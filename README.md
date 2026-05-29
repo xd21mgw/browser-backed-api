@@ -24,6 +24,17 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - `src/config.js` - environment loading and fixed-origin validation.
 - `src/quality.js` - `source_card`, `source_quality`, and shape-only summarization.
 
+## First Batch Source Summary
+
+See `ONLINE_SOURCE_SUMMARY.md` for the first batch browser-backed online source closure.
+
+- Track Analysis: `live_complete`
+- RCP eventList: `live_complete`
+- Weapon graph/risk: `live_complete`
+- Login Logs: `live_complete_no_data_case`
+
+All four sources return `source_card`, `source_quality`, `latency_ms`, and `sensitive_output=false`; live outputs are shape summaries only and do not include raw upstream full bodies.
+
 ## Run Mock Mode
 
 ```sh
