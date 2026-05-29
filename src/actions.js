@@ -27,9 +27,11 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
+const TRACK_ANALYSIS_PROFILE_PATH = "/dp/platform/app/analytics/v2/sequence/profile";
 const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
-const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration"]);
+const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration", "profile"]);
 const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
+const TRACK_ANALYSIS_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "url",
@@ -137,8 +139,8 @@ export const ACTIONS = Object.freeze({
       user_id: "required string when device_id is absent",
       device_id: "required string when user_id is absent",
       appName: "required enum: KUAISHOU | NEBULA",
-      sub_interface: "optional enum: getLastestDateTime | getUseDuration; default getLastestDateTime",
-      time_window: "optional object; getUseDuration defaults to the platform contract window"
+      sub_interface: "optional enum: getLastestDateTime | getUseDuration | profile; default getLastestDateTime",
+      time_window: "optional { startTime, endTime }; profile defaults to the recent 30-day window"
     },
     validateParams: validateTrackAnalysisInput,
     buildRequest: buildTrackAnalysisRequest,
@@ -150,19 +152,8 @@ export const ACTIONS = Object.freeze({
       shape_summary_only: true,
       latest_datetime_present: trackAnalysisSubInterface(input) === "getLastestDateTime",
       uid_did_relation_latest_datetime_present: trackAnalysisSubInterface(input) === "getLastestDateTime",
-      activity_summary: trackAnalysisSubInterface(input) === "getUseDuration"
-        ? {
-            rows_count: 3,
-            total_duration: 150,
-            peak_duration: 90,
-            peak_date: "2026-05-28",
-            nonzero_days_count: 2,
-            date_range_observed: {
-              from: "2026-05-26",
-              to: "2026-05-28"
-            }
-          }
-        : null,
+      activity_summary: mockTrackAnalysisActivitySummary(input),
+      profile_summary: mockTrackAnalysisProfileSummary(input),
       generated_at: fixedMockTime()
     })
   })
@@ -555,8 +546,8 @@ function validateTrackAnalysisInput(input) {
   }
   if (!TRACK_ANALYSIS_SUB_INTERFACES.includes(subInterface)) {
     return {
-      message: "track_analysis_summary sub_interface must be getLastestDateTime or getUseDuration",
-      required: ["sub_interface=getLastestDateTime|getUseDuration"]
+      message: "track_analysis_summary sub_interface must be getLastestDateTime, getUseDuration, or profile",
+      required: ["sub_interface=getLastestDateTime|getUseDuration|profile"]
     };
   }
   if (typeof input.appName !== "string" || !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
@@ -572,6 +563,9 @@ function buildTrackAnalysisRequest(input) {
   const subInterface = trackAnalysisSubInterface(input);
   if (subInterface === "getUseDuration") {
     return buildTrackAnalysisUseDurationRequest(input);
+  }
+  if (subInterface === "profile") {
+    return buildTrackAnalysisProfileRequest(input);
   }
   return buildTrackAnalysisLatestDateRequest(input);
 }
@@ -605,10 +599,32 @@ function buildTrackAnalysisUseDurationRequest(input) {
   };
 }
 
+function buildTrackAnalysisProfileRequest(input) {
+  const entityKey = Object.hasOwn(input, "device_id") ? "deviceId" : "userId";
+  const window = trackAnalysisTimeWindow(input);
+  return {
+    path: TRACK_ANALYSIS_PROFILE_PATH,
+    method: "POST",
+    body: {
+      appName: input.appName,
+      startTime: window.startTime,
+      endTime: window.endTime,
+      include: 1,
+      pageSize: 100,
+      funcType: TRACK_ANALYSIS_FUNC_TYPE,
+      _t: String(Date.now()),
+      [entityKey]: input[entityKey === "deviceId" ? "device_id" : "user_id"]
+    }
+  };
+}
+
 function summarizeTrackAnalysisResponse(value, input) {
   const subInterface = trackAnalysisSubInterface(input);
   if (subInterface === "getUseDuration") {
     return summarizeTrackAnalysisUseDurationResponse(value, input);
+  }
+  if (subInterface === "profile") {
+    return summarizeTrackAnalysisProfileResponse(value, input);
   }
   return summarizeTrackAnalysisLatestDateResponse(value, input);
 }
@@ -691,8 +707,68 @@ function summarizeTrackAnalysisUseDurationResponse(value, input) {
   };
 }
 
+function summarizeTrackAnalysisProfileResponse(value, input) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 200].includes(apiCode)) {
+    return {
+      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
+      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
+      summary: {
+        track_analysis: {
+          sub_interface: "profile",
+          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+          appName: input.appName,
+          api_code: apiCode,
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const profileSummary = buildProfileSummary(value);
+  const noData = isProfileSummaryEmpty(profileSummary);
+  return {
+    sourceStatus: noData ? "no_data" : "completed",
+    errorType: null,
+    summary: {
+      track_analysis: {
+        sub_interface: "profile",
+        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+        appName: input.appName,
+        output_fields_observed: profileSummary.output_fields_observed,
+        no_data: noData,
+        no_data_not_risk_exclusion: true,
+        profile_summary: profileSummary
+      }
+    }
+  };
+}
+
 function trackAnalysisSubInterface(input) {
   return typeof input.sub_interface === "string" ? input.sub_interface : "getLastestDateTime";
+}
+
+function trackAnalysisTimeWindow(input) {
+  const rawWindow = input.time_window && typeof input.time_window === "object" ? input.time_window : {};
+  const startTime = Number(rawWindow.startTime);
+  const endTime = Number(rawWindow.endTime);
+  if (
+    Number.isFinite(startTime) &&
+    Number.isFinite(endTime) &&
+    startTime > 0 &&
+    endTime > startTime
+  ) {
+    return {
+      startTime: Math.trunc(startTime),
+      endTime: Math.trunc(endTime)
+    };
+  }
+
+  const end = Date.now();
+  return {
+    startTime: end - TRACK_ANALYSIS_DEFAULT_WINDOW_MS,
+    endTime: end
+  };
 }
 
 function extractUseDurationRows(value) {
@@ -744,11 +820,127 @@ function buildActivitySummary(rows) {
   };
 }
 
+function buildProfileSummary(value) {
+  const data = value && typeof value === "object" ? value.data : null;
+  const profile = data && typeof data === "object" && !Array.isArray(data) ? data.profile : null;
+  const firstLevelProfile = profile && typeof profile === "object" ? profile.firstLevelProfile : null;
+  const secondLevelProfile = profile && typeof profile === "object" ? profile.secondLevelProfile : null;
+  const deviceIds = profileDeviceIds(data, profile);
+  const firstLevelKeys = observedKeys(firstLevelProfile);
+  const secondLevelKeys = secondLevelProfileKeys(secondLevelProfile);
+  const outputFields = profileOutputFields(data, firstLevelKeys, secondLevelProfile, deviceIds);
+
+  return {
+    profile_sections_observed: profileSectionsObserved(data, profile),
+    first_level_profile_keys_count: firstLevelKeys.length,
+    second_level_profile_keys_count: secondLevelKeys.length,
+    register_time_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(register|注册)/i),
+    fan_distribution_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(fan|粉丝|fans?)/i),
+    active_days_bucket_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(active.*day|active_days|活跃)/i),
+    device_ids_count: deviceIds ? deviceIds.length : null,
+    output_fields_observed: outputFields
+  };
+}
+
+function profileSectionsObserved(data, profile) {
+  const sections = [];
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    if (Object.hasOwn(data, "deviceIds")) {
+      sections.push("data.deviceIds");
+    }
+    if (Object.hasOwn(data, "latestDateTime")) {
+      sections.push("data.latestDateTime");
+    }
+    if (Object.hasOwn(data, "profile")) {
+      sections.push("data.profile");
+    }
+  }
+  if (profile && typeof profile === "object" && !Array.isArray(profile)) {
+    if (Object.hasOwn(profile, "firstLevelProfile")) {
+      sections.push("data.profile.firstLevelProfile");
+    }
+    if (Object.hasOwn(profile, "secondLevelProfile")) {
+      sections.push("data.profile.secondLevelProfile");
+    }
+  }
+  return sections;
+}
+
+function profileDeviceIds(data, profile) {
+  const candidates = [data?.deviceIds, profile?.deviceIds];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function secondLevelProfileKeys(secondLevelProfile) {
+  if (Array.isArray(secondLevelProfile)) {
+    const labels = secondLevelProfile
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        return typeof item.label === "string" ? item.label : null;
+      })
+      .filter(Boolean);
+    return labels.length > 0 ? [...new Set(labels.map(safeFieldName))] : secondLevelProfile.map((_, index) => `item_${index}`);
+  }
+  return observedKeys(secondLevelProfile);
+}
+
+function profileOutputFields(data, firstLevelKeys, secondLevelProfile, deviceIds) {
+  const outputFields = [];
+  if (deviceIds) {
+    outputFields.push("data.deviceIds");
+  }
+  for (const key of firstLevelKeys) {
+    outputFields.push(`data.profile.firstLevelProfile.${safeFieldName(key)}`);
+  }
+  if (Array.isArray(secondLevelProfile) && secondLevelProfile.length > 0) {
+    outputFields.push("data.profile.secondLevelProfile[].label");
+    outputFields.push("data.profile.secondLevelProfile[].value");
+  } else {
+    for (const key of observedKeys(secondLevelProfile)) {
+      outputFields.push(`data.profile.secondLevelProfile.${safeFieldName(key)}`);
+    }
+  }
+  if (data && typeof data === "object" && Object.hasOwn(data, "latestDateTime")) {
+    outputFields.push("data.latestDateTime");
+  }
+  return outputFields.slice(0, 80);
+}
+
+function containsProfileSignal(keys, pattern) {
+  return keys.some((key) => pattern.test(String(key)));
+}
+
+function isProfileSummaryEmpty(summary) {
+  return (
+    summary.profile_sections_observed.length === 0 ||
+    (
+      summary.first_level_profile_keys_count === 0 &&
+      summary.second_level_profile_keys_count === 0 &&
+      !summary.device_ids_count &&
+      summary.output_fields_observed.length === 0
+    )
+  );
+}
+
 function observedKeys(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return [];
   }
-  return Object.keys(value).slice(0, 50);
+  return Object.keys(value).slice(0, 50).map(safeFieldName);
+}
+
+function safeFieldName(key) {
+  if (/(authorization|cookie|token|secret|session|password|credential|csrf|jwt)/i.test(key)) {
+    return "[redacted_key]";
+  }
+  return String(key).slice(0, 128);
 }
 
 function readApiCode(value) {
@@ -780,6 +972,49 @@ function scopeFromInput(input) {
   return {
     account_id: typeof input.accountId === "string" ? input.accountId : "mock-account",
     workspace_id: typeof input.workspaceId === "string" ? input.workspaceId : "mock-workspace"
+  };
+}
+
+function mockTrackAnalysisActivitySummary(input) {
+  if (trackAnalysisSubInterface(input) !== "getUseDuration") {
+    return null;
+  }
+  return {
+    rows_count: 3,
+    total_duration: 150,
+    peak_duration: 90,
+    peak_date: "2026-05-28",
+    nonzero_days_count: 2,
+    date_range_observed: {
+      from: "2026-05-26",
+      to: "2026-05-28"
+    }
+  };
+}
+
+function mockTrackAnalysisProfileSummary(input) {
+  if (trackAnalysisSubInterface(input) !== "profile") {
+    return null;
+  }
+  return {
+    profile_sections_observed: [
+      "data.deviceIds",
+      "data.profile",
+      "data.profile.firstLevelProfile",
+      "data.profile.secondLevelProfile"
+    ],
+    first_level_profile_keys_count: 4,
+    second_level_profile_keys_count: 3,
+    register_time_present: true,
+    fan_distribution_present: true,
+    active_days_bucket_present: true,
+    device_ids_count: 2,
+    output_fields_observed: [
+      "data.deviceIds",
+      "data.profile.firstLevelProfile.userId",
+      "data.profile.secondLevelProfile[].label",
+      "data.profile.secondLevelProfile[].value"
+    ]
   };
 }
 
