@@ -145,6 +145,17 @@ Each live action uses the configured domain page and calls `fetch()` with a fixe
 - empty `eventList` is a source no-hit/no-data outcome and is not no-risk counterevidence
 - no caller-provided URL, path, header, cookie, token, session, secret, or raw body is accepted
 
+RCP source status:
+
+- source contract: `RCP_SOURCE_CONTRACT.md`
+- source_name: `rcp_snapshot`
+- access_method: `browser_backed_api_service`
+- origin: `https://rcp.corp.kuaishou.com`
+- live validated wrapper: `data.eventList`, `data.pagination`, `data.tableHeaderList`
+- live validation summary: `source_status=completed`, `event_count=200`, `sensitive_output=false`, `raw_full_body_returned=false`
+- evidence use: strategy-hit or event-entry source; `hitFusePolicyCode`, `eventId`, and `_occurTime` are candidate chaining keys
+- `no_data`, `completed_no_hit_for_small_window`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
+
 `track_analysis_summary` supports fixed track-analysis sub-interfaces:
 
 - default sub-interface: `getLastestDateTime`
