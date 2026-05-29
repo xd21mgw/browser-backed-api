@@ -497,6 +497,38 @@ test("rcp_snapshot builds fixed eventList body from typed params", () => {
   });
 });
 
+test("rcp_snapshot uses HAR-like body template with typed overrides", () => {
+  const request = buildActionBody(ACTIONS.rcp_snapshot, {
+    sourceIds: ["source-a", "source-b"],
+    page: 1,
+    pageSize: 200
+  });
+
+  assert.deepEqual(Object.keys(request.body), [
+    "tableHeaderList",
+    "startTime",
+    "endTime",
+    "currentTime",
+    "eventV2",
+    "conditionList",
+    "pagination"
+  ]);
+  assert.equal(typeof request.body.startTime, "string");
+  assert.equal(typeof request.body.endTime, "string");
+  assert.equal(typeof request.body.currentTime, "string");
+  assert.equal(request.body.eventV2.eventType, "REGISTER");
+  assert.equal(request.body.eventV2.sourceIds, "source-a,source-b");
+  assert.equal(Array.isArray(request.body.eventV2.sourceIds), false);
+  assert.deepEqual(request.body.eventV2.conditionList, []);
+  assert.deepEqual(request.body.conditionList, []);
+  assert.deepEqual(request.body.pagination, { page: 1, pageSize: 200 });
+  assert.ok(request.body.tableHeaderList.every((column) => {
+    return typeof column.column_name === "string" && typeof column.column_comment === "string";
+  }));
+  assert.equal(JSON.stringify(request.body).includes("\"field\""), false);
+  assert.equal(JSON.stringify(request.body).includes("\"operator\""), false);
+});
+
 test("rcp_snapshot status message wrapper is classified as request body shape error", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(

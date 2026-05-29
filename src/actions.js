@@ -691,23 +691,22 @@ function buildRcpSnapshotRequest(input) {
   const page = Object.hasOwn(input, "page") ? Math.trunc(input.page) : RCP_DEFAULT_PAGE;
   const pageSize = Object.hasOwn(input, "pageSize") ? Math.trunc(input.pageSize) : RCP_DEFAULT_PAGE_SIZE;
   const conditionList = rcpConditionList(input);
-  const eventV2 = buildRcpEventV2(input, conditionList);
+  const body = rcpEventListHarBodyTemplate();
+
+  body.tableHeaderList = tableHeaderList;
+  body.startTime = timeWindow.startTime;
+  body.endTime = timeWindow.endTime;
+  body.currentTime = timeWindow.currentTime;
+  body.eventV2.eventType = isNonEmptyString(input.eventType) ? input.eventType.trim() : RCP_DEFAULT_EVENT_TYPE;
+  body.eventV2.sourceIds = rcpSourceIdsString(input) || "";
+  body.eventV2.conditionList = conditionList;
+  body.conditionList = conditionList;
+  body.pagination = rcpPaginationTemplate(page, pageSize);
 
   return {
     path: RCP_EVENT_LIST_PATH,
     method: "POST",
-    body: {
-      tableHeaderList,
-      startTime: timeWindow.startTime,
-      endTime: timeWindow.endTime,
-      currentTime: timeWindow.currentTime,
-      eventV2,
-      conditionList,
-      pagination: {
-        page,
-        pageSize
-      }
-    }
+    body
   };
 }
 
@@ -1471,20 +1470,39 @@ function rcpTableHeaderList(selectedColumns) {
   }));
 }
 
-function buildRcpEventV2(input, conditionList) {
+function rcpEventListHarBodyTemplate() {
   return {
-    eventType: isNonEmptyString(input.eventType) ? input.eventType.trim() : RCP_DEFAULT_EVENT_TYPE,
+    tableHeaderList: rcpTableHeaderList(),
+    startTime: "",
+    endTime: "",
+    currentTime: "",
+    eventV2: rcpEventV2HarTemplate(),
+    conditionList: [],
+    pagination: rcpPaginationTemplate()
+  };
+}
+
+function rcpEventV2HarTemplate() {
+  return {
+    eventType: RCP_DEFAULT_EVENT_TYPE,
     hitPolicies: [],
     version: RCP_DEFAULT_VERSION,
     status: RCP_DEFAULT_STATUS,
     snapshotVersion: RCP_DEFAULT_SNAPSHOT_VERSION,
-    sourceIds: rcpSourceIdsString(input) || "",
+    sourceIds: "",
     realTimeOp: RCP_DEFAULT_REAL_TIME_OP,
     isPolicyTreeExperiment: false,
-    conditionList,
+    conditionList: [],
     grayFeature: false,
     grayQueryStatus: false,
     region: RCP_DEFAULT_REGION
+  };
+}
+
+function rcpPaginationTemplate(page = RCP_DEFAULT_PAGE, pageSize = RCP_DEFAULT_PAGE_SIZE) {
+  return {
+    page,
+    pageSize
   };
 }
 
