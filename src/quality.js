@@ -16,6 +16,13 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     origin_warmed: Boolean(meta.originWarmed),
     latency_ms: meta.latencyMs ?? null,
     action_diagnostics: meta.actionDiagnostics || null,
+    lazy_rewarm: {
+      attempted: Boolean(meta.lazyRewarmAttempted),
+      status: meta.lazyRewarmStatus || "not_attempted",
+      page_ready_before_fetch: meta.pageReadyBeforeFetch ?? null,
+      bound_page_origin_before_rewarm: meta.boundPageOriginBeforeRewarm || null,
+      bound_page_origin_after_rewarm: meta.boundPageOriginAfterRewarm || null
+    },
     body_policy: {
       raw_response_full_body_returned: false,
       max_live_body_bytes_observed: config.browser.maxLiveBodyBytes,

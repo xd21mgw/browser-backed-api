@@ -228,6 +228,11 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
     sensitive_output: false,
+    lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
+    lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
+    page_ready_before_fetch: meta.pageReadyBeforeFetch ?? null,
+    bound_page_origin_before_rewarm: meta.boundPageOriginBeforeRewarm || null,
+    bound_page_origin_after_rewarm: meta.boundPageOriginAfterRewarm || null,
     action_diagnostics: meta.actionDiagnostics || null,
     data,
     source_card: buildSourceCard({
@@ -267,6 +272,11 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
     sensitive_output: false,
+    lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
+    lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
+    page_ready_before_fetch: meta.pageReadyBeforeFetch ?? null,
+    bound_page_origin_before_rewarm: meta.boundPageOriginBeforeRewarm || null,
+    bound_page_origin_after_rewarm: meta.boundPageOriginAfterRewarm || null,
     action_diagnostics: meta.actionDiagnostics || null,
     data: {
       http_status: null,

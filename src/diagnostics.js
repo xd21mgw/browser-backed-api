@@ -1,5 +1,6 @@
 const SENSITIVE_NAME_PATTERN = /(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)/i;
 const SENSITIVE_NAME_GLOBAL_PATTERN = /(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)/gi;
+const FIXED_AUTH_REDIRECT_ORIGINS = new Set(["https://sso.corp.kuaishou.com"]);
 
 export function sanitizeUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string") {
@@ -63,7 +64,7 @@ export function classifyNavigation({ error = null, finalUrl = null, finalOrigin 
   }
 
   if (finalOrigin && expectedOrigin && finalOrigin !== expectedOrigin) {
-    if (looksAuthRedirect(normalizedUrl)) {
+    if (isKnownAuthRedirectOrigin(finalOrigin) || looksAuthRedirect(normalizedUrl)) {
       return "auth_redirect";
     }
     if (looksLoginPage(normalizedUrl)) {
@@ -91,8 +92,10 @@ export function sourceStatusFromErrorType(errorType) {
   switch (errorType) {
     case "auth_redirect":
     case "login_page":
+    case "landing_flow_blocked":
       return "auth_failed";
     case "navigation_timeout":
+    case "timeout":
       return "timeout";
     case "parse_error":
       return "parse_error";
@@ -104,6 +107,14 @@ export function sourceStatusFromErrorType(errorType) {
     default:
       return "blocked";
   }
+}
+
+export function isKnownAuthRedirectOrigin(origin) {
+  return FIXED_AUTH_REDIRECT_ORIGINS.has(origin);
+}
+
+export function isAuthRedirectTarget({ origin = null, url = null } = {}) {
+  return Boolean(isKnownAuthRedirectOrigin(origin) || looksAuthRedirect(String(url || "").toLowerCase()));
 }
 
 export function classifyHttpStatus(status) {

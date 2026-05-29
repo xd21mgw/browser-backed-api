@@ -120,17 +120,13 @@ test("raw header and cookie inputs are forbidden", async () => {
   );
 });
 
-test("prewarm origin mismatch returns final URL, final origin, and classified error type", async () => {
+test("prewarm auth redirect waits for automatic return to the configured origin", async () => {
   const config = createLiveConfig();
   const client = new BrowserBackedClient(config);
-  const page = {
-    async goto() {
-      return { status: () => 200 };
-    },
-    url() {
-      return "https://sso.example.test/login?ticket=redacted-by-test";
-    }
-  };
+  const page = new FakeLandingPage({
+    gotoUrl: "https://sso.corp.kuaishou.com/login?ticket=redacted-by-test",
+    waitOutcomes: ["return"]
+  });
   client.start = async () => {};
   client.context = { newPage: async () => page };
 
@@ -138,12 +134,86 @@ test("prewarm origin mismatch returns final URL, final origin, and classified er
 
   assert.equal(result.configured_origin, "https://rcp.example.test");
   assert.equal(result.initial_url, "https://rcp.example.test/");
-  assert.equal(result.final_url, "https://sso.example.test/login?[redacted_query]");
-  assert.equal(result.final_origin, "https://sso.example.test");
+  assert.equal(result.final_origin, "https://rcp.example.test");
   assert.equal(result.same_origin_expected, true);
-  assert.equal(result.same_origin_actual, false);
+  assert.equal(result.same_origin_actual, true);
   assert.equal(result.navigation_status, 200);
-  assert.equal(result.error_type, "auth_redirect");
+  assert.equal(result.error_type, null);
+  assert.equal(result.status, "ready");
+  assert.equal(result.page_ready, true);
+  assert.equal(result.auth_redirect_detected, true);
+  assert.equal(result.landing_flow_attempted, true);
+  assert.equal(result.allowed_clicks_executed, 0);
+  assert.equal(result.landing_flow_status, "auto_returned");
+});
+
+test("prewarm auth redirect can use one allowlisted next click before becoming ready", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://sso.corp.kuaishou.com/login",
+    waitOutcomes: ["timeout", "return"],
+    controls: {
+      Continue: { safe: true }
+    }
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("weapon");
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.page_ready, true);
+  assert.equal(result.final_origin_after_landing, "https://weapon.example.test");
+  assert.equal(result.landing_flow_attempted, true);
+  assert.equal(result.allowed_clicks_executed, 1);
+  assert.equal(result.landing_flow_status, "allowed_click_returned");
+  assert.deepEqual(page.clickedLabels, ["Continue"]);
+});
+
+test("prewarm auth redirect blocks after the maximum allowlisted clicks", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://sso.corp.kuaishou.com/login",
+    waitOutcomes: ["timeout", "timeout", "timeout"],
+    controls: {
+      Next: { safe: true }
+    }
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("login_logs");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.page_ready, false);
+  assert.equal(result.error_type, "landing_flow_blocked");
+  assert.equal(result.final_origin_after_landing, "https://sso.corp.kuaishou.com");
+  assert.equal(result.allowed_clicks_executed, 2);
+  assert.equal(result.landing_flow_status, "max_clicks_exceeded");
+});
+
+test("prewarm auth redirect does not click dangerous submit controls", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://sso.corp.kuaishou.com/login",
+    waitOutcomes: ["timeout"],
+    controls: {
+      Next: { safe: false },
+      Delete: { safe: true }
+    }
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("rcp");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.error_type, "landing_flow_blocked");
+  assert.equal(result.allowed_clicks_executed, 0);
+  assert.deepEqual(page.clickedLabels, []);
 });
 
 test("action origin mismatch returns source metadata instead of throwing a bare service error", async () => {
@@ -189,7 +259,8 @@ test("action execution uses the warmed page for the matching fixed origin", asyn
     diagnostics: {
       weapon: {
         bound_page_origin: "https://weapon.example.test",
-        origin_match: true
+        origin_match: true,
+        page_ready: true
       }
     },
     fetchResults: {
@@ -213,6 +284,124 @@ test("action execution uses the warmed page for the matching fixed origin", asyn
   assert.equal(fakeClient.runCalls[0].actionName, "weapon_inventory");
   assert.equal(response.status, "ok");
   assert.equal(response.source_card.action_diagnostics.expected_origin, "https://weapon.example.test");
+});
+
+test("action detects SSO drift and attempts one lazy rewarm", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      track_analysis: prewarmResult(config, "track_analysis")
+    },
+    diagnostics: {
+      track_analysis: [
+        {
+          bound_page_origin: "https://sso.corp.kuaishou.com",
+          origin_match: false,
+          page_ready: false
+        },
+        {
+          bound_page_origin: "https://track-analysis.example.test",
+          origin_match: true,
+          page_ready: true
+        }
+      ]
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
+
+  const response = await service.executeAction("track_analysis_summary", { trackId: "demo" });
+
+  assert.deepEqual(fakeClient.prewarmCalls, ["track_analysis"]);
+  assert.equal(response.lazy_rewarm_attempted, true);
+  assert.equal(response.lazy_rewarm_status, "ready");
+  assert.equal(response.bound_page_origin_before_rewarm, "https://sso.corp.kuaishou.com");
+  assert.equal(response.bound_page_origin_after_rewarm, "https://track-analysis.example.test");
+});
+
+test("lazy rewarm success allows the action fetch to continue", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      weapon: prewarmResult(config, "weapon")
+    },
+    diagnostics: {
+      weapon: [
+        {
+          bound_page_origin: "https://sso.corp.kuaishou.com",
+          origin_match: false,
+          page_ready: false
+        },
+        {
+          bound_page_origin: "https://weapon.example.test",
+          origin_match: true,
+          page_ready: true
+        }
+      ]
+    },
+    fetchResults: {
+      weapon_inventory: {
+        completed: true,
+        ok: true,
+        status: 200,
+        bodyText: JSON.stringify({ items: [{ id: "shape-only" }] }),
+        bodyTruncated: false,
+        observedBytes: 38
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("weapon", warmStateReady(config, "weapon"));
+
+  const response = await service.executeAction("weapon_inventory", { workspaceId: "demo" });
+
+  assert.equal(fakeClient.runCalls.length, 1);
+  assert.equal(response.status, "ok");
+  assert.equal(response.source_status, "ok");
+  assert.equal(response.lazy_rewarm_attempted, true);
+  assert.equal(response.lazy_rewarm_status, "ready");
+  assert.equal(response.page_ready_before_fetch, true);
+});
+
+test("lazy rewarm failure still returns source card, quality, and sensitivity flag", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      rcp: prewarmResult(config, "rcp", {
+        finalOrigin: "https://sso.corp.kuaishou.com",
+        errorType: "landing_flow_blocked",
+        status: "auth_failed",
+        pageReady: false
+      })
+    },
+    diagnostics: {
+      rcp: [
+        {
+          bound_page_origin: "https://sso.corp.kuaishou.com",
+          origin_match: false,
+          page_ready: false
+        },
+        {
+          bound_page_origin: "https://sso.corp.kuaishou.com",
+          origin_match: false,
+          page_ready: false
+        }
+      ]
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("rcp", warmStateReady(config, "rcp"));
+
+  const response = await service.executeAction("rcp_snapshot", { accountId: "demo" });
+
+  assert.equal(fakeClient.runCalls.length, 0);
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.error_type, "landing_flow_blocked");
+  assert.equal(response.lazy_rewarm_attempted, true);
+  assert.equal(response.lazy_rewarm_status, "landing_flow_blocked");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
 });
 
 test("forbidden action input terms still return 400", async () => {
@@ -267,6 +456,7 @@ class FakeBrowserClient {
     this.config = config;
     this.prewarmResults = options.prewarmResults || {};
     this.diagnostics = options.diagnostics || {};
+    this.diagnosticCalls = new Map();
     this.fetchResults = options.fetchResults || {};
     this.prewarmCalls = [];
     this.runCalls = [];
@@ -288,17 +478,30 @@ class FakeBrowserClient {
 
   actionDiagnostics(action, originWarmed) {
     const domain = this.config.domains[action.domainKey];
-    const diagnostics = this.diagnostics[action.domainKey] || {
+    const configuredDiagnostics = this.diagnostics[action.domainKey] || {
       bound_page_origin: domain.origin,
-      origin_match: true
+      origin_match: true,
+      page_ready: true
     };
+    const diagnostics = Array.isArray(configuredDiagnostics)
+      ? configuredDiagnostics[Math.min(this.nextDiagnosticIndex(action.domainKey), configuredDiagnostics.length - 1)]
+      : configuredDiagnostics;
 
     return {
       action_name: action.name,
       expected_origin: domain.origin,
       bound_page_origin: diagnostics.bound_page_origin,
       origin_warmed: Boolean(originWarmed),
+      page_ready: Boolean(diagnostics.page_ready),
       origin_match: diagnostics.origin_match
+    };
+  }
+
+  domainState(domainKey) {
+    const domain = this.config.domains[domainKey];
+    return {
+      current_origin: domain.origin,
+      page_ready: true
     };
   }
 
@@ -317,12 +520,20 @@ class FakeBrowserClient {
       observedBytes: 2
     };
   }
+
+  nextDiagnosticIndex(domainKey) {
+    const current = this.diagnosticCalls.get(domainKey) || 0;
+    this.diagnosticCalls.set(domainKey, current + 1);
+    return current;
+  }
 }
 
 function prewarmResult(config, domainKey, overrides = {}) {
   const domain = config.domains[domainKey];
   const finalOrigin = overrides.finalOrigin || domain.origin;
   const errorType = overrides.errorType || null;
+  const pageReady = overrides.pageReady ?? finalOrigin === domain.origin;
+  const status = overrides.status || (pageReady ? "ready" : errorType ? "auth_failed" : "error");
   return {
     key: domain.key,
     domain: domain.label,
@@ -332,11 +543,110 @@ function prewarmResult(config, domainKey, overrides = {}) {
     initial_url: `${domain.origin}${domain.prewarmPath}`,
     final_url: `${finalOrigin}${domain.prewarmPath}`,
     final_origin: finalOrigin,
+    current_origin: finalOrigin,
     same_origin_expected: true,
     same_origin_actual: finalOrigin === domain.origin,
     navigation_status: 200,
-    status: errorType ? "error" : "ready",
+    status,
+    warmed: pageReady,
+    page_ready: pageReady,
     error_type: errorType,
-    error_message_sanitized: errorType ? "Navigation ended outside configured origin" : null
+    error_message_sanitized: errorType ? "Navigation ended outside configured origin" : null,
+    auth_redirect_detected: errorType === "auth_redirect" || errorType === "landing_flow_blocked",
+    landing_flow_attempted: errorType === "auth_redirect" || errorType === "landing_flow_blocked",
+    allowed_clicks_executed: errorType === "landing_flow_blocked" ? 2 : 0,
+    final_origin_after_landing: finalOrigin,
+    landing_flow_status: errorType === "landing_flow_blocked" ? "max_clicks_exceeded" : "not_needed"
   };
+}
+
+function warmStateReady(config, domainKey) {
+  const domain = config.domains[domainKey];
+  return {
+    ...prewarmResult(config, domainKey),
+    warmed: true,
+    page_ready: true,
+    current_origin: domain.origin,
+    latency_ms: 1,
+    warmed_at: "2026-05-29T00:00:00.000Z",
+    last_prewarm_at: "2026-05-29T00:00:00.000Z",
+    last_error_type: null,
+    last_landing_flow_status: "not_needed"
+  };
+}
+
+class FakeLandingPage {
+  constructor({ gotoUrl, waitOutcomes = [], controls = {} }) {
+    this.gotoUrl = gotoUrl;
+    this.waitOutcomes = [...waitOutcomes];
+    this.controls = controls;
+    this.clickedLabels = [];
+    this.currentUrl = "about:blank";
+    this.targetUrl = null;
+  }
+
+  async goto(target) {
+    this.targetUrl = target;
+    this.currentUrl = this.gotoUrl;
+    return { status: () => 200 };
+  }
+
+  url() {
+    return this.currentUrl;
+  }
+
+  async waitForURL(predicate) {
+    const outcome = this.waitOutcomes.shift() || "timeout";
+    if (outcome === "return") {
+      this.currentUrl = this.targetUrl;
+      assert.equal(predicate(new URL(this.currentUrl)), true);
+      return;
+    }
+    throw new Error("timeout");
+  }
+
+  getByRole(_role, options) {
+    const label = Object.keys(this.controls).find((candidate) => options.name.test(candidate));
+    if (!label) {
+      return new FakeLandingControl(this, null, { exists: false });
+    }
+    return new FakeLandingControl(this, label, this.controls[label]);
+  }
+}
+
+class FakeLandingControl {
+  constructor(page, label, options) {
+    this.page = page;
+    this.label = label;
+    this.options = options;
+  }
+
+  first() {
+    return this;
+  }
+
+  async count() {
+    return this.options.exists === false ? 0 : 1;
+  }
+
+  async isVisible() {
+    return this.options.visible !== false;
+  }
+
+  async isEnabled() {
+    return this.options.enabled !== false;
+  }
+
+  async evaluate() {
+    return {
+      isButton: true,
+      isSubmit: this.options.safe === false,
+      inForm: this.options.safe === false,
+      disabled: this.options.enabled === false
+    };
+  }
+
+  async click() {
+    this.page.clickedLabels.push(this.label);
+  }
 }
