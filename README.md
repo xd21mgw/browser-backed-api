@@ -172,6 +172,18 @@ RCP source status:
 - riskData failure is reported as partial risk status and does not overwrite graph success
 - no caller-provided URL, path, header, cookie, token, session, secret, or raw body is accepted
 
+Weapon source status:
+
+- source contract: `WEAPON_SOURCE_CONTRACT.md`
+- source_name: `weapon_inventory`
+- access_method: `browser_backed_api_service`
+- origin: `https://weapon-platform.corp.kuaishou.com`
+- live validated APIs: `GET /apiv2/graphData`, `GET /apiv2/riskData`
+- live validation summary: `source_status=completed`, `riskData_status=completed`, `risk_item_count=1`, `risk_label_count=17`, `userLevel_observed=HIGH`, `sensitive_output=false`, `raw_full_body_returned=false`
+- evidence use: device relation evidence, device risk label summary, and userLevel/risk group supporting evidence
+- raw device IDs, raw `labelInfo`, raw `originalLog`, and raw upstream full bodies are not output
+- `no_data`, `completed_no_data`, `not_executed_missing_device_id`, `risk_partial_failed`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
+
 `track_analysis_summary` supports fixed track-analysis sub-interfaces:
 
 - default sub-interface: `getLastestDateTime`
