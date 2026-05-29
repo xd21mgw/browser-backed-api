@@ -172,6 +172,7 @@ export class BrowserBackedApiService {
       return buildActionParameterErrorResponse(action, this.config, {
         latencyMs: Date.now() - startedAt,
         originWarmed,
+        outputScope: input?.output_scope,
         parameterError
       });
     }

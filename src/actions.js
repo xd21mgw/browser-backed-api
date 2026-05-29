@@ -39,7 +39,8 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "device_id",
   "appName",
   "time_window",
-  "sub_interface"
+  "sub_interface",
+  "output_scope"
 ]);
 
 const RCP_EVENT_LIST_PATH = "/v2/rest/event/eventList";
@@ -91,6 +92,46 @@ const LOGIN_LOGS_FALLBACK_WINDOW_MS = 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
+const DEFAULT_OUTPUT_SCOPE = "internal_risk_review";
+const OUTPUT_SCOPES = Object.freeze(["internal_risk_review", "external_share"]);
+const FIELD_CLASSIFICATION = Object.freeze({
+  credential_secret: Object.freeze([
+    "cookie",
+    "token",
+    "session",
+    "header",
+    "authorization",
+    "password",
+    "raw_response_full_body",
+    "raw_login_records_full_dump",
+    "raw_labelInfo_full_dump",
+    "raw_originalLog_full_dump"
+  ]),
+  pii_strict: Object.freeze(["phone_number", "id_card", "real_name"]),
+  risk_entity_identifier: Object.freeze([
+    "user_id",
+    "uid",
+    "device_id",
+    "did",
+    "ip",
+    "eventId",
+    "sourceId",
+    "hitFusePolicyCode",
+    "strategy_code",
+    "logSource",
+    "method",
+    "timestamp"
+  ]),
+  source_summary_metric: Object.freeze([
+    "records_count",
+    "event_count",
+    "related_device_count",
+    "related_user_count",
+    "duration",
+    "date_range",
+    "field_presence"
+  ])
+});
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -294,6 +335,10 @@ export function runMockAction(action, input, config, meta = {}) {
   const sourceRequest = typeof action.buildRequest === "function"
     ? action.buildRequest(safeInput)
     : { path: action.apiPath, method: action.method };
+  const enrichedMeta = {
+    ...meta,
+    outputScope: outputScope(safeInput)
+  };
   const fetchMeta = {
     ok: true,
     status: 200,
@@ -306,6 +351,8 @@ export function runMockAction(action, input, config, meta = {}) {
     mode: "mock",
     latency_ms: meta.latencyMs ?? 0,
     origin_warmed: Boolean(meta.originWarmed),
+    output_scope: enrichedMeta.outputScope,
+    field_classification: fieldClassificationSummary(),
     sensitive_output: false,
     data,
     source_card: buildSourceCard({
@@ -314,25 +361,29 @@ export function runMockAction(action, input, config, meta = {}) {
       fetchMeta,
       mock: true,
       meta: {
-        ...meta,
+        ...enrichedMeta,
         requestPath: sourceRequest.displayPath || sourceRequest.path,
         requestMethod: sourceRequest.method || action.method
       }
     }),
-    source_quality: buildSourceQuality({ action, fetchMeta, mock: true, meta })
+    source_quality: buildSourceQuality({ action, fetchMeta, mock: true, meta: enrichedMeta })
   };
 }
 
 export function buildLiveActionResponse(action, input, config, fetchResult, meta = {}) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
+  const enrichedMeta = {
+    ...meta,
+    outputScope: outputScope(safeInput)
+  };
   const parsed = parseJson(fetchResult.bodyText);
   const httpErrorType = classifyHttpStatus(fetchResult.status);
   const parseErrorType = parsed.ok ? null : classifyUnparseableBody(fetchResult.bodyText);
   const responseFormat = parsed.ok ? "json" : "non_json_or_unparseable";
   const parseErrorDetailSanitized = parsed.ok ? null : parseErrorDetail(fetchResult, parseErrorType);
   const summaryMeta = {
-    ...meta,
+    ...enrichedMeta,
     config,
     fetchResult,
     responseFormat,
@@ -376,6 +427,8 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
     error_type: errorType,
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
+    output_scope: enrichedMeta.outputScope,
+    field_classification: fieldClassificationSummary(),
     sensitive_output: false,
     lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
     lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
@@ -389,13 +442,13 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
       config,
       fetchMeta: fetchResult,
       mock: false,
-      meta: { ...meta, sourceStatus, errorType }
+      meta: { ...enrichedMeta, sourceStatus, errorType }
     }),
     source_quality: buildSourceQuality({
       action,
       fetchMeta: fetchResult,
       mock: false,
-      meta: { ...meta, sourceStatus, errorType }
+      meta: { ...enrichedMeta, sourceStatus, errorType }
     })
   };
 }
@@ -403,6 +456,10 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
 export function buildLiveActionFailureResponse(action, input, config, meta = {}) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
+  const enrichedMeta = {
+    ...meta,
+    outputScope: outputScope(safeInput)
+  };
   const errorType = meta.errorType || "page_load_error";
   const sourceStatus = meta.sourceStatus || sourceStatusFromErrorType(errorType);
   const fetchMeta = {
@@ -414,7 +471,7 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
   };
   const actionSummary = typeof action.summarizeFailureResponse === "function"
     ? action.summarizeFailureResponse(safeInput, {
-        ...meta,
+        ...enrichedMeta,
         fetchResult: fetchMeta,
         responseFormat: "not_available",
         sourceStatus,
@@ -430,6 +487,8 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
     error_type: errorType,
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
+    output_scope: enrichedMeta.outputScope,
+    field_classification: fieldClassificationSummary(),
     sensitive_output: false,
     lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
     lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
@@ -450,8 +509,8 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
           }
         : null
     },
-    source_card: buildSourceCard({ action, config, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } }),
-    source_quality: buildSourceQuality({ action, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } })
+    source_card: buildSourceCard({ action, config, fetchMeta, mock: false, meta: { ...enrichedMeta, sourceStatus, errorType } }),
+    source_quality: buildSourceQuality({ action, fetchMeta, mock: false, meta: { ...enrichedMeta, sourceStatus, errorType } })
   };
 }
 
@@ -474,6 +533,8 @@ export function buildActionParameterErrorResponse(action, config, meta = {}) {
     error_type: errorType,
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
+    output_scope: meta.outputScope || DEFAULT_OUTPUT_SCOPE,
+    field_classification: fieldClassificationSummary(),
     sensitive_output: false,
     data: {
       http_status: null,
@@ -545,10 +606,30 @@ export function validateActionInput(input) {
 }
 
 export function getActionParameterError(action, input) {
+  if (input && Object.hasOwn(input, "output_scope") && !OUTPUT_SCOPES.includes(input.output_scope)) {
+    return {
+      message: "output_scope must be internal_risk_review or external_share",
+      required: ["output_scope=internal_risk_review|external_share"],
+      errorType: "invalid_parameter"
+    };
+  }
   if (typeof action.validateParams !== "function") {
     return null;
   }
   return action.validateParams(input || {});
+}
+
+function outputScope(input) {
+  return OUTPUT_SCOPES.includes(input?.output_scope) ? input.output_scope : DEFAULT_OUTPUT_SCOPE;
+}
+
+function fieldClassificationSummary() {
+  return {
+    credential_secret: [...FIELD_CLASSIFICATION.credential_secret],
+    pii_strict: [...FIELD_CLASSIFICATION.pii_strict],
+    risk_entity_identifier: [...FIELD_CLASSIFICATION.risk_entity_identifier],
+    source_summary_metric: [...FIELD_CLASSIFICATION.source_summary_metric]
+  };
 }
 
 function freezeAction(action) {
@@ -570,6 +651,9 @@ function sanitizeInput(input) {
 
   if (typeof safe.limit === "number") {
     safe.limit = Math.min(Math.max(Math.trunc(safe.limit), 1), 100);
+  }
+  if (!OUTPUT_SCOPES.includes(safe.output_scope)) {
+    delete safe.output_scope;
   }
 
   return safe;
@@ -778,7 +862,7 @@ function summarizeWeaponInventoryResponse(value, input) {
       errorType: graphErrorType,
       summary: {
         weapon_inventory: {
-          ...buildWeaponGraphSummary(graphValue),
+          ...buildWeaponGraphSummary(graphValue, input),
           riskData_status: "not_executed_graph_failed",
           risk_item_count: 0,
           risk_label_summary: emptyRiskLabelSummary(),
@@ -793,7 +877,7 @@ function summarizeWeaponInventoryResponse(value, input) {
     };
   }
 
-  const graphSummary = buildWeaponGraphSummary(graphValue);
+  const graphSummary = buildWeaponGraphSummary(graphValue, input);
   const riskSummary = buildWeaponRiskSummary(value, graphSummary, input);
   const graphNoData = graphSummary.pointInfoMap_count === 0 && graphSummary.relationEdgeList_count === 0;
   const riskPartial = riskSummary.riskData_status === "risk_partial_failed";
@@ -811,7 +895,7 @@ function summarizeWeaponInventoryResponse(value, input) {
   };
 }
 
-function buildWeaponGraphSummary(value) {
+function buildWeaponGraphSummary(value, input = {}) {
   const payload = weaponPayload(value);
   const pointInfoMap = payload && isPlainObject(payload.pointInfoMap) ? payload.pointInfoMap : null;
   const relationEdgeList = Array.isArray(payload?.relationEdgeList) ? payload.relationEdgeList : [];
@@ -829,6 +913,8 @@ function buildWeaponGraphSummary(value) {
     relationEdgeList_count: relationEdgeList.length,
     related_device_count: deviceIds.length,
     related_user_count: userIds.length,
+    related_device_id_sample: deviceIds.length > 0 ? displayRiskEntity("deviceId", deviceIds[0], input) : null,
+    related_user_id_sample: userIds.length > 0 ? displayRiskEntity("user_id", userIds[0], input) : null,
     masked_device_id_sample: deviceIds.length > 0 ? maskDeviceId(deviceIds[0]) : null,
     raw_device_ids_for_internal_chaining_count: deviceIds.length,
     graph_no_data: graphNoData,
@@ -866,6 +952,7 @@ function buildWeaponRiskSummary(value, graphSummary, input) {
 
   const labelSummary = buildRiskLabelSummary(riskItems);
   const originalLogSummary = buildOriginalLogKeySummary(riskItems);
+  const originalLogEventId = firstOriginalLogField(riskItems, "eventId");
   return {
     riskData_status: riskFailure ? "risk_partial_failed" : riskItems.length > 0 ? "completed" : "no_data",
     risk_item_count: riskItems.length,
@@ -874,9 +961,20 @@ function buildWeaponRiskSummary(value, graphSummary, input) {
     risk_group_names_observed: labelSummary.groupNames,
     readable_label_sample: labelSummary.readableSample,
     originalLog_key_summary: originalLogSummary,
+    originalLog_eventId_sample: originalLogEventId ? displayRiskEntity("eventId", originalLogEventId, input) : null,
     userLevel_observed: userLevelsObserved(riskItems),
     no_data_not_risk_exclusion: true
   };
+}
+
+function firstOriginalLogField(items, fieldName) {
+  for (const item of items) {
+    const log = item && typeof item === "object" && !Array.isArray(item) ? item.originalLog : null;
+    if (log && typeof log === "object" && !Array.isArray(log) && log[fieldName] !== undefined && log[fieldName] !== null) {
+      return String(log[fieldName]);
+    }
+  }
+  return null;
 }
 
 function weaponEntityScope(input) {
@@ -1217,10 +1315,108 @@ function sanitizeSummaryText(value) {
     return null;
   }
   return String(value)
-    .replace(/\b(?:ANDROID|IOS)_[A-Za-z0-9_.:-]+/g, "[masked_device_id]")
-    .replace(/\b\d{8,}\b/g, "[masked_numeric_id]")
+    .replace(/(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)\s*[:=]\s*\S+/gi, "$1=[credential_present_redacted]")
     .replace(/\bhttps?:\/\/\S+/gi, "[redacted_url]")
+    .replace(/\b\d{17}[\dXx]\b/g, "[id_card_present]")
+    .replace(/\b(?:ANDROID|IOS)_[A-Za-z0-9_.:-]+/g, "[masked_device_id]")
     .slice(0, 160);
+}
+
+function displayRiskEntity(fieldName, value, input) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  if (outputScope(input) === "external_share") {
+    return maskRiskEntity(fieldName, text);
+  }
+  return text.slice(0, 160);
+}
+
+function displayPiiStrict(fieldName, value, input) {
+  const text = firstStringLike(value);
+  if (!text) {
+    return null;
+  }
+  if (isPhoneField(fieldName) && isPhoneNumber(text)) {
+    return maskPhoneNumber(text, outputScope(input));
+  }
+  if (isIdCardField(fieldName) && looksLikeIdCard(text)) {
+    return {
+      id_card_present: true,
+      birth_year_present: outputScope(input) === "internal_risk_review" ? idCardBirthYear(text) !== null : undefined
+    };
+  }
+  if (isNameField(fieldName)) {
+    return { name_present: true };
+  }
+  return null;
+}
+
+function maskRiskEntity(fieldName, value) {
+  const text = String(value);
+  if (isIpField(fieldName) || looksLikeIp(text)) {
+    return maskIp(text);
+  }
+  if (isDeviceField(fieldName) || /^(ANDROID|IOS)_/.test(text)) {
+    return maskDeviceId(text);
+  }
+  if (isUserIdField(fieldName)) {
+    return `[masked_user_id:length=${text.length}]`;
+  }
+  return `[masked_identifier:length=${text.length}]`;
+}
+
+function maskPhoneNumber(value, scope) {
+  const digits = String(value).replace(/\D/g, "");
+  if (!isPhoneNumber(digits)) {
+    return null;
+  }
+  return scope === "external_share" ? `${digits.slice(0, 3)}********` : `${digits.slice(0, 7)}****`;
+}
+
+function isPhoneNumber(value) {
+  return /^1\d{10}$/.test(String(value).replace(/\D/g, ""));
+}
+
+function looksLikeIdCard(value) {
+  return /^\d{17}[\dXx]$/.test(String(value));
+}
+
+function idCardBirthYear(value) {
+  const match = String(value).match(/^\d{6}(\d{4})\d{7}[\dXx]$/);
+  return match ? match[1] : null;
+}
+
+function isPhoneField(fieldName) {
+  return /(phone|mobile|手机号|手机|电话号码|phone_number)/i.test(String(fieldName));
+}
+
+function isIdCardField(fieldName) {
+  return /(id.?card|identity|身份证|证件号|idNo)/i.test(String(fieldName));
+}
+
+function isNameField(fieldName) {
+  return /(^name$|real.?name|姓名|真实姓名)/i.test(String(fieldName));
+}
+
+function isIpField(fieldName) {
+  return /(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(String(fieldName));
+}
+
+function isDeviceField(fieldName) {
+  return /(deviceId|device_id|did|deviceDid|设备)/i.test(String(fieldName));
+}
+
+function isUserIdField(fieldName) {
+  return /(^user_id$|^userId$|^uid$|userIds|用户id)/i.test(String(fieldName));
+}
+
+function looksLikeIp(value) {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(String(value)) || String(value).includes(":");
 }
 
 function readApiMessage(value) {
@@ -1500,6 +1696,12 @@ function buildLoginLogsSummary(records, input, noData, diagnostics) {
   const window = loginLogsTimeWindow(input);
   const timeValues = records.map(loginRecordTime).filter((value) => value !== null).sort((a, b) => a - b);
   const returnedFields = returnedLoginLogFields(records);
+  const firstIp = firstLoginIp(records);
+  const firstDeviceId = firstLoginDeviceId(records);
+  const firstUserId = firstLoginUserId(records);
+  const firstMethod = firstLoginField(records, /(^method$|loginMethod|登录方式)/i);
+  const firstLogSource = firstLoginField(records, /(^logSource$|origin|source|channel|platform|app|端|来源)/i);
+  const piiSummary = loginPiiStrictSummary(records, input);
   return {
     source_status: noData ? "no_data" : "completed",
     records_count: records.length,
@@ -1512,8 +1714,17 @@ function buildLoginLogsSummary(records, input, noData, diagnostics) {
     login_result_fields_present: fieldsPresent(returnedFields, /(result|status|success|outcome|error|失败|成功|状态)/i),
     device_fields_present: fieldsPresent(returnedFields, /(device|did|设备|model|机型)/i),
     ip_fields_present: fieldsPresent(returnedFields, /(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i),
-    ip_sample_masked: firstLoginIp(records) ? maskIp(firstLoginIp(records)) : null,
-    device_id_sample_masked: firstLoginDeviceId(records) ? maskDeviceId(firstLoginDeviceId(records)) : null,
+    ip_sample: firstIp ? displayRiskEntity("ip", firstIp, input) : null,
+    device_id_sample: firstDeviceId ? displayRiskEntity("deviceId", firstDeviceId, input) : null,
+    user_id_sample: firstUserId ? displayRiskEntity("user_id", firstUserId, input) : null,
+    method_sample: firstMethod ? displayRiskEntity("method", firstMethod, input) : null,
+    logSource_sample: firstLogSource ? displayRiskEntity("logSource", firstLogSource, input) : null,
+    ip_sample_masked: firstIp ? maskIp(firstIp) : null,
+    device_id_sample_masked: firstDeviceId ? maskDeviceId(firstDeviceId) : null,
+    phone_number_sample: piiSummary.phone_number_sample,
+    id_card_present: piiSummary.id_card_present,
+    birth_year_present: piiSummary.birth_year_present,
+    name_present: piiSummary.name_present,
     origin_fields_present: fieldsPresent(returnedFields, /(origin|source|channel|platform|app|端|来源)/i),
     returned_fields_observed: returnedFields,
     no_data: noData,
@@ -1608,6 +1819,47 @@ function firstLoginDeviceId(records) {
     }
   }
   return null;
+}
+
+function firstLoginUserId(records) {
+  return firstLoginField(records, /(^user_id$|^userId$|^uid$|userIds|用户id)/i);
+}
+
+function firstLoginField(records, pattern) {
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (pattern.test(key)) {
+        const sample = firstStringLike(value);
+        if (sample) {
+          return sample;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function loginPiiStrictSummary(records, input) {
+  const summary = {
+    phone_number_sample: null,
+    id_card_present: false,
+    birth_year_present: false,
+    name_present: false
+  };
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      const piiValue = displayPiiStrict(key, value, input);
+      if (isPhoneField(key) && piiValue && !summary.phone_number_sample) {
+        summary.phone_number_sample = piiValue;
+      } else if (isIdCardField(key) && piiValue) {
+        summary.id_card_present = true;
+        summary.birth_year_present = Boolean(piiValue.birth_year_present);
+      } else if (isNameField(key) && piiValue) {
+        summary.name_present = true;
+      }
+    }
+  }
+  return summary;
 }
 
 function firstStringLike(value) {
@@ -1777,7 +2029,7 @@ function buildRcpSnapshotRequest(input) {
   };
 }
 
-function summarizeRcpSnapshotResponse(value) {
+function summarizeRcpSnapshotResponse(value, input = {}) {
   const apiCode = readApiCode(value);
   if (apiCode !== null && ![0, 200].includes(apiCode)) {
     const errorType = classifyRcpApiError(value);
@@ -1841,11 +2093,29 @@ function summarizeRcpSnapshotResponse(value) {
         returned_columns_observed: returnedColumns,
         first_event_shape_keys: returnedColumnsFromFirstEvent(eventList),
         dynamic_columns_observed: returnedColumns.filter((column) => !tableHeaderColumns.includes(column)),
+        first_event_entity_samples: rcpFirstEventEntitySamples(eventList, input),
         no_data: noData,
         no_data_not_risk_exclusion: true
       }
     }
   };
+}
+
+function rcpFirstEventEntitySamples(eventList, input) {
+  const first = eventList.find((item) => item && typeof item === "object" && !Array.isArray(item));
+  if (!first) {
+    return {};
+  }
+  const fields = ["eventId", "sourceId", "deviceId", "hitFusePolicyCode", "_occurTime"];
+  const samples = {};
+  for (const field of fields) {
+    if (first[field] !== undefined && first[field] !== null) {
+      samples[field] = ["_occurTime"].includes(field)
+        ? String(first[field]).slice(0, 160)
+        : displayRiskEntity(field, first[field], input);
+    }
+  }
+  return samples;
 }
 
 function validateTrackAnalysisInput(input) {
@@ -2096,7 +2366,7 @@ function summarizeTrackAnalysisDeviceIdsResponse(value, input) {
     };
   }
 
-  const deviceSummary = buildDeviceSummary(value);
+  const deviceSummary = buildDeviceSummary(value, input);
   const noData = isDeviceSummaryEmpty(deviceSummary);
   return {
     sourceStatus: noData ? "no_data" : "completed",
@@ -2300,7 +2570,7 @@ function isProfileSummaryEmpty(summary) {
   );
 }
 
-function buildDeviceSummary(value) {
+function buildDeviceSummary(value, input = {}) {
   const data = value && typeof value === "object" ? value.data : null;
   const { entries, sourcePath } = extractDeviceEntries(data);
   const deviceIds = entries.map(deviceIdFromEntry).filter((item) => item !== null && item !== undefined && String(item).length > 0);
@@ -2310,6 +2580,7 @@ function buildDeviceSummary(value) {
 
   return {
     device_ids_count: uniqueDeviceIds.length > 0 ? uniqueDeviceIds.length : entries.length,
+    device_id_sample: uniqueDeviceIds.length > 0 ? displayRiskEntity("deviceId", uniqueDeviceIds[0], input) : null,
     device_id_sample_masked: uniqueDeviceIds.length > 0 ? maskDeviceId(uniqueDeviceIds[0]) : null,
     device_fields_observed: fieldKeys,
     device_model_fields_present: containsProfileSignal(fieldKeys, /(device.*model|model|机型|设备型号)/i),

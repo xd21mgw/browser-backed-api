@@ -35,6 +35,22 @@ See `ONLINE_SOURCE_SUMMARY.md` for the first batch browser-backed online source 
 
 All four sources return `source_card`, `source_quality`, `latency_ms`, and `sensitive_output=false`; live outputs are shape summaries only and do not include raw upstream full bodies.
 
+## Output Scope And Field Classification
+
+Every action accepts optional `output_scope`:
+
+- `internal_risk_review` (default): risk entity identifiers may appear in compact summaries for internal fraud/risk review.
+- `external_share`: risk entity identifiers are masked for sharing outside the internal review context.
+
+Field classes:
+
+- `credential_secret`: cookie, token, session, header, authorization, password, and reusable credential material. These are never output.
+- `pii_strict`: phone number, ID card, and real name. Phone numbers are masked as `1381234****` internally and `138********` externally. Full ID card and real name are never output; only presence/weak summaries are allowed.
+- `risk_entity_identifier`: user_id/UID, device_id/DID, IP, eventId, sourceId, hitFusePolicyCode, strategy code, logSource, method, timestamp. These can be shown in `internal_risk_review` and are masked in `external_share`.
+- `source_summary_metric`: counts, time windows, status fields, and field-presence metrics. These can be displayed normally.
+
+`sensitive_output=false` means no credential secret, no raw upstream full body, no raw records full dump, and no raw `labelInfo`/`originalLog` full dump. It does not mean risk entity identifiers were removed from internal review summaries.
+
 ## Run Mock Mode
 
 ```sh
@@ -178,7 +194,8 @@ RCP source status:
 - device input maps to graph query `groupKey=DEVICE_ID`, `dimKey=USER_ID`
 - graph output is shape-only and summarizes `pointInfoMap`, `relationEdgeList`, related device/user counts, and masked device samples
 - `riskData` only runs when graph output contains device IDs with full `ANDROID_` or `IOS_` prefixes; pure numeric graph keys are treated as probable user IDs, not device IDs
-- risk output summarizes label counts, group names, readable label samples, originalLog keys, and userLevel values without returning raw `labelInfo`, raw `originalLog`, or raw device IDs
+- risk output summarizes label counts, group names, readable label samples, originalLog keys, and userLevel values without returning raw `labelInfo` or raw `originalLog` full dumps
+- related device/user identifiers in summary follow `output_scope`: visible for internal risk review and masked for external sharing
 - graph no-data is a source no-hit/no-data outcome and is not no-risk counterevidence
 - riskData failure is reported as partial risk status and does not overwrite graph success
 - no caller-provided URL, path, header, cookie, token, session, secret, or raw body is accepted
@@ -192,7 +209,7 @@ Weapon source status:
 - live validated APIs: `GET /apiv2/graphData`, `GET /apiv2/riskData`
 - live validation summary: `source_status=completed`, `riskData_status=completed`, `risk_item_count=1`, `risk_label_count=17`, `userLevel_observed=HIGH`, `sensitive_output=false`, `raw_full_body_returned=false`
 - evidence use: device relation evidence, device risk label summary, and userLevel/risk group supporting evidence
-- raw device IDs, raw `labelInfo`, raw `originalLog`, and raw upstream full bodies are not output
+- raw `labelInfo`, raw `originalLog`, and raw upstream full bodies are not output; related device IDs in compact summaries follow `output_scope`
 - `no_data`, `completed_no_data`, `not_executed_missing_device_id`, `risk_partial_failed`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
 
 `login_logs_search` uses the fixed Login Logs online source:
@@ -206,7 +223,8 @@ Weapon source status:
 - live output is shape-only and summarizes record count, observed time range, result/device/IP/origin field presence, and returned field names
 - records arrays are detected from known response wrappers including `data.records` and `data.logSearchModels`
 - when the default 7-day response is too large or unparseable JSON, the action retries once with a 24-hour window and keeps the first-attempt diagnostics
-- raw login log records, raw IP values, raw device IDs, and raw upstream full bodies are not output
+- raw login log records and raw upstream full bodies are not output
+- login IP, login device, userId, method, and logSource samples follow `output_scope`: visible for internal risk review and masked for external sharing
 - empty records are a source no-data outcome and are not no-risk counterevidence
 - no caller-provided URL, path, header, cookie, token, session, secret, or raw query is accepted
 
@@ -240,6 +258,8 @@ Every action response includes:
 
 - `latency_ms`
 - `origin_warmed`
+- `output_scope`
+- `field_classification`
 - `sensitive_output: false`
 - `source_card`
 - `source_quality`
@@ -251,6 +271,7 @@ Every action response includes:
 - Response bodies are read only up to `MAX_LIVE_BODY_BYTES` for summarization, and returned live data is shape-only.
 - Sensitive-looking JSON key names are redacted in shape summaries.
 - Inputs containing URL-like values, raw header fields, raw cookie fields, tokens, sessions, or secrets are rejected with `forbidden_action_input`.
+- `external_share` masks risk entity identifiers; `internal_risk_review` can display the compact risk entity samples needed for fraud review.
 
 ## Live Smoke Checklist
 

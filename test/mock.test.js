@@ -571,6 +571,9 @@ test("login_logs_search successful records return completed summary without raw 
   assert.equal(summary.device_fields_present, true);
   assert.equal(summary.ip_fields_present, true);
   assert.equal(summary.origin_fields_present, true);
+  assert.equal(summary.ip_sample, "10.20.30.40");
+  assert.equal(summary.device_id_sample, "ANDROID_raw_login_device");
+  assert.equal(summary.logSource_sample, "APP_RAW_VALUE");
   assert.equal(summary.ip_sample_masked, "10.20.*.*");
   assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=24]");
   assert.ok(summary.returned_fields_observed.includes("loginTime"));
@@ -587,8 +590,8 @@ test("login_logs_search successful records return completed summary without raw 
   const serialized = JSON.stringify(response);
   assert.equal(serialized.includes("SUCCESS_RAW_VALUE"), false);
   assert.equal(serialized.includes("DENY_RAW_VALUE"), false);
-  assert.equal(serialized.includes("ANDROID_raw_login_device"), false);
-  assert.equal(serialized.includes("10.20.30.40"), false);
+  assert.equal(serialized.includes("ANDROID_raw_login_device"), true);
+  assert.equal(serialized.includes("10.20.30.40"), true);
   assert.equal(serialized.includes("raw-login-record-secret"), false);
 });
 
@@ -672,6 +675,10 @@ test("login_logs_search logSearchModels records return completed summary without
   assert.equal(summary.device_fields_present, true);
   assert.equal(summary.ip_fields_present, true);
   assert.equal(summary.origin_fields_present, true);
+  assert.equal(summary.ip_sample, "10.20.30.42");
+  assert.equal(summary.device_id_sample, "ANDROID_log_device_abc");
+  assert.equal(summary.logSource_sample, "APP_RAW_VALUE");
+  assert.equal(summary.method_sample, "LOGIN_RAW_METHOD");
   assert.equal(summary.ip_sample_masked, "10.20.*.*");
   assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=22]");
   assert.deepEqual(summary.returned_fields_observed, [
@@ -692,10 +699,10 @@ test("login_logs_search logSearchModels records return completed summary without
   assert.equal(summary.diagnostics.parse_error_detail_sanitized, null);
   const serialized = JSON.stringify(response);
   assert.equal(serialized.includes("raw-login-record-secret"), false);
-  assert.equal(serialized.includes("APP_RAW_VALUE"), false);
-  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), false);
-  assert.equal(serialized.includes("ANDROID_log_device_abc"), false);
-  assert.equal(serialized.includes("10.20.30.42"), false);
+  assert.equal(serialized.includes("APP_RAW_VALUE"), true);
+  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), true);
+  assert.equal(serialized.includes("ANDROID_log_device_abc"), true);
+  assert.equal(serialized.includes("10.20.30.42"), true);
 });
 
 test("login_logs_search empty logSearchModels returns no_data without risk exclusion", () => {
@@ -728,6 +735,108 @@ test("login_logs_search empty logSearchModels returns no_data without risk exclu
   assert.equal(summary.no_data_not_risk_exclusion, true);
   assert.equal(summary.diagnostics.records_array_path_detected, "data.logSearchModels");
   assert.equal(summary.diagnostics.records_count_before_limit, 0);
+});
+
+test("login_logs_search external_share masks risk entities and pii strict fields", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "12345678901",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000,
+      output_scope: "external_share"
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          logSearchModels: [
+            {
+              userIds: ["12345678901"],
+              dids: ["ANDROID_external_device_abc"],
+              ip: "10.20.30.44",
+              phone_number: "13812345678",
+              idCard: "110105199001011234",
+              realName: "RawNameShouldNotLeak",
+              logSource: "APP",
+              method: "LOGIN",
+              timestamp: 1780000005000
+            }
+          ],
+          totalCount: 1
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 480
+    },
+    { latencyMs: 11, originWarmed: true }
+  );
+
+  assert.equal(response.output_scope, "external_share");
+  assert.equal(response.status, "completed");
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "completed");
+  assert.equal(summary.records_count, 1);
+  assert.equal(summary.diagnostics.records_array_path_detected, "data.logSearchModels");
+  assert.equal(summary.ip_sample, "10.20.*.*");
+  assert.equal(summary.device_id_sample, "[masked_device_id:length=27]");
+  assert.equal(summary.user_id_sample, "[masked_user_id:length=11]");
+  assert.equal(summary.phone_number_sample, "138********");
+  assert.equal(summary.id_card_present, true);
+  assert.equal(summary.birth_year_present, false);
+  assert.equal(summary.name_present, true);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("10.20.30.44"), false);
+  assert.equal(serialized.includes("ANDROID_external_device_abc"), false);
+  assert.equal(serialized.includes("12345678901"), false);
+  assert.equal(serialized.includes("13812345678"), false);
+  assert.equal(serialized.includes("110105199001011234"), false);
+  assert.equal(serialized.includes("RawNameShouldNotLeak"), false);
+});
+
+test("login_logs_search internal pii keeps risk user id distinct from phone number", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "12345678901",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          logSearchModels: [
+            {
+              userIds: ["12345678901"],
+              phone_number: "13812345678",
+              timestamp: 1780000005000
+            }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 180
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(response.output_scope, "internal_risk_review");
+  assert.equal(summary.user_id_sample, "12345678901");
+  assert.equal(summary.phone_number_sample, "1381234****");
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("13812345678"), false);
 });
 
 test("login_logs_search default seven day large response falls back to 24h logSearchModels completed", async () => {
@@ -813,6 +922,10 @@ test("login_logs_search default seven day large response falls back to 24h logSe
   assert.equal(summary.last_login_time_observed, 1780000004000);
   assert.equal(summary.device_fields_present, true);
   assert.equal(summary.ip_fields_present, true);
+  assert.equal(summary.ip_sample, "10.20.30.43");
+  assert.equal(summary.device_id_sample, "ANDROID_login_device_abc");
+  assert.equal(summary.logSource_sample, "APP_RAW_VALUE");
+  assert.equal(summary.method_sample, "LOGIN_RAW_METHOD");
   assert.equal(summary.ip_sample_masked, "10.20.*.*");
   assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=24]");
   assert.ok(summary.returned_fields_observed.includes("logContent"));
@@ -838,14 +951,14 @@ test("login_logs_search default seven day large response falls back to 24h logSe
     "response_body_truncated_at_max_live_body_bytes"
   );
   const serialized = JSON.stringify(response);
-  assert.equal(serialized.includes("2871834924"), false);
+  assert.equal(serialized.includes("2871834924"), true);
   assert.equal(serialized.includes("444946196"), false);
-  assert.equal(serialized.includes("ANDROID_login_device_abc"), false);
+  assert.equal(serialized.includes("ANDROID_login_device_abc"), true);
   assert.equal(serialized.includes("ANDROID_raw_login_device"), false);
-  assert.equal(serialized.includes("10.20.30.43"), false);
+  assert.equal(serialized.includes("10.20.30.43"), true);
   assert.equal(serialized.includes("raw-login-record-secret"), false);
-  assert.equal(serialized.includes("APP_RAW_VALUE"), false);
-  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), false);
+  assert.equal(serialized.includes("APP_RAW_VALUE"), true);
+  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), true);
 });
 
 test("login_logs_search parse failure returns parse_error diagnostics instead of network_error", () => {
@@ -886,7 +999,7 @@ test("login_logs_search HTML login page is classified as auth_failed", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
     ACTIONS.login_logs_search,
-    { user_id: "444946196" },
+    { user_id: "444946196", output_scope: "external_share" },
     config,
     {
       completed: true,
@@ -1020,7 +1133,7 @@ test("weapon_inventory empty graphData returns completed_no_data without risk ex
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
     ACTIONS.weapon_inventory,
-    { user_id: "444946196" },
+    { user_id: "444946196", output_scope: "external_share" },
     config,
     {
       completed: true,
@@ -1102,6 +1215,8 @@ test("weapon_inventory graphData device IDs drive riskData summary", () => {
   assert.equal(summary.relationEdgeList_count, 1);
   assert.equal(summary.related_device_count, 2);
   assert.equal(summary.related_user_count, 1);
+  assert.equal(summary.related_device_id_sample, "ANDROID_raw_device_1");
+  assert.equal(summary.related_user_id_sample, "444946196");
   assert.equal(summary.masked_device_id_sample, "[masked_device_id:length=20]");
   assert.equal(summary.raw_device_ids_for_internal_chaining_count, 2);
   assert.equal(summary.riskData_status, "completed");
@@ -1216,12 +1331,64 @@ test("weapon_inventory riskData list parses labelInfo originalLog and userLevel 
   assert.deepEqual(summary.readable_label_sample, ["readable_risk_label"]);
   assert.deepEqual(summary.originalLog_key_summary.top_level_keys_observed, ["eventId", "nested"]);
   assert.equal(summary.originalLog_key_summary.originalLog_present, true);
+  assert.equal(summary.originalLog_eventId_sample, "raw-event-id");
   assert.deepEqual(summary.userLevel_observed, ["L5"]);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("ANDROID_raw_device_1"), true);
+  assert.equal(serialized.includes("raw-event-id"), true);
+  assert.equal(serialized.includes("raw-original-log-value"), false);
+  assert.equal(serialized.includes("raw-label-secret-value"), false);
+});
+
+test("weapon_inventory external_share masks related device and originalLog event identifiers", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { device_id: "ANDROID_raw_device_1", output_scope: "external_share" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify(weaponCombinedResponse({
+        pointInfoMap: {
+          ANDROID_raw_device_1: { nodeType: "device", deviceId: "ANDROID_raw_device_1" }
+        },
+        relationEdgeList: [{ from: "ANDROID_raw_device_1", to: "444946196" }],
+        riskDataResults: [
+          {
+            ok: true,
+            status: 200,
+            body: {
+              code: 0,
+              data: [
+                {
+                  deviceId: "ANDROID_raw_device_1",
+                  originalLog: {
+                    eventId: "raw-event-id",
+                    nested: { rawKey: "raw-original-log-value" }
+                  },
+                  userLevel: "L5"
+                }
+              ]
+            }
+          }
+        ]
+      })),
+      bodyTruncated: false,
+      observedBytes: 420
+    },
+    { latencyMs: 20, originWarmed: true }
+  );
+
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(response.output_scope, "external_share");
+  assert.equal(summary.related_device_id_sample, "[masked_device_id:length=20]");
+  assert.equal(summary.originalLog_eventId_sample, "[masked_identifier:length=12]");
   const serialized = JSON.stringify(response);
   assert.equal(serialized.includes("ANDROID_raw_device_1"), false);
   assert.equal(serialized.includes("raw-event-id"), false);
   assert.equal(serialized.includes("raw-original-log-value"), false);
-  assert.equal(serialized.includes("raw-label-secret-value"), false);
 });
 
 test("weapon_inventory riskData failure leaves graph completed with partial risk status", () => {
@@ -1286,7 +1453,7 @@ test("weapon_inventory forbidden inputs are rejected and raw response body is no
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
     ACTIONS.weapon_inventory,
-    { user_id: "444946196" },
+    { user_id: "444946196", output_scope: "external_share" },
     config,
     {
       completed: true,
@@ -1577,11 +1744,65 @@ test("rcp_snapshot successful eventList JSON returns completed shape summary", (
   assert.deepEqual(summary.table_header_columns, ["sourceId", "eventId", "_occurTime", "deviceId"]);
   assert.deepEqual(summary.first_event_shape_keys, ["sourceId", "eventId", "_occurTime", "deviceId", "dynamicScore"]);
   assert.ok(summary.dynamic_columns_observed.includes("dynamicScore"));
+  assert.deepEqual(summary.first_event_entity_samples, {
+    eventId: "raw-event-id",
+    sourceId: "raw-source-id",
+    deviceId: "raw-device-id",
+    _occurTime: "2026-05-29 10:01:00"
+  });
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("raw-source-id"), true);
+  assert.equal(serialized.includes("raw-event-id"), true);
+  assert.equal(serialized.includes("raw-device-id"), true);
+  assert.equal(serialized.includes("raw-dynamic-value"), false);
+});
+
+test("rcp_snapshot external_share masks first event entity samples", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    {
+      eventType: "REGISTER",
+      startTime: "2026-05-29 10:00:00",
+      endTime: "2026-05-29 10:30:00",
+      output_scope: "external_share"
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          eventList: [
+            {
+              sourceId: "raw-source-id",
+              eventId: "raw-event-id",
+              _occurTime: "2026-05-29 10:01:00",
+              deviceId: "ANDROID_rcp_device"
+            }
+          ],
+          pagination: { page: 1, pageSize: 200, total: 1 },
+          tableHeaderList: []
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 280
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  const samples = response.data.response_summary.rcp_snapshot.first_event_entity_samples;
+  assert.equal(response.output_scope, "external_share");
+  assert.equal(samples.sourceId, "[masked_identifier:length=13]");
+  assert.equal(samples.eventId, "[masked_identifier:length=12]");
+  assert.equal(samples.deviceId, "[masked_device_id:length=18]");
+  assert.equal(samples._occurTime, "2026-05-29 10:01:00");
   const serialized = JSON.stringify(response);
   assert.equal(serialized.includes("raw-source-id"), false);
   assert.equal(serialized.includes("raw-event-id"), false);
-  assert.equal(serialized.includes("raw-device-id"), false);
-  assert.equal(serialized.includes("raw-dynamic-value"), false);
+  assert.equal(serialized.includes("ANDROID_rcp_device"), false);
 });
 
 test("rcp_snapshot empty eventList returns source no-hit without risk exclusion", () => {
@@ -2081,6 +2302,7 @@ test("track_analysis_summary getDeviceIds successful JSON returns device summary
   assert.equal(response.source_card.path, "/dp/platform/app/analytics/v2/sequence/getDeviceIds");
   const summary = response.data.response_summary.track_analysis.device_summary;
   assert.equal(summary.device_ids_count, 2);
+  assert.equal(summary.device_id_sample, "ANDROID_raw_device_id_1");
   assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=23]");
   assert.equal(summary.device_model_fields_present, true);
   assert.equal(summary.last_active_fields_present, true);
@@ -2088,9 +2310,41 @@ test("track_analysis_summary getDeviceIds successful JSON returns device summary
   assert.ok(summary.output_fields_observed.includes("data.deviceIds[].deviceId"));
   assert.ok(summary.output_fields_observed.includes("data.deviceIds[].lastActiveTime"));
   const serialized = JSON.stringify(response);
-  assert.equal(serialized.includes("ANDROID_raw_device_id_1"), false);
+  assert.equal(serialized.includes("ANDROID_raw_device_id_1"), true);
   assert.equal(serialized.includes("raw-model-value"), false);
   assert.equal(serialized.includes("raw-device-debug-value"), false);
+});
+
+test("track_analysis_summary external_share masks deviceIds", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getDeviceIds", user_id: "demo-user", appName: "KUAISHOU", output_scope: "external_share" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          deviceIds: [
+            { deviceId: "ANDROID_external_track_device", lastActiveTime: "2026-05-29" }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 180
+    },
+    { latencyMs: 20, originWarmed: true }
+  );
+
+  const summary = response.data.response_summary.track_analysis.device_summary;
+  assert.equal(response.output_scope, "external_share");
+  assert.equal(summary.device_id_sample, "[masked_device_id:length=29]");
+  assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=29]");
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("ANDROID_external_track_device"), false);
 });
 
 test("track_analysis_summary HTML login page is classified as auth_failed without raw body", () => {

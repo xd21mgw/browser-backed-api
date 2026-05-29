@@ -11,6 +11,13 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     captured_at: new Date().toISOString(),
     transport: mock ? "synthetic" : "playwright_page_evaluate_fetch",
     user_data_dir: config.userDataDir,
+    output_scope: meta.outputScope || "internal_risk_review",
+    field_classification_policy: {
+      credential_secret: "never_output",
+      pii_strict: "limited_masking",
+      risk_entity_identifier: "scope_controlled",
+      source_summary_metric: "display_allowed"
+    },
     source_status: meta.sourceStatus || (fetchMeta.ok ? "ok" : "blocked"),
     error_type: meta.errorType || null,
     origin_warmed: Boolean(meta.originWarmed),
@@ -26,7 +33,12 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     body_policy: {
       raw_response_full_body_returned: false,
       max_live_body_bytes_observed: config.browser.maxLiveBodyBytes,
-      cookie_token_session_header_plaintext_read: false
+      cookie_token_session_header_plaintext_read: false,
+      credential_secret_plaintext_returned: false,
+      raw_records_full_dump_returned: false,
+      raw_labelInfo_full_dump_returned: false,
+      raw_originalLog_full_dump_returned: false,
+      risk_entity_identifier_may_be_displayed: (meta.outputScope || "internal_risk_review") === "internal_risk_review"
     },
     fetch_status: {
       ok: Boolean(fetchMeta.ok),
@@ -42,7 +54,9 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
     { name: "fixed_action_registry", passed: true },
     { name: "same_origin_relative_path", passed: action.apiPath.startsWith("/") && !action.apiPath.startsWith("//") },
     { name: "no_cookie_token_session_header_plaintext_read", passed: true },
+    { name: "credential_secret_plaintext_suppressed", passed: true },
     { name: "raw_response_full_body_suppressed", passed: true },
+    { name: "raw_records_full_dump_suppressed", passed: true },
     { name: "sensitive_output_false", passed: true }
   ];
 
@@ -65,6 +79,13 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
     score,
     checks,
     warnings: qualityWarnings({ mock, meta }),
+    output_scope: meta.outputScope || "internal_risk_review",
+    field_classification_policy: {
+      credential_secret: "never_output",
+      pii_strict: "limited_masking",
+      risk_entity_identifier: "scope_controlled",
+      source_summary_metric: "display_allowed"
+    },
     no_data_not_risk_exclusion: true,
     no_hit_not_risk_exclusion: true
   };
