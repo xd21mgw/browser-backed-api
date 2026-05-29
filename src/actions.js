@@ -18,6 +18,9 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "cursor",
   "query",
   "severity",
+  "recallSource",
+  "from_timestamp",
+  "to_timestamp",
   "product",
   "productName",
   "searchLevel",
@@ -81,6 +84,13 @@ const WEAPON_DEFAULT_INCLUDE_RISK_DATA = true;
 const WEAPON_DEFAULT_MAX_DEVICE_IDS = 5;
 const WEAPON_MAX_DEVICE_IDS = 20;
 
+const LOGIN_LOGS_SEARCH_PATH = "/rest/unified/log/search";
+const LOGIN_LOGS_DEFAULT_RECALL_SOURCE = "2,0,1,3";
+const LOGIN_LOGS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGIN_LOGS_DEFAULT_LIMIT = 20;
+const LOGIN_LOGS_MAX_LIMIT = 100;
+
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
 const TRACK_ANALYSIS_PROFILE_PATH = "/dp/platform/app/analytics/v2/sequence/profile";
@@ -112,6 +122,7 @@ const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "secret",
   "session",
   "sessionid",
+  "rawquery",
   "rawbody",
   "csrf",
   "jwt"
@@ -165,25 +176,21 @@ export const ACTIONS = Object.freeze({
   login_logs_search: freezeAction({
     name: "login_logs_search",
     domainKey: "login_logs",
-    description: "Return a bounded login log summary without exposing session or header material.",
-    method: "POST",
-    apiPath: "/api/login-logs/search",
+    description: "Return a bounded online login log shape summary for a typed user and time window.",
+    method: "GET",
+    apiPath: LOGIN_LOGS_SEARCH_PATH,
     inputContract: {
-      accountId: "optional string",
-      dateRange: "optional { from, to }",
-      severity: "optional string",
-      limit: "optional number <= 100"
+      user_id: "required string",
+      time_window: "optional { from_timestamp, to_timestamp } epoch ms; default recent 7 days",
+      from_timestamp: "optional epoch ms",
+      to_timestamp: "optional epoch ms",
+      recallSource: "optional string; default 2,0,1,3",
+      limit: "optional positive integer <= 100; default 20"
     },
-    mockData: (input) => ({
-      scope: scopeFromInput(input),
-      returned_count: 3,
-      events: [
-        { event_id: "mock-login-1", outcome: "success", actor_type: "user" },
-        { event_id: "mock-login-2", outcome: "mfa_required", actor_type: "user" },
-        { event_id: "mock-login-3", outcome: "denied", actor_type: "service" }
-      ],
-      generated_at: fixedMockTime()
-    })
+    validateParams: validateLoginLogsInput,
+    buildRequest: buildLoginLogsRequest,
+    summarizeLiveResponse: summarizeLoginLogsResponse,
+    mockData: mockLoginLogsData
   }),
   track_analysis_summary: freezeAction({
     name: "track_analysis_summary",
@@ -1156,6 +1163,278 @@ function readApiMessage(value) {
     }
   }
   return null;
+}
+
+function validateLoginLogsInput(input) {
+  if (!isNonEmptyString(input.user_id)) {
+    return {
+      message: "login_logs_search requires user_id",
+      required: ["user_id"],
+      errorType: "parameter_error"
+    };
+  }
+
+  const windowValidation = validateLoginLogsWindow(input);
+  if (windowValidation) {
+    return windowValidation;
+  }
+
+  if (Object.hasOwn(input, "recallSource") && !validRecallSource(input.recallSource)) {
+    return {
+      message: "login_logs_search recallSource must be comma-separated digits",
+      required: ["recallSource comma-separated digits"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "limit") && (!validPositiveInteger(input.limit) || input.limit > LOGIN_LOGS_MAX_LIMIT)) {
+    return {
+      message: `login_logs_search limit must be a positive integer <= ${LOGIN_LOGS_MAX_LIMIT}`,
+      required: [`limit positive integer <= ${LOGIN_LOGS_MAX_LIMIT}`],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  return null;
+}
+
+function validateLoginLogsWindow(input) {
+  const window = loginLogsTimeWindow(input);
+  if (!Number.isSafeInteger(window.from) || !Number.isSafeInteger(window.to)) {
+    return {
+      message: "login_logs_search timestamps must be epoch milliseconds",
+      required: ["from_timestamp/to_timestamp epoch ms"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (window.from <= 0 || window.to <= 0 || window.to <= window.from) {
+    return {
+      message: "login_logs_search requires to_timestamp > from_timestamp",
+      required: ["to_timestamp > from_timestamp"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (window.to - window.from > LOGIN_LOGS_MAX_WINDOW_MS) {
+    return {
+      message: "login_logs_search time window must not exceed 7 days",
+      required: ["time window <= 7 days"],
+      errorType: "query_window_too_large",
+      sourceStatus: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildLoginLogsRequest(input) {
+  const window = loginLogsTimeWindow(input);
+  const recallSource = loginLogsRecallSource(input);
+  const params = new URLSearchParams({
+    userId: input.user_id.trim(),
+    from_timestamp: String(window.from),
+    to_timestamp: String(window.to),
+    recallSource
+  });
+  const displayParams = new URLSearchParams({
+    userId: "[typed_user_id]",
+    from_timestamp: String(window.from),
+    to_timestamp: String(window.to),
+    recallSource
+  });
+
+  return {
+    path: `${LOGIN_LOGS_SEARCH_PATH}?${params.toString()}`,
+    displayPath: `${LOGIN_LOGS_SEARCH_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function summarizeLoginLogsResponse(value, input) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
+    return {
+      sourceStatus: "blocked",
+      errorType: "platform_error",
+      summary: {
+        login_logs: {
+          source_status: "blocked",
+          api_code: apiCode,
+          records_count: 0,
+          no_data: false,
+          no_data_not_risk_exclusion: true
+        }
+      }
+    };
+  }
+
+  const records = extractLoginLogRecords(value).slice(0, loginLogsLimit(input));
+  const noData = records.length === 0;
+  const summary = buildLoginLogsSummary(records, input, noData);
+  return {
+    sourceStatus: noData ? "no_data" : "completed",
+    errorType: null,
+    summary: {
+      login_logs: summary
+    }
+  };
+}
+
+function loginLogsTimeWindow(input) {
+  const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
+    ? input.time_window
+    : {};
+  const from = firstNumberValue(input.from_timestamp, rawWindow.from_timestamp, rawWindow.from, rawWindow.startTime);
+  const to = firstNumberValue(input.to_timestamp, rawWindow.to_timestamp, rawWindow.to, rawWindow.endTime);
+  if (from !== null || to !== null) {
+    return {
+      from: from ?? NaN,
+      to: to ?? NaN
+    };
+  }
+
+  const now = Date.now();
+  return {
+    from: now - LOGIN_LOGS_DEFAULT_WINDOW_MS,
+    to: now
+  };
+}
+
+function firstNumberValue(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const number = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(number)) {
+      return Math.trunc(number);
+    }
+    return NaN;
+  }
+  return null;
+}
+
+function loginLogsRecallSource(input) {
+  return isNonEmptyString(input.recallSource) ? input.recallSource.trim() : LOGIN_LOGS_DEFAULT_RECALL_SOURCE;
+}
+
+function loginLogsLimit(input) {
+  return Object.hasOwn(input, "limit") ? Math.trunc(input.limit) : LOGIN_LOGS_DEFAULT_LIMIT;
+}
+
+function validRecallSource(value) {
+  return typeof value === "string" && /^\d+(,\d+)*$/.test(value.trim());
+}
+
+function extractLoginLogRecords(value) {
+  const data = value && typeof value === "object" ? value.data : value;
+  if (Array.isArray(data)) {
+    return data.filter(isPlainObject);
+  }
+  if (!isPlainObject(data)) {
+    return [];
+  }
+
+  for (const key of ["records", "rows", "list", "items", "logs", "result", "data"]) {
+    if (Array.isArray(data[key])) {
+      return data[key].filter(isPlainObject);
+    }
+  }
+  if (isPlainObject(data.page) && Array.isArray(data.page.list)) {
+    return data.page.list.filter(isPlainObject);
+  }
+  return [];
+}
+
+function buildLoginLogsSummary(records, input, noData) {
+  const window = loginLogsTimeWindow(input);
+  const timeValues = records.map(loginRecordTime).filter((value) => value !== null).sort((a, b) => a - b);
+  const returnedFields = returnedLoginLogFields(records);
+  return {
+    source_status: noData ? "no_data" : "completed",
+    records_count: records.length,
+    time_window_observed: {
+      from_timestamp: window.from,
+      to_timestamp: window.to
+    },
+    first_login_time_observed: timeValues.length > 0 ? timeValues[0] : null,
+    last_login_time_observed: timeValues.length > 0 ? timeValues[timeValues.length - 1] : null,
+    login_result_fields_present: fieldsPresent(returnedFields, /(result|status|success|outcome|error|失败|成功|状态)/i),
+    device_fields_present: fieldsPresent(returnedFields, /(device|did|设备|model|机型)/i),
+    ip_fields_present: fieldsPresent(returnedFields, /(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i),
+    ip_sample_masked: firstLoginIp(records) ? maskIp(firstLoginIp(records)) : null,
+    device_id_sample_masked: firstLoginDeviceId(records) ? maskDeviceId(firstLoginDeviceId(records)) : null,
+    origin_fields_present: fieldsPresent(returnedFields, /(origin|source|channel|platform|app|端|来源)/i),
+    returned_fields_observed: returnedFields,
+    no_data: noData,
+    no_data_not_risk_exclusion: true
+  };
+}
+
+function loginRecordTime(record) {
+  if (!isPlainObject(record)) {
+    return null;
+  }
+  for (const key of Object.keys(record)) {
+    if (/(time|timestamp|loginTime|eventTime|createTime|登录时间|时间)/i.test(key)) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.trunc(value);
+      }
+      if (typeof value === "string") {
+        const number = Number(value);
+        if (Number.isFinite(number)) {
+          return Math.trunc(number);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function returnedLoginLogFields(records) {
+  const fields = [];
+  for (const record of records.slice(0, LOGIN_LOGS_DEFAULT_LIMIT)) {
+    fields.push(...observedKeys(record));
+  }
+  return [...new Set(fields)].slice(0, 80);
+}
+
+function fieldsPresent(fields, pattern) {
+  return fields.some((field) => pattern.test(String(field)));
+}
+
+function firstLoginIp(records) {
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (/(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(key) && isNonEmptyString(value)) {
+        return value.trim();
+      }
+    }
+  }
+  return null;
+}
+
+function firstLoginDeviceId(records) {
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record)) {
+      if (/(deviceId|device_id|did|deviceDid|设备)/i.test(key) && (isNonEmptyString(value) || typeof value === "number")) {
+        return String(value);
+      }
+    }
+  }
+  return null;
+}
+
+function maskIp(value) {
+  const text = String(value);
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text)) {
+    const parts = text.split(".");
+    return `${parts[0]}.${parts[1]}.*.*`;
+  }
+  if (text.includes(":")) {
+    return "[masked_ipv6]";
+  }
+  return "[masked_ip]";
 }
 
 function validateRcpSnapshotInput(input) {
@@ -2367,10 +2646,41 @@ function mockWeaponInventoryData(input) {
   };
 }
 
-function scopeFromInput(input) {
+function mockLoginLogsData(input) {
+  const request = buildLoginLogsRequest(input);
+  const mockValue = {
+    code: 0,
+    data: {
+      records: [
+        {
+          loginTime: loginLogsTimeWindow(input).from + 1000,
+          result: "success",
+          deviceId: "ANDROID_mock_login_device",
+          ip: "10.20.30.40",
+          origin: "mock-origin"
+        },
+        {
+          loginTime: loginLogsTimeWindow(input).to - 1000,
+          result: "denied",
+          deviceId: "IOS_mock_login_device",
+          ip: "10.20.30.41",
+          origin: "mock-origin"
+        }
+      ]
+    }
+  };
+  const summary = summarizeLoginLogsResponse(mockValue, input).summary.login_logs;
   return {
-    account_id: typeof input.accountId === "string" ? input.accountId : "mock-account",
-    workspace_id: typeof input.workspaceId === "string" ? input.workspaceId : "mock-workspace"
+    shape_summary_only: true,
+    fixed_path: LOGIN_LOGS_SEARCH_PATH,
+    request: {
+      method: request.method,
+      display_path: request.displayPath,
+      recallSource: loginLogsRecallSource(input),
+      limit: loginLogsLimit(input)
+    },
+    login_logs: summary,
+    generated_at: fixedMockTime()
   };
 }
 

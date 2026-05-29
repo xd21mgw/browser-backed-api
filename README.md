@@ -184,6 +184,19 @@ Weapon source status:
 - raw device IDs, raw `labelInfo`, raw `originalLog`, and raw upstream full bodies are not output
 - `no_data`, `completed_no_data`, `not_executed_missing_device_id`, `risk_partial_failed`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
 
+`login_logs_search` uses the fixed Login Logs online source:
+
+- fixed path: `GET /rest/unified/log/search`
+- typed input: `user_id`
+- optional typed input: `time_window`, `from_timestamp`, `to_timestamp`, `recallSource`, `limit`
+- default input: recent 7-day window, `recallSource=2,0,1,3`, `limit=20`
+- generated query: `userId`, `from_timestamp`, `to_timestamp`, `recallSource`
+- time fields must be epoch milliseconds; windows larger than 7 days are rejected as `query_window_too_large`
+- live output is shape-only and summarizes record count, observed time range, result/device/IP/origin field presence, and returned field names
+- raw login log records, raw IP values, raw device IDs, and raw upstream full bodies are not output
+- empty records are a source no-data outcome and are not no-risk counterevidence
+- no caller-provided URL, path, header, cookie, token, session, secret, or raw query is accepted
+
 `track_analysis_summary` supports fixed track-analysis sub-interfaces:
 
 - default sub-interface: `getLastestDateTime`

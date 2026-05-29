@@ -440,6 +440,256 @@ test("forbidden action input terms still return 400", async () => {
   }
 });
 
+test("login_logs_search missing user_id returns parameter_error without platform fetch", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("login_logs_search", {});
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "parameter_error");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("login_logs_search builds default seven day online query", () => {
+  const request = buildActionBody(ACTIONS.login_logs_search, {
+    user_id: "444946196"
+  });
+  const parsed = new URL(request.path, "https://user-center-workbench.example.test");
+
+  assert.equal(request.method, "GET");
+  assert.equal(request.body && Object.keys(request.body).length, 0);
+  assert.equal(parsed.pathname, "/rest/unified/log/search");
+  assert.equal(parsed.searchParams.get("userId"), "444946196");
+  assert.equal(parsed.searchParams.get("recallSource"), "2,0,1,3");
+  assert.equal(Number(parsed.searchParams.get("to_timestamp")) - Number(parsed.searchParams.get("from_timestamp")), 7 * 24 * 60 * 60 * 1000);
+  assert.equal(request.displayPath.includes("444946196"), false);
+  assert.equal(request.displayPath.includes("[typed_user_id]"), false);
+});
+
+test("login_logs_search builds explicit timestamp query and recallSource", () => {
+  const request = buildActionBody(ACTIONS.login_logs_search, {
+    user_id: "444946196",
+    from_timestamp: 1780000000000,
+    to_timestamp: 1780086400000,
+    recallSource: "1,3",
+    limit: 10
+  });
+  const parsed = new URL(request.path, "https://user-center-workbench.example.test");
+
+  assert.equal(parsed.pathname, "/rest/unified/log/search");
+  assert.equal(parsed.searchParams.get("userId"), "444946196");
+  assert.equal(parsed.searchParams.get("from_timestamp"), "1780000000000");
+  assert.equal(parsed.searchParams.get("to_timestamp"), "1780086400000");
+  assert.equal(parsed.searchParams.get("recallSource"), "1,3");
+  assert.equal(parsed.searchParams.has("limit"), false);
+});
+
+test("login_logs_search rejects windows larger than seven days", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("login_logs_search", {
+    user_id: "444946196",
+    from_timestamp: 1780000000000,
+    to_timestamp: 1780691200001
+  });
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "query_window_too_large");
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("login_logs_search successful records return completed summary without raw records", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "444946196",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          records: [
+            {
+              loginTime: 1780000001000,
+              loginResult: "SUCCESS_RAW_VALUE",
+              deviceId: "ANDROID_raw_login_device",
+              ip: "10.20.30.40",
+              origin: "APP_RAW_VALUE",
+              rawRecordValue: "raw-login-record-secret"
+            },
+            {
+              loginTime: 1780000002000,
+              loginResult: "DENY_RAW_VALUE",
+              deviceId: "IOS_raw_login_device",
+              clientIp: "10.20.30.41",
+              source: "WEB_RAW_VALUE"
+            }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 420
+    },
+    {
+      latencyMs: 18,
+      originWarmed: true,
+      requestPath: "/rest/unified/log/search?userId=%5Btyped_user_id%5D&from_timestamp=1780000000000&to_timestamp=1780086400000&recallSource=2%2C0%2C1%2C3",
+      requestMethod: "GET"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(response.source_card.path.includes("444946196"), false);
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "completed");
+  assert.equal(summary.records_count, 2);
+  assert.deepEqual(summary.time_window_observed, {
+    from_timestamp: 1780000000000,
+    to_timestamp: 1780086400000
+  });
+  assert.equal(summary.first_login_time_observed, 1780000001000);
+  assert.equal(summary.last_login_time_observed, 1780000002000);
+  assert.equal(summary.login_result_fields_present, true);
+  assert.equal(summary.device_fields_present, true);
+  assert.equal(summary.ip_fields_present, true);
+  assert.equal(summary.origin_fields_present, true);
+  assert.equal(summary.ip_sample_masked, "10.20.*.*");
+  assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=24]");
+  assert.ok(summary.returned_fields_observed.includes("loginTime"));
+  assert.equal(summary.no_data_not_risk_exclusion, true);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("SUCCESS_RAW_VALUE"), false);
+  assert.equal(serialized.includes("DENY_RAW_VALUE"), false);
+  assert.equal(serialized.includes("ANDROID_raw_login_device"), false);
+  assert.equal(serialized.includes("10.20.30.40"), false);
+  assert.equal(serialized.includes("raw-login-record-secret"), false);
+});
+
+test("login_logs_search empty records returns no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "444946196",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({ code: 0, data: { records: [] } }),
+      bodyTruncated: false,
+      observedBytes: 36
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(response.status, "no_data");
+  assert.equal(response.source_status, "no_data");
+  assert.equal(response.error_type, null);
+  assert.equal(response.data.response_summary.login_logs.records_count, 0);
+  assert.equal(response.data.response_summary.login_logs.no_data, true);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("login_logs_search HTML login page is classified as auth_failed", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "<html><title>SSO Login</title><body>login logs auth required</body></html>",
+      bodyTruncated: false,
+      observedBytes: 76
+    },
+    { latencyMs: 12, originWarmed: true }
+  );
+
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(JSON.stringify(response).includes("login logs auth required"), false);
+});
+
+test("login_logs_search platform and network errors stay standardized", async () => {
+  const config = createLiveConfig();
+  const platformResponse = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: false,
+      status: 500,
+      bodyText: JSON.stringify({ code: 500, message: "login logs failed" }),
+      bodyTruncated: false,
+      observedBytes: 44
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(platformResponse.status, "blocked");
+  assert.equal(platformResponse.error_type, "platform_error");
+  assert.ok(platformResponse.source_card);
+  assert.ok(platformResponse.source_quality);
+  assert.equal(JSON.stringify(platformResponse).includes("login logs failed"), false);
+
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      login_logs: prewarmResult(config, "login_logs")
+    },
+    runErrors: {
+      login_logs_search: new Error("Failed to fetch")
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("login_logs", warmStateReady(config, "login_logs"));
+  const networkResponse = await service.executeAction("login_logs_search", { user_id: "444946196" });
+
+  assert.equal(networkResponse.status, "blocked");
+  assert.equal(networkResponse.error_type, "network_error");
+  assert.equal(networkResponse.sensitive_output, false);
+  assert.ok(networkResponse.source_card);
+  assert.ok(networkResponse.source_quality);
+});
+
+test("login_logs_search forbidden inputs are rejected", async () => {
+  const service = createService();
+  for (const key of ["url", "path", "header", "cookie", "token", "session", "secret", "raw_query"]) {
+    await assert.rejects(
+      () => service.executeAction("login_logs_search", { user_id: "444946196", [key]: "blocked" }),
+      (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
+    );
+  }
+});
+
 test("weapon_inventory missing typed params returns parameter_error without platform fetch", async () => {
   const config = createLiveConfig();
   const fakeClient = new FakeBrowserClient(config);
