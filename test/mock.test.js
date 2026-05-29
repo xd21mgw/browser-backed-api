@@ -438,16 +438,56 @@ test("rcp_snapshot builds fixed eventList body from typed params", () => {
   assert.equal(request.body.startTime, "2026-05-29 10:00:00");
   assert.equal(request.body.endTime, "2026-05-29 10:30:00");
   assert.equal(request.body.currentTime, "2026-05-29 10:30:00");
-  assert.deepEqual(request.body.eventV2, {
-    eventType: "REGISTER",
-    sourceIds: "source-demo"
-  });
+  assert.deepEqual(Object.keys(request.body.eventV2), [
+    "eventType",
+    "hitPolicies",
+    "version",
+    "status",
+    "snapshotVersion",
+    "sourceIds",
+    "realTimeOp",
+    "isPolicyTreeExperiment",
+    "conditionList",
+    "grayFeature",
+    "grayQueryStatus",
+    "region"
+  ]);
+  assert.equal(request.body.eventV2.eventType, "REGISTER");
+  assert.deepEqual(request.body.eventV2.hitPolicies, []);
+  assert.equal(request.body.eventV2.version, "");
+  assert.equal(request.body.eventV2.status, "");
+  assert.equal(request.body.eventV2.snapshotVersion, "");
+  assert.equal(request.body.eventV2.sourceIds, "source-demo");
+  assert.equal(request.body.eventV2.realTimeOp, "");
+  assert.equal(request.body.eventV2.isPolicyTreeExperiment, false);
+  assert.equal(request.body.eventV2.grayFeature, false);
+  assert.equal(request.body.eventV2.grayQueryStatus, false);
+  assert.equal(request.body.eventV2.region, "");
   assert.deepEqual(request.body.conditionList, [
     [
       {
-        field: "deviceId",
-        operator: "=",
-        value: "device-demo"
+        key: "deviceId",
+        logic: "=",
+        value: "device-demo",
+        id: 1,
+        seq: 1,
+        keyType: "event",
+        description: "deviceId",
+        rightDataType: "STRING"
+      }
+    ]
+  ]);
+  assert.deepEqual(request.body.eventV2.conditionList, [
+    [
+      {
+        key: "deviceId",
+        logic: "=",
+        value: "device-demo",
+        id: 1,
+        seq: 1,
+        keyType: "event",
+        description: "deviceId",
+        rightDataType: "STRING"
       }
     ]
   ]);
@@ -455,6 +495,51 @@ test("rcp_snapshot builds fixed eventList body from typed params", () => {
     page: 2,
     pageSize: 100
   });
+});
+
+test("rcp_snapshot status message wrapper is classified as request body shape error", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    {},
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        status: 500,
+        message: "request rejected",
+        host: "shape-only-host",
+        port: 0,
+        timestamp: "2026-05-29 10:01:00",
+        traceId: "shape-only-trace",
+        traceSampled: false
+      }),
+      bodyTruncated: false,
+      observedBytes: 160
+    },
+    {
+      latencyMs: 12,
+      originWarmed: true,
+      requestPath: "/v2/rest/event/eventList",
+      requestMethod: "POST"
+    }
+  );
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "wrong_request_body_shape");
+  assert.deepEqual(response.data.response_summary.rcp_snapshot.response_wrapper_paths_present, {
+    data_eventList: false,
+    data_pagination: false,
+    data_tableHeaderList: false
+  });
+  assert.equal(response.data.response_summary.rcp_snapshot.response_error_category, "wrong_request_body_shape");
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("request rejected"), false);
+  assert.equal(serialized.includes("shape-only-host"), false);
+  assert.equal(serialized.includes("shape-only-trace"), false);
 });
 
 test("rcp_snapshot epoch time input returns wrong_time_field_format without platform fetch", async () => {
