@@ -1,0 +1,178 @@
+# Browser-Backed API Service POC
+
+Local service skeleton for fixed browser-backed actions using an existing Chrome profile.
+
+The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and does not touch real platforms.
+
+## Goals Covered
+
+- Keeps a long-lived Playwright persistent browser context in `SERVICE_MODE=live`.
+- Uses `/Users/pengcheng/chrome-agent-auth-profile` as `userDataDir` by default.
+- Prewarms the fixed RCP, Weapon, Login Logs, and Track Analysis origins in live mode.
+- Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
+- Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
+- Adds `source_card` and `source_quality` to every action response.
+- Does not call Playwright cookie/session/header inspection APIs.
+- Does not return full raw live responses; live mode returns status plus JSON shape only.
+- Exposes Dennis runtime-oriented health, prewarm, action latency, and source quality metadata.
+
+## Files
+
+- `src/server.js` - HTTP service and routes.
+- `src/actions.js` - fixed action registry and mock payloads.
+- `src/browser.js` - Playwright persistent context and same-origin fetch executor.
+- `src/config.js` - environment loading and fixed-origin validation.
+- `src/quality.js` - `source_card`, `source_quality`, and shape-only summarization.
+
+## Run Mock Mode
+
+```sh
+npm run start:mock
+```
+
+Mock examples:
+
+```sh
+curl http://localhost:8787/health
+curl http://localhost:8787/actions
+curl -X POST http://localhost:8787/prewarm
+curl -X POST http://localhost:8787/actions/rcp_snapshot \
+  -H 'content-type: application/json' \
+  -d '{"accountId":"demo","dateRange":{"from":"2026-05-01","to":"2026-05-29"}}'
+```
+
+The service binds to `127.0.0.1` by default. Override `HOST` only if you intentionally want a different bind address.
+
+## Run Live Mode
+
+Install dependencies first if they are not already present:
+
+```sh
+npm install
+```
+
+Set fixed origins in `.env` or the shell, then start live mode:
+
+```sh
+SERVICE_MODE=live \
+RCP_ORIGIN=https://rcp.example.com \
+WEAPON_ORIGIN=https://weapon.example.com \
+LOGIN_LOGS_ORIGIN=https://login-logs.example.com \
+TRACK_ANALYSIS_ORIGIN=https://track-analysis.example.com \
+npm run start:live
+```
+
+Live mode starts a long-lived Playwright persistent context with:
+
+```txt
+userDataDir=/Users/pengcheng/chrome-agent-auth-profile
+channel=chrome
+headless=true
+```
+
+If a normal Chrome instance has the same profile locked, close it or point `USER_DATA_DIR` to a copied profile before running live mode.
+
+## Chrome Profile
+
+The default `USER_DATA_DIR` is:
+
+```txt
+/Users/pengcheng/chrome-agent-auth-profile
+```
+
+The service allows the browser to use its ambient profile state during same-origin `fetch()` calls, but it does not call cookie/session/header inspection APIs and does not return those values.
+
+## API
+
+### `GET /health`
+
+Returns readiness metadata for Dennis runtime integration:
+
+```json
+{
+  "ok": true,
+  "service_mode": "mock",
+  "browser_initialized": false,
+  "context_initialized": false,
+  "warmed_origins": [],
+  "uptime_ms": 123,
+  "action_count": 4
+}
+```
+
+`warmed_origins` contains one entry per fixed origin with `status`, `latency_ms`, and `error_type`.
+
+### `GET /actions`
+
+Lists fixed actions and their input contracts. The allowlist is exactly:
+
+- `rcp_snapshot`
+- `weapon_inventory`
+- `login_logs_search`
+- `track_analysis_summary`
+
+### `POST /prewarm`
+
+Mock mode returns simulated readiness. Live mode navigates each persistent page to its configured fixed origin/prewarm path and verifies the final page origin.
+
+Each result contains:
+
+- `status`: `simulated`, `ready`, `error`, or `not_warmed`
+- `latency_ms`
+- `error_type`: `null`, `timeout`, `origin_mismatch`, `network`, or `unknown`
+
+### `POST /actions/:actionName`
+
+Allowed action names:
+
+- `rcp_snapshot`
+- `weapon_inventory`
+- `login_logs_search`
+- `track_analysis_summary`
+
+Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
+
+Every action response includes:
+
+- `latency_ms`
+- `origin_warmed`
+- `sensitive_output: false`
+- `source_card`
+- `source_quality`
+
+## Safety Boundaries
+
+- No endpoint accepts a URL, origin, path, header, cookie, token, or session value from the caller.
+- Live fetches use `credentials: "include"` so the browser may use its own ambient login state, but the service does not read or return that state.
+- Response bodies are read only up to `MAX_LIVE_BODY_BYTES` for summarization, and returned live data is shape-only.
+- Sensitive-looking JSON key names are redacted in shape summaries.
+- Inputs containing URL-like values, raw header fields, raw cookie fields, tokens, sessions, or secrets are rejected with `forbidden_action_input`.
+
+## Live Smoke Checklist
+
+Run this only on the local machine after fixed origins are configured:
+
+```sh
+npm install
+npm run start:live
+curl http://127.0.0.1:8787/health
+curl -X POST http://127.0.0.1:8787/prewarm
+curl -X POST http://127.0.0.1:8787/actions/rcp_snapshot \
+  -H 'content-type: application/json' \
+  -d '{"accountId":"demo"}'
+```
+
+Verify:
+
+- `/health` reports `service_mode: "live"`, `browser_initialized: true`, and `context_initialized: true`.
+- `/prewarm` returns one result per fixed origin and no unexpected `origin_mismatch`.
+- action responses include `source_card`, `source_quality`, `latency_ms`, `origin_warmed`, and `sensitive_output: false`.
+- no response contains raw cookies, tokens, sessions, request headers, or a full raw upstream response body.
+
+## Local Checks
+
+```sh
+npm run check
+```
+
+`npm run check` runs syntax checks and mock tests for health, actions, prewarm, action metadata, arbitrary URL rejection, and raw header/cookie rejection.
