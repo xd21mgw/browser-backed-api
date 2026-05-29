@@ -1,5 +1,15 @@
-import { ACTIONS, buildActionBody, buildLiveActionResponse, getAction, listActions, runMockAction, validateActionInput } from "./actions.js";
+import {
+  ACTIONS,
+  buildActionBody,
+  buildLiveActionFailureResponse,
+  buildLiveActionResponse,
+  getAction,
+  listActions,
+  runMockAction,
+  validateActionInput
+} from "./actions.js";
 import { BrowserBackedClient } from "./browser.js";
+import { sanitizeErrorMessage, sourceStatusFromErrorType } from "./diagnostics.js";
 
 export class BrowserBackedApiService {
   constructor(config, browserClient = null) {
@@ -62,11 +72,19 @@ export class BrowserBackedApiService {
           key: domain.key,
           domain: domain.label,
           origin: "mock",
+          configured_origin: "mock",
           prewarm_path: domain.prewarmPath,
+          initial_url: "mock:/",
+          final_url: "mock:/",
+          final_origin: "mock",
+          same_origin_expected: true,
+          same_origin_actual: true,
+          navigation_status: "simulated",
           status: "simulated",
           warmed: true,
           latency_ms: Date.now() - startedAt,
           error_type: null,
+          error_message_sanitized: null,
           warmed_at: new Date().toISOString()
         };
         this.warmState.set(domain.key, result);
@@ -74,13 +92,15 @@ export class BrowserBackedApiService {
       }
 
       const liveResult = await this.browserClient.prewarmDomain(domain.key);
+      const warmed = liveResult.status === "ready" && liveResult.same_origin_actual === true;
       const result = {
         ...liveResult,
-        status: "ready",
-        warmed: true,
+        status: warmed ? "ready" : "error",
+        warmed,
         latency_ms: Date.now() - startedAt,
-        error_type: null,
-        warmed_at: new Date().toISOString()
+        error_type: liveResult.error_type || null,
+        error_message_sanitized: liveResult.error_message_sanitized || null,
+        warmed_at: warmed ? new Date().toISOString() : null
       };
       this.warmState.set(domain.key, result);
       return result;
@@ -89,11 +109,19 @@ export class BrowserBackedApiService {
         key: domain.key,
         domain: domain.label,
         origin: domain.origin || "unconfigured",
+        configured_origin: domain.origin || "unconfigured",
         prewarm_path: domain.prewarmPath,
+        initial_url: null,
+        final_url: null,
+        final_origin: null,
+        same_origin_expected: true,
+        same_origin_actual: false,
+        navigation_status: "error",
         status: "error",
         warmed: false,
         latency_ms: Date.now() - startedAt,
         error_type: classifyError(error),
+        error_message_sanitized: sanitizeErrorMessage(error),
         warmed_at: null
       };
       this.warmState.set(domain.key, result);
@@ -124,11 +152,36 @@ export class BrowserBackedApiService {
 
     const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
     const actionRequest = buildActionBody(action, input);
-    const fetchResult = await this.browserClient.runAction(action, actionRequest);
-    return buildLiveActionResponse(action, input, this.config, fetchResult, {
-      latencyMs: Date.now() - startedAt,
-      originWarmed
-    });
+    const actionDiagnostics = this.browserClient.actionDiagnostics(action, originWarmed);
+
+    if (!actionDiagnostics.origin_match) {
+      const errorType = this.warmState.get(action.domainKey)?.error_type || "origin_mismatch";
+      return buildLiveActionFailureResponse(action, input, this.config, {
+        latencyMs: Date.now() - startedAt,
+        originWarmed,
+        actionDiagnostics,
+        errorType,
+        sourceStatus: sourceStatusFromErrorType(errorType)
+      });
+    }
+
+    try {
+      const fetchResult = await this.browserClient.runAction(action, actionRequest);
+      return buildLiveActionResponse(action, input, this.config, fetchResult, {
+        latencyMs: Date.now() - startedAt,
+        originWarmed,
+        actionDiagnostics
+      });
+    } catch (error) {
+      const errorType = classifyError(error);
+      return buildLiveActionFailureResponse(action, input, this.config, {
+        latencyMs: Date.now() - startedAt,
+        originWarmed,
+        actionDiagnostics: this.browserClient.actionDiagnostics(action, originWarmed),
+        errorType,
+        sourceStatus: sourceStatusFromErrorType(errorType)
+      });
+    }
   }
 
   warmedOrigins() {
@@ -147,26 +200,34 @@ function defaultWarmState(domain, config) {
     key: domain.key,
     domain: domain.label,
     origin: config.mode === "mock" ? "mock" : domain.origin || "unconfigured",
+    configured_origin: config.mode === "mock" ? "mock" : domain.origin || "unconfigured",
     prewarm_path: domain.prewarmPath,
+    initial_url: null,
+    final_url: null,
+    final_origin: null,
+    same_origin_expected: true,
+    same_origin_actual: false,
+    navigation_status: "not_started",
     status: "not_warmed",
     warmed: false,
     latency_ms: null,
     error_type: null,
+    error_message_sanitized: null,
     warmed_at: null
   };
 }
 
 function classifyError(error) {
   if (error?.name === "TimeoutError" || /timeout/i.test(error?.message || "")) {
-    return "timeout";
+    return "navigation_timeout";
   }
   if (/origin/i.test(error?.message || "")) {
     return "origin_mismatch";
   }
   if (/net::|navigation|fetch|connection|dns|host/i.test(error?.message || "")) {
-    return "network";
+    return "network_error";
   }
-  return "unknown";
+  return "page_load_error";
 }
 
 export function publicError(statusCode, code, publicMessage) {

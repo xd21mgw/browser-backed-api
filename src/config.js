@@ -1,33 +1,40 @@
+import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_USER_DATA_DIR = "/Users/pengcheng/chrome-agent-auth-profile";
 
 export function loadConfig(env = process.env) {
-  const mode = env.SERVICE_MODE || "mock";
+  const effectiveEnv = env === process.env ? loadLocalEnv(env) : env;
+  const mode = effectiveEnv.SERVICE_MODE || "mock";
   if (!["mock", "live"].includes(mode)) {
     throw new Error("SERVICE_MODE must be either mock or live");
   }
 
   const config = {
     mode,
-    port: parsePort(env.PORT || "8787"),
-    host: env.HOST || "127.0.0.1",
-    userDataDir: path.resolve(env.USER_DATA_DIR || DEFAULT_USER_DATA_DIR),
+    port: parsePort(effectiveEnv.PORT || "8787"),
+    host: effectiveEnv.HOST || "127.0.0.1",
+    userDataDir: path.resolve(effectiveEnv.USER_DATA_DIR || DEFAULT_USER_DATA_DIR),
     browser: {
-      headless: env.BROWSER_HEADLESS !== "false",
-      channel: env.PLAYWRIGHT_CHANNEL || "chrome",
-      requestTimeoutMs: parsePositiveInt(env.REQUEST_TIMEOUT_MS || "15000", "REQUEST_TIMEOUT_MS"),
-      maxLiveBodyBytes: parsePositiveInt(env.MAX_LIVE_BODY_BYTES || "65536", "MAX_LIVE_BODY_BYTES")
+      headless: effectiveEnv.BROWSER_HEADLESS !== "false",
+      channel: effectiveEnv.PLAYWRIGHT_CHANNEL || "chrome",
+      requestTimeoutMs: parsePositiveInt(effectiveEnv.REQUEST_TIMEOUT_MS || "15000", "REQUEST_TIMEOUT_MS"),
+      maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || "65536", "MAX_LIVE_BODY_BYTES")
     },
     domains: {
-      rcp: domainConfig("rcp", "RCP", env.RCP_ORIGIN, env.RCP_PREWARM_PATH || "/"),
-      weapon: domainConfig("weapon", "Weapon", env.WEAPON_ORIGIN, env.WEAPON_PREWARM_PATH || "/"),
-      login_logs: domainConfig("login_logs", "Login Logs", env.LOGIN_LOGS_ORIGIN, env.LOGIN_LOGS_PREWARM_PATH || "/"),
+      rcp: domainConfig("rcp", "RCP", effectiveEnv.RCP_ORIGIN, effectiveEnv.RCP_PREWARM_PATH || "/"),
+      weapon: domainConfig("weapon", "Weapon", effectiveEnv.WEAPON_ORIGIN, effectiveEnv.WEAPON_PREWARM_PATH || "/"),
+      login_logs: domainConfig(
+        "login_logs",
+        "Login Logs",
+        effectiveEnv.LOGIN_LOGS_ORIGIN,
+        effectiveEnv.LOGIN_LOGS_PREWARM_PATH || "/"
+      ),
       track_analysis: domainConfig(
         "track_analysis",
         "Track Analysis",
-        env.TRACK_ANALYSIS_ORIGIN,
-        env.TRACK_ANALYSIS_PREWARM_PATH || "/"
+        effectiveEnv.TRACK_ANALYSIS_ORIGIN,
+        effectiveEnv.TRACK_ANALYSIS_PREWARM_PATH || "/"
       )
     }
   };
@@ -37,6 +44,45 @@ export function loadConfig(env = process.env) {
   }
 
   return config;
+}
+
+function loadLocalEnv(env) {
+  const localEnv = parseDotEnv(".env");
+  return { ...localEnv, ...env };
+}
+
+function parseDotEnv(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const parsed = {};
+  for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    parsed[key] = stripOptionalQuotes(value);
+  }
+  return parsed;
+}
+
+function stripOptionalQuotes(value) {
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 function parsePort(raw) {

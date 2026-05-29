@@ -1,3 +1,5 @@
+import { classifyNavigation, originFromUrl, sanitizeErrorMessage, sanitizeUrl } from "./diagnostics.js";
+
 export class BrowserBackedClient {
   constructor(config) {
     this.config = config;
@@ -43,22 +45,65 @@ export class BrowserBackedClient {
     this.pages.set(domainKey, page);
 
     const target = new URL(domain.prewarmPath, domain.origin).toString();
-    await page.goto(target, {
-      waitUntil: "domcontentloaded",
-      timeout: this.config.browser.requestTimeoutMs
-    });
+    let response = null;
+    let navigationError = null;
 
-    const currentOrigin = new URL(page.url()).origin;
-    if (currentOrigin !== domain.origin) {
-      throw new Error(`Prewarm for ${domain.label} ended at ${currentOrigin}; expected ${domain.origin}`);
+    try {
+      response = await page.goto(target, {
+        waitUntil: "domcontentloaded",
+        timeout: this.config.browser.requestTimeoutMs
+      });
+    } catch (error) {
+      navigationError = error;
     }
+
+    const finalUrl = safePageUrl(page);
+    const finalOrigin = originFromUrl(finalUrl);
+    const navigationStatus = navigationError ? "error" : response?.status() ?? "no_response";
+    const sameOriginActual = Boolean(finalOrigin && finalOrigin === domain.origin);
+    const errorType = classifyNavigation({
+      error: navigationError,
+      finalUrl,
+      finalOrigin,
+      expectedOrigin: domain.origin,
+      navigationStatus
+    });
+    const errorMessage = navigationError
+      ? sanitizeErrorMessage(navigationError)
+      : errorType
+        ? `Navigation ended outside configured origin`
+        : null;
 
     return {
       key: domain.key,
       domain: domain.label,
       origin: domain.origin,
+      configured_origin: domain.origin,
       prewarm_path: domain.prewarmPath,
-      status: "ready"
+      initial_url: sanitizeUrl(target),
+      final_url: sanitizeUrl(finalUrl),
+      final_origin: finalOrigin,
+      same_origin_expected: true,
+      same_origin_actual: sameOriginActual,
+      navigation_status: navigationStatus,
+      status: errorType ? "error" : "ready",
+      error_type: errorType,
+      error_message_sanitized: errorMessage
+    };
+  }
+
+  actionDiagnostics(action, originWarmed = false) {
+    const domain = this.config.domains[action.domainKey];
+    const page = this.pages.get(action.domainKey) || null;
+    const pageUrl = page ? safePageUrl(page) : null;
+    const boundPageOrigin = originFromUrl(pageUrl);
+
+    return {
+      action_name: action.name,
+      expected_origin: domain?.origin || null,
+      bound_page_origin: boundPageOrigin,
+      origin_warmed: Boolean(originWarmed),
+      origin_match: Boolean(boundPageOrigin && domain?.origin && boundPageOrigin === domain.origin)
     };
   }
 
@@ -72,9 +117,12 @@ export class BrowserBackedClient {
       page = this.pages.get(action.domainKey);
     }
 
-    const currentOrigin = new URL(page.url()).origin;
-    if (currentOrigin !== domain.origin) {
-      throw new Error(`Action ${action.name} page is at ${currentOrigin}; expected ${domain.origin}`);
+    const diagnostics = this.actionDiagnostics(action, true);
+    if (!diagnostics.origin_match) {
+      const error = new Error(`Action page origin mismatch for ${action.name}`);
+      error.code = "origin_mismatch";
+      error.diagnostics = diagnostics;
+      throw error;
     }
 
     return page.evaluate(
@@ -172,5 +220,13 @@ export class BrowserBackedClient {
       browser_initialized: this.browserInitialized,
       context_initialized: Boolean(this.context)
     };
+  }
+}
+
+function safePageUrl(page) {
+  try {
+    return page.url();
+  } catch {
+    return null;
   }
 }

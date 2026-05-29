@@ -1,4 +1,5 @@
 import { normalizeRelativePath } from "./config.js";
+import { classifyHttpStatus, sourceStatusFromErrorType } from "./diagnostics.js";
 import { buildSourceCard, buildSourceQuality, summarizeJsonShape } from "./quality.js";
 
 export const ACTION_ALLOWLIST = Object.freeze([
@@ -198,6 +199,10 @@ export function runMockAction(action, input, config, meta = {}) {
 export function buildLiveActionResponse(action, input, config, fetchResult, meta = {}) {
   validateActionInput(input);
   const parsed = parseJson(fetchResult.bodyText);
+  const httpErrorType = classifyHttpStatus(fetchResult.status);
+  const parseErrorType = parsed.ok ? null : "parse_error";
+  const errorType = httpErrorType || parseErrorType;
+  const sourceStatus = errorType ? sourceStatusFromErrorType(errorType) : "ok";
   const data = {
     http_status: fetchResult.status,
     ok: fetchResult.ok,
@@ -217,12 +222,61 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
   return {
     action: action.name,
     mode: "live",
+    status: sourceStatus,
+    source_status: sourceStatus,
+    error_type: errorType,
     latency_ms: meta.latencyMs ?? null,
     origin_warmed: Boolean(meta.originWarmed),
     sensitive_output: false,
+    action_diagnostics: meta.actionDiagnostics || null,
     data,
-    source_card: buildSourceCard({ action, config, fetchMeta: fetchResult, mock: false, meta }),
-    source_quality: buildSourceQuality({ action, fetchMeta: fetchResult, mock: false, meta })
+    source_card: buildSourceCard({
+      action,
+      config,
+      fetchMeta: fetchResult,
+      mock: false,
+      meta: { ...meta, sourceStatus, errorType }
+    }),
+    source_quality: buildSourceQuality({
+      action,
+      fetchMeta: fetchResult,
+      mock: false,
+      meta: { ...meta, sourceStatus, errorType }
+    })
+  };
+}
+
+export function buildLiveActionFailureResponse(action, input, config, meta = {}) {
+  validateActionInput(input);
+  const errorType = meta.errorType || "page_load_error";
+  const sourceStatus = meta.sourceStatus || sourceStatusFromErrorType(errorType);
+  const fetchMeta = {
+    completed: false,
+    ok: false,
+    status: null,
+    bodyTruncated: false,
+    observedBytes: 0
+  };
+
+  return {
+    action: action.name,
+    mode: "live",
+    status: sourceStatus,
+    source_status: sourceStatus,
+    error_type: errorType,
+    latency_ms: meta.latencyMs ?? null,
+    origin_warmed: Boolean(meta.originWarmed),
+    sensitive_output: false,
+    action_diagnostics: meta.actionDiagnostics || null,
+    data: {
+      http_status: null,
+      ok: false,
+      body_truncated: false,
+      observed_bytes: 0,
+      response_summary: null
+    },
+    source_card: buildSourceCard({ action, config, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } }),
+    source_quality: buildSourceQuality({ action, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } })
   };
 }
 

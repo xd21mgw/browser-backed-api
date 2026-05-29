@@ -11,8 +11,11 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     captured_at: new Date().toISOString(),
     transport: mock ? "synthetic" : "playwright_page_evaluate_fetch",
     user_data_dir: config.userDataDir,
+    source_status: meta.sourceStatus || (fetchMeta.ok ? "ok" : "blocked"),
+    error_type: meta.errorType || null,
     origin_warmed: Boolean(meta.originWarmed),
     latency_ms: meta.latencyMs ?? null,
+    action_diagnostics: meta.actionDiagnostics || null,
     body_policy: {
       raw_response_full_body_returned: false,
       max_live_body_bytes_observed: config.browser.maxLiveBodyBytes,
@@ -37,6 +40,9 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
   ];
 
   checks.push({ name: "origin_warmed_reported", passed: typeof meta.originWarmed === "boolean" });
+  if (meta.actionDiagnostics) {
+    checks.push({ name: "bound_page_origin_matches_expected", passed: meta.actionDiagnostics.origin_match !== false });
+  }
 
   if (!mock) {
     checks.push({ name: "browser_fetch_completed", passed: Boolean(fetchMeta.completed) });
@@ -48,16 +54,34 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
   const score = Number(Math.min(baseScore + passedCount * 0.04, mock ? 0.55 : 0.9).toFixed(2));
 
   return {
-    level: mock ? "mock_only" : fetchMeta.ok ? "transport_verified_shape_only" : "transport_attempted",
+    level: qualityLevel({ mock, fetchMeta, meta }),
     score,
     checks,
-    warnings: mock
-      ? ["Synthetic response only; no real platform was accessed."]
-      : [
-          "Live response is summarized by shape only in this POC.",
-          "Action-specific extraction should be implemented after local live validation."
-        ]
+    warnings: qualityWarnings({ mock, meta })
   };
+}
+
+function qualityLevel({ mock, fetchMeta, meta }) {
+  if (mock) {
+    return "mock_only";
+  }
+  if (meta.sourceStatus && meta.sourceStatus !== "ok") {
+    return `${meta.sourceStatus}_${meta.errorType || "source_error"}`;
+  }
+  return fetchMeta.ok ? "transport_verified_shape_only" : "transport_attempted";
+}
+
+function qualityWarnings({ mock, meta }) {
+  if (mock) {
+    return ["Synthetic response only; no real platform was accessed."];
+  }
+  if (meta.sourceStatus && meta.sourceStatus !== "ok") {
+    return [`Live source status is ${meta.sourceStatus}; response body was not returned.`];
+  }
+  return [
+    "Live response is summarized by shape only in this POC.",
+    "Action-specific extraction should be implemented after local live validation."
+  ];
 }
 
 export function summarizeJsonShape(value, depth = 0) {
