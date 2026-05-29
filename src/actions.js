@@ -28,8 +28,9 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
 const TRACK_ANALYSIS_PROFILE_PATH = "/dp/platform/app/analytics/v2/sequence/profile";
+const TRACK_ANALYSIS_DEVICE_IDS_PATH = "/dp/platform/app/analytics/v2/sequence/getDeviceIds";
 const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
-const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration", "profile"]);
+const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration", "profile", "getDeviceIds"]);
 const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
 const TRACK_ANALYSIS_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -139,7 +140,7 @@ export const ACTIONS = Object.freeze({
       user_id: "required string when device_id is absent",
       device_id: "required string when user_id is absent",
       appName: "required enum: KUAISHOU | NEBULA",
-      sub_interface: "optional enum: getLastestDateTime | getUseDuration | profile; default getLastestDateTime",
+      sub_interface: "optional enum: getLastestDateTime | getUseDuration | profile | getDeviceIds; default getLastestDateTime",
       time_window: "optional { startTime, endTime }; profile defaults to the recent 30-day window"
     },
     validateParams: validateTrackAnalysisInput,
@@ -154,6 +155,7 @@ export const ACTIONS = Object.freeze({
       uid_did_relation_latest_datetime_present: trackAnalysisSubInterface(input) === "getLastestDateTime",
       activity_summary: mockTrackAnalysisActivitySummary(input),
       profile_summary: mockTrackAnalysisProfileSummary(input),
+      device_summary: mockTrackAnalysisDeviceSummary(input),
       generated_at: fixedMockTime()
     })
   })
@@ -546,8 +548,8 @@ function validateTrackAnalysisInput(input) {
   }
   if (!TRACK_ANALYSIS_SUB_INTERFACES.includes(subInterface)) {
     return {
-      message: "track_analysis_summary sub_interface must be getLastestDateTime, getUseDuration, or profile",
-      required: ["sub_interface=getLastestDateTime|getUseDuration|profile"]
+      message: "track_analysis_summary sub_interface must be getLastestDateTime, getUseDuration, profile, or getDeviceIds",
+      required: ["sub_interface=getLastestDateTime|getUseDuration|profile|getDeviceIds"]
     };
   }
   if (typeof input.appName !== "string" || !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
@@ -566,6 +568,9 @@ function buildTrackAnalysisRequest(input) {
   }
   if (subInterface === "profile") {
     return buildTrackAnalysisProfileRequest(input);
+  }
+  if (subInterface === "getDeviceIds") {
+    return buildTrackAnalysisDeviceIdsRequest(input);
   }
   return buildTrackAnalysisLatestDateRequest(input);
 }
@@ -618,6 +623,20 @@ function buildTrackAnalysisProfileRequest(input) {
   };
 }
 
+function buildTrackAnalysisDeviceIdsRequest(input) {
+  const entityKey = Object.hasOwn(input, "device_id") ? "deviceId" : "userId";
+  return {
+    path: TRACK_ANALYSIS_DEVICE_IDS_PATH,
+    method: "POST",
+    body: {
+      appName: input.appName,
+      funcType: TRACK_ANALYSIS_FUNC_TYPE,
+      _t: String(Date.now()),
+      [entityKey]: input[entityKey === "deviceId" ? "device_id" : "user_id"]
+    }
+  };
+}
+
 function summarizeTrackAnalysisResponse(value, input) {
   const subInterface = trackAnalysisSubInterface(input);
   if (subInterface === "getUseDuration") {
@@ -625,6 +644,9 @@ function summarizeTrackAnalysisResponse(value, input) {
   }
   if (subInterface === "profile") {
     return summarizeTrackAnalysisProfileResponse(value, input);
+  }
+  if (subInterface === "getDeviceIds") {
+    return summarizeTrackAnalysisDeviceIdsResponse(value, input);
   }
   return summarizeTrackAnalysisLatestDateResponse(value, input);
 }
@@ -739,6 +761,43 @@ function summarizeTrackAnalysisProfileResponse(value, input) {
         no_data: noData,
         no_data_not_risk_exclusion: true,
         profile_summary: profileSummary
+      }
+    }
+  };
+}
+
+function summarizeTrackAnalysisDeviceIdsResponse(value, input) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 200].includes(apiCode)) {
+    return {
+      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
+      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
+      summary: {
+        track_analysis: {
+          sub_interface: "getDeviceIds",
+          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+          appName: input.appName,
+          api_code: apiCode,
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const deviceSummary = buildDeviceSummary(value);
+  const noData = isDeviceSummaryEmpty(deviceSummary);
+  return {
+    sourceStatus: noData ? "no_data" : "completed",
+    errorType: null,
+    summary: {
+      track_analysis: {
+        sub_interface: "getDeviceIds",
+        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+        appName: input.appName,
+        output_fields_observed: deviceSummary.output_fields_observed,
+        no_data: noData,
+        no_data_not_risk_exclusion: true,
+        device_summary: deviceSummary
       }
     }
   };
@@ -929,6 +988,108 @@ function isProfileSummaryEmpty(summary) {
   );
 }
 
+function buildDeviceSummary(value) {
+  const data = value && typeof value === "object" ? value.data : null;
+  const { entries, sourcePath } = extractDeviceEntries(data);
+  const deviceIds = entries.map(deviceIdFromEntry).filter((item) => item !== null && item !== undefined && String(item).length > 0);
+  const uniqueDeviceIds = [...new Set(deviceIds.map((item) => String(item)))];
+  const fieldKeys = deviceFieldsObserved(entries);
+  const outputFields = deviceOutputFields(sourcePath, entries, fieldKeys);
+
+  return {
+    device_ids_count: uniqueDeviceIds.length > 0 ? uniqueDeviceIds.length : entries.length,
+    device_id_sample_masked: uniqueDeviceIds.length > 0 ? maskDeviceId(uniqueDeviceIds[0]) : null,
+    device_fields_observed: fieldKeys,
+    device_model_fields_present: containsProfileSignal(fieldKeys, /(device.*model|model|机型|设备型号)/i),
+    last_active_fields_present: containsProfileSignal(fieldKeys, /(last.*active|active.*time|last.*login|latest|recent|活跃|最近|时间|日期)/i),
+    output_fields_observed: outputFields
+  };
+}
+
+function extractDeviceEntries(data) {
+  if (Array.isArray(data)) {
+    return { entries: data.filter(isDeviceEntry), sourcePath: "data[]" };
+  }
+  if (!data || typeof data !== "object") {
+    return { entries: [], sourcePath: "data" };
+  }
+
+  const arrayCandidates = [
+    ["data.deviceIds", data.deviceIds],
+    ["data.device_ids", data.device_ids],
+    ["data.devices", data.devices],
+    ["data.deviceList", data.deviceList],
+    ["data.device_list", data.device_list],
+    ["data.rows", data.rows],
+    ["data.records", data.records],
+    ["data.list", data.list],
+    ["data.data", data.data]
+  ];
+  for (const [sourcePath, candidate] of arrayCandidates) {
+    if (Array.isArray(candidate)) {
+      return { entries: candidate.filter(isDeviceEntry), sourcePath };
+    }
+  }
+
+  if (deviceIdFromEntry(data) !== null || deviceFieldsObserved([data]).length > 0) {
+    return { entries: [data], sourcePath: "data" };
+  }
+  return { entries: [], sourcePath: "data" };
+}
+
+function isDeviceEntry(value) {
+  return ["string", "number"].includes(typeof value) || Boolean(value && typeof value === "object");
+}
+
+function deviceIdFromEntry(entry) {
+  if (typeof entry === "string" || typeof entry === "number") {
+    return entry;
+  }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+  for (const key of Object.keys(entry)) {
+    if (/^(deviceId|device_id|did|deviceDid|device_did|deviceNo|device_no)$/i.test(key)) {
+      const value = entry[key];
+      if (typeof value === "string" || typeof value === "number") {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function deviceFieldsObserved(entries) {
+  const keys = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    keys.push(...observedKeys(entry));
+  }
+  return [...new Set(keys)].slice(0, 50);
+}
+
+function deviceOutputFields(sourcePath, entries, fieldKeys) {
+  if (entries.length === 0) {
+    return [];
+  }
+  const normalizedBase = sourcePath && sourcePath.endsWith("[]") ? sourcePath : `${sourcePath || "data"}[]`;
+  if (fieldKeys.length === 0) {
+    return [normalizedBase];
+  }
+  return fieldKeys.map((key) => `${normalizedBase}.${safeFieldName(key)}`).slice(0, 80);
+}
+
+function maskDeviceId(value) {
+  const text = String(value);
+  return `[masked_device_id:length=${text.length}]`;
+}
+
+function isDeviceSummaryEmpty(summary) {
+  return summary.device_ids_count === 0 && summary.device_fields_observed.length === 0 && summary.output_fields_observed.length === 0;
+}
+
 function observedKeys(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return [];
@@ -1014,6 +1175,24 @@ function mockTrackAnalysisProfileSummary(input) {
       "data.profile.firstLevelProfile.userId",
       "data.profile.secondLevelProfile[].label",
       "data.profile.secondLevelProfile[].value"
+    ]
+  };
+}
+
+function mockTrackAnalysisDeviceSummary(input) {
+  if (trackAnalysisSubInterface(input) !== "getDeviceIds") {
+    return null;
+  }
+  return {
+    device_ids_count: 2,
+    device_id_sample_masked: "[masked_device_id:length=17]",
+    device_fields_observed: ["deviceId", "deviceModel", "lastActiveTime"],
+    device_model_fields_present: true,
+    last_active_fields_present: true,
+    output_fields_observed: [
+      "data.deviceIds[].deviceId",
+      "data.deviceIds[].deviceModel",
+      "data.deviceIds[].lastActiveTime"
     ]
   };
 }

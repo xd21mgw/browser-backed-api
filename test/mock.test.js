@@ -564,6 +564,53 @@ test("track_analysis_summary builds fixed profile request from typed params", ()
   assert.equal(Object.hasOwn(request.body, "url"), false);
 });
 
+test("track_analysis_summary getDeviceIds missing typed params returns parameter_error", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("track_analysis_summary", {
+    sub_interface: "getDeviceIds",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "parameter_error");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("track_analysis_summary builds fixed getDeviceIds request from typed params", () => {
+  const request = buildActionBody(ACTIONS.track_analysis_summary, {
+    sub_interface: "getDeviceIds",
+    user_id: "demo-user",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(request.method, "POST");
+  assert.equal(request.path, "/dp/platform/app/analytics/v2/sequence/getDeviceIds");
+  assert.equal(request.body.appName, "KUAISHOU");
+  assert.equal(request.body.funcType, "USER_PROFILE_QUERY");
+  assert.equal(request.body.userId, "demo-user");
+  assert.equal(typeof request.body._t, "string");
+  assert.equal(Object.hasOwn(request.body, "url"), false);
+  assert.equal(Object.hasOwn(request.body, "path"), false);
+
+  const deviceRequest = buildActionBody(ACTIONS.track_analysis_summary, {
+    sub_interface: "getDeviceIds",
+    device_id: "ANDROID_demo",
+    appName: "NEBULA"
+  });
+
+  assert.equal(deviceRequest.path, "/dp/platform/app/analytics/v2/sequence/getDeviceIds");
+  assert.equal(deviceRequest.body.appName, "NEBULA");
+  assert.equal(deviceRequest.body.deviceId, "ANDROID_demo");
+  assert.equal(Object.hasOwn(deviceRequest.body, "userId"), false);
+});
+
 test("track_analysis_summary successful live JSON returns completed shape-only source result", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -719,6 +766,64 @@ test("track_analysis_summary profile successful JSON returns profile summary wit
   assert.equal(serialized.includes("ANDROID_raw_device_id"), false);
 });
 
+test("track_analysis_summary getDeviceIds successful JSON returns device summary without raw values", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getDeviceIds", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          deviceIds: [
+            {
+              deviceId: "ANDROID_raw_device_id_1",
+              deviceModel: "raw-model-value",
+              lastActiveTime: "raw-active-time-value",
+              debugValue: "raw-device-debug-value"
+            },
+            {
+              deviceId: "IOS_raw_device_id_2",
+              deviceModel: "raw-second-model-value",
+              lastActiveTime: "raw-second-active-time-value"
+            }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 360
+    },
+    {
+      latencyMs: 20,
+      originWarmed: true,
+      requestPath: "/dp/platform/app/analytics/v2/sequence/getDeviceIds",
+      requestMethod: "POST"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(response.source_card.method, "POST");
+  assert.equal(response.source_card.path, "/dp/platform/app/analytics/v2/sequence/getDeviceIds");
+  const summary = response.data.response_summary.track_analysis.device_summary;
+  assert.equal(summary.device_ids_count, 2);
+  assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=23]");
+  assert.equal(summary.device_model_fields_present, true);
+  assert.equal(summary.last_active_fields_present, true);
+  assert.deepEqual(summary.device_fields_observed, ["deviceId", "deviceModel", "lastActiveTime", "debugValue"]);
+  assert.ok(summary.output_fields_observed.includes("data.deviceIds[].deviceId"));
+  assert.ok(summary.output_fields_observed.includes("data.deviceIds[].lastActiveTime"));
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("ANDROID_raw_device_id_1"), false);
+  assert.equal(serialized.includes("raw-model-value"), false);
+  assert.equal(serialized.includes("raw-device-debug-value"), false);
+});
+
 test("track_analysis_summary HTML login page is classified as auth_failed without raw body", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -797,6 +902,32 @@ test("track_analysis_summary profile HTML login page is classified as auth_faile
   assert.equal(JSON.stringify(response).includes("profile login required"), false);
 });
 
+test("track_analysis_summary getDeviceIds HTML login page is classified as auth_failed", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getDeviceIds", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "<html><title>SSO Login</title><body>device login required</body></html>",
+      bodyTruncated: false,
+      observedBytes: 72
+    },
+    { latencyMs: 12, originWarmed: true }
+  );
+
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(JSON.stringify(response).includes("device login required"), false);
+});
+
 test("track_analysis_summary empty data returns no_data without risk exclusion", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -871,6 +1002,31 @@ test("track_analysis_summary profile empty data returns no_data without risk exc
   assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
 });
 
+test("track_analysis_summary getDeviceIds empty data returns no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getDeviceIds", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({ code: 0, data: { deviceIds: [] } }),
+      bodyTruncated: false,
+      observedBytes: 32
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(response.status, "no_data");
+  assert.equal(response.source_status, "no_data");
+  assert.equal(response.error_type, null);
+  assert.equal(response.data.response_summary.track_analysis.no_data, true);
+  assert.equal(response.data.response_summary.track_analysis.device_summary.device_ids_count, 0);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
 test("track_analysis_summary platform and network errors stay standardized", async () => {
   const config = createLiveConfig();
   const platformResponse = buildLiveActionResponse(
@@ -904,6 +1060,51 @@ test("track_analysis_summary platform and network errors stay standardized", asy
   const service = new BrowserBackedApiService(config, fakeClient);
   service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
   const networkResponse = await service.executeAction("track_analysis_summary", {
+    user_id: "demo-user",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(networkResponse.status, "blocked");
+  assert.equal(networkResponse.error_type, "network_error");
+  assert.equal(networkResponse.sensitive_output, false);
+  assert.ok(networkResponse.source_card);
+  assert.ok(networkResponse.source_quality);
+});
+
+test("track_analysis_summary getDeviceIds platform and network errors stay standardized", async () => {
+  const config = createLiveConfig();
+  const platformResponse = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getDeviceIds", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: false,
+      status: 500,
+      bodyText: JSON.stringify({ code: 500, data: null }),
+      bodyTruncated: false,
+      observedBytes: 28
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(platformResponse.status, "blocked");
+  assert.equal(platformResponse.error_type, "platform_error");
+  assert.ok(platformResponse.source_card);
+  assert.ok(platformResponse.source_quality);
+
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      track_analysis: prewarmResult(config, "track_analysis")
+    },
+    runErrors: {
+      track_analysis_summary: new Error("Failed to fetch")
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
+  const networkResponse = await service.executeAction("track_analysis_summary", {
+    sub_interface: "getDeviceIds",
     user_id: "demo-user",
     appName: "KUAISHOU"
   });
