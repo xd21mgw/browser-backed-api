@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACTIONS, ACTION_ALLOWLIST, buildLiveActionResponse } from "../src/actions.js";
+import { ACTIONS, ACTION_ALLOWLIST, buildActionBody, buildLiveActionResponse } from "../src/actions.js";
 import { BrowserBackedClient } from "../src/browser.js";
 import { loadConfig } from "../src/config.js";
 import { BrowserBackedApiService } from "../src/service.js";
@@ -79,7 +79,8 @@ test("each action returns source card, source quality, latency, warm state, and 
     const response = await service.executeAction(actionName, {
       accountId: "demo",
       workspaceId: "workspace",
-      trackId: "track",
+      user_id: "track-user",
+      appName: "KUAISHOU",
       query: "sample",
       limit: 10
     });
@@ -310,7 +311,7 @@ test("action detects SSO drift and attempts one lazy rewarm", async () => {
   const service = new BrowserBackedApiService(config, fakeClient);
   service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
 
-  const response = await service.executeAction("track_analysis_summary", { trackId: "demo" });
+  const response = await service.executeAction("track_analysis_summary", { user_id: "demo", appName: "KUAISHOU" });
 
   assert.deepEqual(fakeClient.prewarmCalls, ["track_analysis"]);
   assert.equal(response.lazy_rewarm_attempted, true);
@@ -451,6 +452,173 @@ test("live response shape summary does not include raw response body values", ()
   assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
 });
 
+test("track_analysis_summary missing typed params returns parameter_error without platform fetch", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("track_analysis_summary", { appName: "KUAISHOU" });
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "parameter_error");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.prewarmCalls, []);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("track_analysis_summary builds fixed getLastestDateTime relative path from typed params", () => {
+  const request = buildActionBody(ACTIONS.track_analysis_summary, {
+    user_id: "demo-user",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(request.method, "GET");
+  assert.equal(request.body && Object.keys(request.body).length, 0);
+  assert.equal(request.path.startsWith("/dp/platform/app/analytics/v2/sequence/getLastestDateTime?"), true);
+  assert.equal(request.path.includes("product=KUAISHOU"), true);
+  assert.equal(request.path.includes("type=userId"), true);
+  assert.equal(request.path.includes("funcType=USER_PROFILE_QUERY"), true);
+  assert.equal(request.path.includes("_t="), true);
+  assert.equal(request.path.includes("demo-user"), false);
+});
+
+test("track_analysis_summary successful live JSON returns completed shape-only source result", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          lastestDateTime: "raw-latest-value",
+          uidDidRelLatestDateTime: "raw-relation-value"
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 120
+    },
+    {
+      latencyMs: 15,
+      originWarmed: true,
+      requestPath: "/dp/platform/app/analytics/v2/sequence/getLastestDateTime?product=KUAISHOU&type=userId&funcType=USER_PROFILE_QUERY&_t=1"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(response.data.response_summary.track_analysis.sub_interface, "getLastestDateTime");
+  assert.equal(response.data.response_summary.track_analysis.latest_datetime_present, true);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("raw-latest-value"), false);
+  assert.equal(serialized.includes("raw-relation-value"), false);
+});
+
+test("track_analysis_summary HTML login page is classified as auth_failed without raw body", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { device_id: "ANDROID_demo", appName: "NEBULA" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "<html><title>SSO Login</title><body>login required</body></html>",
+      bodyTruncated: false,
+      observedBytes: 64
+    },
+    { latencyMs: 12, originWarmed: true }
+  );
+
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(JSON.stringify(response).includes("login required"), false);
+});
+
+test("track_analysis_summary empty data returns no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({ code: 0, data: {} }),
+      bodyTruncated: false,
+      observedBytes: 20
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(response.status, "no_data");
+  assert.equal(response.source_status, "no_data");
+  assert.equal(response.error_type, null);
+  assert.equal(response.data.response_summary.track_analysis.no_data, true);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("track_analysis_summary platform and network errors stay standardized", async () => {
+  const config = createLiveConfig();
+  const platformResponse = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: false,
+      status: 500,
+      bodyText: JSON.stringify({ code: 500, data: null }),
+      bodyTruncated: false,
+      observedBytes: 28
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(platformResponse.status, "blocked");
+  assert.equal(platformResponse.error_type, "platform_error");
+  assert.ok(platformResponse.source_card);
+  assert.ok(platformResponse.source_quality);
+
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      track_analysis: prewarmResult(config, "track_analysis")
+    },
+    runErrors: {
+      track_analysis_summary: new Error("Failed to fetch")
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
+  const networkResponse = await service.executeAction("track_analysis_summary", {
+    user_id: "demo-user",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(networkResponse.status, "blocked");
+  assert.equal(networkResponse.error_type, "network_error");
+  assert.equal(networkResponse.sensitive_output, false);
+  assert.ok(networkResponse.source_card);
+  assert.ok(networkResponse.source_quality);
+});
+
 class FakeBrowserClient {
   constructor(config, options = {}) {
     this.config = config;
@@ -458,6 +626,7 @@ class FakeBrowserClient {
     this.diagnostics = options.diagnostics || {};
     this.diagnosticCalls = new Map();
     this.fetchResults = options.fetchResults || {};
+    this.runErrors = options.runErrors || {};
     this.prewarmCalls = [];
     this.runCalls = [];
   }
@@ -506,10 +675,15 @@ class FakeBrowserClient {
   }
 
   async runAction(action, actionRequest) {
+    if (this.runErrors[action.name]) {
+      throw this.runErrors[action.name];
+    }
     this.runCalls.push({
       actionName: action.name,
       domainKey: action.domainKey,
-      path: actionRequest.path
+      path: actionRequest.path,
+      method: actionRequest.method,
+      body: actionRequest.body
     });
     return this.fetchResults[action.name] || {
       completed: true,

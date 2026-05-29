@@ -91,6 +91,7 @@ export function classifyNavigation({ error = null, finalUrl = null, finalOrigin 
 export function sourceStatusFromErrorType(errorType) {
   switch (errorType) {
     case "auth_redirect":
+    case "auth_failed":
     case "login_page":
     case "landing_flow_blocked":
       return "auth_failed";

@@ -1,9 +1,11 @@
 import {
   ACTIONS,
   buildActionBody,
+  buildActionParameterErrorResponse,
   buildLiveActionFailureResponse,
   buildLiveActionResponse,
   getAction,
+  getActionParameterError,
   listActions,
   runMockAction,
   validateActionInput
@@ -162,6 +164,16 @@ export class BrowserBackedApiService {
     validateActionInput(input);
 
     const startedAt = Date.now();
+    const parameterError = getActionParameterError(action, input);
+    if (parameterError) {
+      const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
+      return buildActionParameterErrorResponse(action, this.config, {
+        latencyMs: Date.now() - startedAt,
+        originWarmed,
+        parameterError
+      });
+    }
+
     if (this.config.mode === "mock") {
       const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
       return runMockAction(action, input, this.config, {
@@ -203,6 +215,7 @@ export class BrowserBackedApiService {
         actionDiagnostics,
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
+        requestPath: actionRequest.path,
         ...lazyMeta
       });
     }
@@ -213,6 +226,7 @@ export class BrowserBackedApiService {
         latencyMs: Date.now() - startedAt,
         originWarmed,
         actionDiagnostics,
+        requestPath: actionRequest.path,
         ...lazyMeta
       });
     } catch (error) {
@@ -223,6 +237,7 @@ export class BrowserBackedApiService {
         actionDiagnostics: this.browserClient.actionDiagnostics(action, originWarmed),
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
+        requestPath: actionRequest.path,
         ...lazyMeta
       });
     }

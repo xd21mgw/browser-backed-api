@@ -6,7 +6,7 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     domain: domain.label,
     origin: mock ? "mock" : domain.origin,
     method: action.method,
-    path: action.apiPath,
+    path: meta.requestPath || action.apiPath,
     mode: mock ? "mock" : "live",
     captured_at: new Date().toISOString(),
     transport: mock ? "synthetic" : "playwright_page_evaluate_fetch",
@@ -64,7 +64,9 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
     level: qualityLevel({ mock, fetchMeta, meta }),
     score,
     checks,
-    warnings: qualityWarnings({ mock, meta })
+    warnings: qualityWarnings({ mock, meta }),
+    no_data_not_risk_exclusion: true,
+    no_hit_not_risk_exclusion: true
   };
 }
 
@@ -72,7 +74,7 @@ function qualityLevel({ mock, fetchMeta, meta }) {
   if (mock) {
     return "mock_only";
   }
-  if (meta.sourceStatus && meta.sourceStatus !== "ok") {
+  if (meta.sourceStatus && !["ok", "completed"].includes(meta.sourceStatus)) {
     return `${meta.sourceStatus}_${meta.errorType || "source_error"}`;
   }
   return fetchMeta.ok ? "transport_verified_shape_only" : "transport_attempted";

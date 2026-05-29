@@ -18,8 +18,15 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "cursor",
   "query",
   "severity",
-  "trackId"
+  "user_id",
+  "device_id",
+  "appName",
+  "time_window"
 ]);
+
+const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
+const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
+const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
 
 const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "url",
@@ -120,19 +127,25 @@ export const ACTIONS = Object.freeze({
   track_analysis_summary: freezeAction({
     name: "track_analysis_summary",
     domainKey: "track_analysis",
-    description: "Return a compact track-analysis summary for a fixed track-analysis origin.",
-    method: "POST",
-    apiPath: "/api/track-analysis/summary",
+    description: "Return a compact track-analysis getLastestDateTime shape summary for a fixed track-analysis origin.",
+    method: "GET",
+    apiPath: TRACK_ANALYSIS_LATEST_DATE_PATH,
     inputContract: {
-      trackId: "optional string",
-      dateRange: "optional { from, to }",
-      filters: "optional object"
+      user_id: "required string when device_id is absent",
+      device_id: "required string when user_id is absent",
+      appName: "required enum: KUAISHOU | NEBULA",
+      time_window: "optional object; not used by getLastestDateTime"
     },
+    validateParams: validateTrackAnalysisInput,
+    buildRequest: buildTrackAnalysisLatestDateRequest,
+    summarizeLiveResponse: summarizeTrackAnalysisLatestDateResponse,
     mockData: (input) => ({
-      track_id: typeof input.trackId === "string" ? input.trackId : "mock-track",
-      segments: 12,
-      anomalies: 2,
-      confidence: "mock",
+      sub_interface: "getLastestDateTime",
+      entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+      appName: input.appName,
+      shape_summary_only: true,
+      latest_datetime_present: true,
+      uid_did_relation_latest_datetime_present: true,
       generated_at: fixedMockTime()
     })
   })
@@ -166,6 +179,21 @@ export function getAction(name) {
 export function buildActionBody(action, input) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
+  const parameterError = getActionParameterError(action, safeInput);
+  if (parameterError) {
+    const error = new Error(parameterError.message);
+    error.code = "parameter_error";
+    error.parameterError = parameterError;
+    throw error;
+  }
+  if (typeof action.buildRequest === "function") {
+    const request = action.buildRequest(safeInput);
+    return {
+      path: normalizeRelativePath(request.path, `${action.name}.requestPath`),
+      method: request.method || action.method,
+      body: request.body || {}
+    };
+  }
   return {
     path: action.apiPath,
     method: action.method,
@@ -176,6 +204,13 @@ export function buildActionBody(action, input) {
 export function runMockAction(action, input, config, meta = {}) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
+  const parameterError = getActionParameterError(action, safeInput);
+  if (parameterError) {
+    return buildActionParameterErrorResponse(action, config, {
+      ...meta,
+      parameterError
+    });
+  }
   const data = action.mockData(safeInput);
   const fetchMeta = {
     ok: true,
@@ -198,11 +233,18 @@ export function runMockAction(action, input, config, meta = {}) {
 
 export function buildLiveActionResponse(action, input, config, fetchResult, meta = {}) {
   validateActionInput(input);
+  const safeInput = sanitizeInput(input);
   const parsed = parseJson(fetchResult.bodyText);
   const httpErrorType = classifyHttpStatus(fetchResult.status);
-  const parseErrorType = parsed.ok ? null : "parse_error";
-  const errorType = httpErrorType || parseErrorType;
-  const sourceStatus = errorType ? sourceStatusFromErrorType(errorType) : "ok";
+  const parseErrorType = parsed.ok ? null : classifyUnparseableBody(fetchResult.bodyText);
+  const actionSummary = parsed.ok && typeof action.summarizeLiveResponse === "function"
+    ? action.summarizeLiveResponse(parsed.value, safeInput)
+    : {};
+  const transportErrorType = httpErrorType || parseErrorType;
+  const errorType = transportErrorType || actionSummary.errorType || null;
+  const sourceStatus = transportErrorType
+    ? sourceStatusFromErrorType(transportErrorType)
+    : actionSummary.sourceStatus || (errorType ? sourceStatusFromErrorType(errorType) : "ok");
   const data = {
     http_status: fetchResult.status,
     ok: fetchResult.ok,
@@ -211,7 +253,8 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
     response_summary: parsed.ok
       ? {
           format: "json",
-          shape: summarizeJsonShape(parsed.value)
+          shape: summarizeJsonShape(parsed.value),
+          ...(actionSummary.summary || {})
         }
       : {
           format: "non_json_or_unparseable",
@@ -290,6 +333,53 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
   };
 }
 
+export function buildActionParameterErrorResponse(action, config, meta = {}) {
+  const errorType = "parameter_error";
+  const sourceStatus = "parameter_error";
+  const fetchMeta = {
+    completed: false,
+    ok: false,
+    status: null,
+    bodyTruncated: false,
+    observedBytes: 0
+  };
+
+  return {
+    action: action.name,
+    mode: config.mode,
+    status: sourceStatus,
+    source_status: sourceStatus,
+    error_type: errorType,
+    latency_ms: meta.latencyMs ?? null,
+    origin_warmed: Boolean(meta.originWarmed),
+    sensitive_output: false,
+    data: {
+      http_status: null,
+      ok: false,
+      body_truncated: false,
+      observed_bytes: 0,
+      response_summary: null,
+      parameter_error: {
+        message: meta.parameterError?.message || "Missing or invalid action parameters",
+        required: meta.parameterError?.required || []
+      }
+    },
+    source_card: buildSourceCard({
+      action,
+      config,
+      fetchMeta,
+      mock: config.mode === "mock",
+      meta: { ...meta, sourceStatus, errorType }
+    }),
+    source_quality: buildSourceQuality({
+      action,
+      fetchMeta,
+      mock: config.mode === "mock",
+      meta: { ...meta, sourceStatus, errorType }
+    })
+  };
+}
+
 export function validateActionInput(input) {
   if (!input || typeof input !== "object") {
     return;
@@ -303,6 +393,13 @@ export function validateActionInput(input) {
     error.publicMessage = "Action input may not include URLs, paths, headers, cookies, tokens, sessions, or secrets";
     throw error;
   }
+}
+
+export function getActionParameterError(action, input) {
+  if (typeof action.validateParams !== "function") {
+    return null;
+  }
+  return action.validateParams(input || {});
 }
 
 function freezeAction(action) {
@@ -409,6 +506,111 @@ function parseJson(text) {
   } catch {
     return { ok: false, value: null };
   }
+}
+
+function classifyUnparseableBody(text) {
+  const sample = String(text || "").slice(0, 4096).toLowerCase();
+  if (/<html|<!doctype/.test(sample) && /(sso|login|signin|sign-in|passport|auth)/i.test(sample)) {
+    return "auth_failed";
+  }
+  return "parse_error";
+}
+
+function validateTrackAnalysisInput(input) {
+  const hasUserId = typeof input.user_id === "string" && input.user_id.trim().length > 0;
+  const hasDeviceId = typeof input.device_id === "string" && input.device_id.trim().length > 0;
+  if (hasUserId === hasDeviceId) {
+    return {
+      message: "track_analysis_summary requires exactly one of user_id or device_id",
+      required: ["user_id xor device_id", "appName"]
+    };
+  }
+  if (typeof input.appName !== "string" || !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
+    return {
+      message: "track_analysis_summary requires appName to be KUAISHOU or NEBULA",
+      required: ["appName=KUAISHOU|NEBULA"]
+    };
+  }
+  return null;
+}
+
+function buildTrackAnalysisLatestDateRequest(input) {
+  const entityType = Object.hasOwn(input, "device_id") ? "deviceId" : "userId";
+  const params = new URLSearchParams({
+    product: input.appName,
+    type: entityType,
+    funcType: TRACK_ANALYSIS_FUNC_TYPE,
+    _t: String(Date.now())
+  });
+  return {
+    path: `${TRACK_ANALYSIS_LATEST_DATE_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function summarizeTrackAnalysisLatestDateResponse(value, input) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 200].includes(apiCode)) {
+    return {
+      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
+      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
+      summary: {
+        track_analysis: {
+          sub_interface: "getLastestDateTime",
+          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+          appName: input.appName,
+          api_code: apiCode,
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const data = value && typeof value === "object" ? value.data : null;
+  const noData = isEmptyPayload(data);
+  return {
+    sourceStatus: noData ? "no_data" : "completed",
+    errorType: null,
+    summary: {
+      track_analysis: {
+        sub_interface: "getLastestDateTime",
+        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+        appName: input.appName,
+        latest_datetime_present: Boolean(data && typeof data === "object" && Object.hasOwn(data, "lastestDateTime")),
+        uid_did_relation_latest_datetime_present: Boolean(
+          data && typeof data === "object" && Object.hasOwn(data, "uidDidRelLatestDateTime")
+        ),
+        no_data: noData,
+        no_data_not_risk_exclusion: true
+      }
+    }
+  };
+}
+
+function readApiCode(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  for (const key of ["code", "result", "status"]) {
+    if (typeof value[key] === "number") {
+      return value[key];
+    }
+  }
+  return null;
+}
+
+function isEmptyPayload(value) {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length === 0;
+  }
+  return false;
 }
 
 function scopeFromInput(input) {
