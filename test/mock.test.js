@@ -453,48 +453,34 @@ test("rcp_snapshot builds fixed eventList body from typed params", () => {
     "region"
   ]);
   assert.equal(request.body.eventV2.eventType, "REGISTER");
-  assert.deepEqual(request.body.eventV2.hitPolicies, []);
+  assert.equal(request.body.eventV2.hitPolicies, "");
   assert.equal(request.body.eventV2.version, "");
-  assert.equal(request.body.eventV2.status, "");
+  assert.equal(request.body.eventV2.status, 2);
   assert.equal(request.body.eventV2.snapshotVersion, "");
   assert.equal(request.body.eventV2.sourceIds, "source-demo");
   assert.equal(request.body.eventV2.realTimeOp, "");
   assert.equal(request.body.eventV2.isPolicyTreeExperiment, false);
-  assert.equal(request.body.eventV2.grayFeature, false);
-  assert.equal(request.body.eventV2.grayQueryStatus, false);
-  assert.equal(request.body.eventV2.region, "");
-  assert.deepEqual(request.body.conditionList, [
-    [
-      {
-        key: "deviceId",
-        logic: "=",
-        value: "device-demo",
-        id: 1,
-        seq: 1,
-        keyType: "event",
-        description: "deviceId",
-        rightDataType: "STRING"
-      }
-    ]
-  ]);
+  assert.equal(request.body.eventV2.grayFeature, "");
+  assert.equal(request.body.eventV2.grayQueryStatus, 0);
+  assert.equal(request.body.eventV2.region, "china");
+  assert.equal(Object.hasOwn(request.body, "conditionList"), false);
   assert.deepEqual(request.body.eventV2.conditionList, [
     [
       {
         key: "deviceId",
-        logic: "=",
+        logic: "term",
         value: "device-demo",
-        id: 1,
-        seq: 1,
-        keyType: "event",
-        description: "deviceId",
-        rightDataType: "STRING"
+        id: "00000000-0000-4000-8000-000000000000",
+        seq: 0,
+        keyType: "主表",
+        description: "",
+        rightDataType: "C"
       }
     ]
   ]);
-  assert.deepEqual(request.body.pagination, {
-    page: 2,
-    pageSize: 100
-  });
+  assert.equal(Object.hasOwn(request.body, "pagination"), false);
+  assert.equal(request.body.pageIndex, 2);
+  assert.equal(request.body.pageSize, 100);
 });
 
 test("rcp_snapshot uses HAR-like body template with typed overrides", () => {
@@ -510,23 +496,46 @@ test("rcp_snapshot uses HAR-like body template with typed overrides", () => {
     "endTime",
     "currentTime",
     "eventV2",
-    "conditionList",
-    "pagination"
+    "pageIndex",
+    "pageSize"
   ]);
   assert.equal(typeof request.body.startTime, "string");
   assert.equal(typeof request.body.endTime, "string");
   assert.equal(typeof request.body.currentTime, "string");
-  assert.equal(request.body.eventV2.eventType, "REGISTER");
+  assert.equal(request.body.eventV2.eventType, "USER_REGISTER_NEW");
   assert.equal(request.body.eventV2.sourceIds, "source-a,source-b");
   assert.equal(Array.isArray(request.body.eventV2.sourceIds), false);
+  assert.equal(typeof request.body.eventV2.hitPolicies, "string");
+  assert.equal(typeof request.body.eventV2.grayFeature, "string");
+  assert.equal(request.body.eventV2.grayQueryStatus, 0);
+  assert.equal(request.body.eventV2.status, 2);
   assert.deepEqual(request.body.eventV2.conditionList, []);
-  assert.deepEqual(request.body.conditionList, []);
-  assert.deepEqual(request.body.pagination, { page: 1, pageSize: 200 });
+  assert.equal(Object.hasOwn(request.body, "conditionList"), false);
+  assert.equal(Object.hasOwn(request.body, "pagination"), false);
+  assert.equal(request.body.pageIndex, 1);
+  assert.equal(request.body.pageSize, 200);
   assert.ok(request.body.tableHeaderList.every((column) => {
     return typeof column.column_name === "string" && typeof column.column_comment === "string";
   }));
   assert.equal(JSON.stringify(request.body).includes("\"field\""), false);
   assert.equal(JSON.stringify(request.body).includes("\"operator\""), false);
+});
+
+test("rcp_snapshot selected_columns only changes tableHeaderList", () => {
+  const defaultRequest = buildActionBody(ACTIONS.rcp_snapshot, {});
+  const selectedRequest = buildActionBody(ACTIONS.rcp_snapshot, {
+    selected_columns: ["sourceId", "eventId"]
+  });
+
+  assert.deepEqual(selectedRequest.body.tableHeaderList, [
+    { column_name: "sourceId", column_comment: "sourceId" },
+    { column_name: "eventId", column_comment: "eventId" }
+  ]);
+  assert.deepEqual(selectedRequest.body.eventV2, defaultRequest.body.eventV2);
+  assert.equal(selectedRequest.body.pageIndex, defaultRequest.body.pageIndex);
+  assert.equal(selectedRequest.body.pageSize, defaultRequest.body.pageSize);
+  assert.equal(selectedRequest.body.startTime.length, 19);
+  assert.equal(selectedRequest.body.endTime.length, 19);
 });
 
 test("rcp_snapshot status message wrapper is classified as request body shape error", () => {

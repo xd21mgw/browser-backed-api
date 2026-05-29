@@ -24,6 +24,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "startTime",
   "endTime",
   "page",
+  "pageIndex",
   "pageSize",
   "selected_columns",
   "user_id",
@@ -34,16 +35,16 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
 ]);
 
 const RCP_EVENT_LIST_PATH = "/v2/rest/event/eventList";
-const RCP_DEFAULT_EVENT_TYPE = "REGISTER";
+const RCP_DEFAULT_EVENT_TYPE = "USER_REGISTER_NEW";
 const RCP_DEFAULT_WINDOW_MS = 30 * 60 * 1000;
 const RCP_DEFAULT_PAGE = 1;
-const RCP_DEFAULT_PAGE_SIZE = 200;
+const RCP_DEFAULT_PAGE_SIZE = 40;
 const RCP_MAX_PAGE_SIZE = 500;
 const RCP_DEFAULT_VERSION = "";
-const RCP_DEFAULT_STATUS = "";
+const RCP_DEFAULT_STATUS = 2;
 const RCP_DEFAULT_SNAPSHOT_VERSION = "";
 const RCP_DEFAULT_REAL_TIME_OP = "";
-const RCP_DEFAULT_REGION = "";
+const RCP_DEFAULT_REGION = "china";
 const RCP_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const RCP_DEFAULT_TABLE_COLUMNS = Object.freeze([
   "sourceId",
@@ -110,15 +111,16 @@ export const ACTIONS = Object.freeze({
     method: "POST",
     apiPath: RCP_EVENT_LIST_PATH,
     inputContract: {
-      eventType: "optional string; default REGISTER",
+      eventType: "optional string; default USER_REGISTER_NEW",
       source_id: "optional string; maps to eventV2.sourceIds",
       sourceIds: "optional string or string[]; maps to eventV2.sourceIds string",
-      device_id: "optional string; maps to conditionList",
+      device_id: "optional string; maps to eventV2.conditionList",
       startTime: "optional YYYY-MM-DD HH:mm:ss",
       endTime: "optional YYYY-MM-DD HH:mm:ss",
       time_window: "optional { startTime, endTime } in YYYY-MM-DD HH:mm:ss",
-      page: "optional positive integer; default 1",
-      pageSize: "optional positive integer <= 500; default 200",
+      pageIndex: "optional positive integer; default 1",
+      page: "optional positive integer alias for pageIndex",
+      pageSize: "optional positive integer <= 500; default 40",
       selected_columns: "optional string[]; converted to tableHeaderList object array"
     },
     validateParams: validateRcpSnapshotInput,
@@ -632,6 +634,14 @@ function validateRcpSnapshotInput(input) {
     };
   }
 
+  if (Object.hasOwn(input, "pageIndex") && !validPositiveInteger(input.pageIndex)) {
+    return {
+      message: "rcp_snapshot pageIndex must be a positive integer",
+      required: ["pageIndex positive integer"],
+      errorType: "invalid_parameter"
+    };
+  }
+
   if (Object.hasOwn(input, "pageSize") && (!validPositiveInteger(input.pageSize) || input.pageSize > RCP_MAX_PAGE_SIZE)) {
     return {
       message: `rcp_snapshot pageSize must be a positive integer <= ${RCP_MAX_PAGE_SIZE}`,
@@ -688,7 +698,7 @@ function validateRcpTimeInput(input) {
 function buildRcpSnapshotRequest(input) {
   const timeWindow = rcpTimeWindow(input);
   const tableHeaderList = rcpTableHeaderList(input.selected_columns);
-  const page = Object.hasOwn(input, "page") ? Math.trunc(input.page) : RCP_DEFAULT_PAGE;
+  const pageIndex = rcpPageIndex(input);
   const pageSize = Object.hasOwn(input, "pageSize") ? Math.trunc(input.pageSize) : RCP_DEFAULT_PAGE_SIZE;
   const conditionList = rcpConditionList(input);
   const body = rcpEventListHarBodyTemplate();
@@ -700,8 +710,8 @@ function buildRcpSnapshotRequest(input) {
   body.eventV2.eventType = isNonEmptyString(input.eventType) ? input.eventType.trim() : RCP_DEFAULT_EVENT_TYPE;
   body.eventV2.sourceIds = rcpSourceIdsString(input) || "";
   body.eventV2.conditionList = conditionList;
-  body.conditionList = conditionList;
-  body.pagination = rcpPaginationTemplate(page, pageSize);
+  body.pageIndex = pageIndex;
+  body.pageSize = pageSize;
 
   return {
     path: RCP_EVENT_LIST_PATH,
@@ -1425,6 +1435,16 @@ function rcpTimeWindow(input) {
   };
 }
 
+function rcpPageIndex(input) {
+  if (Object.hasOwn(input, "pageIndex")) {
+    return Math.trunc(input.pageIndex);
+  }
+  if (Object.hasOwn(input, "page")) {
+    return Math.trunc(input.page);
+  }
+  return RCP_DEFAULT_PAGE;
+}
+
 function formatRcpTimestamp(date) {
   const pad = (value) => String(value).padStart(2, "0");
   return [
@@ -1477,15 +1497,15 @@ function rcpEventListHarBodyTemplate() {
     endTime: "",
     currentTime: "",
     eventV2: rcpEventV2HarTemplate(),
-    conditionList: [],
-    pagination: rcpPaginationTemplate()
+    pageIndex: RCP_DEFAULT_PAGE,
+    pageSize: RCP_DEFAULT_PAGE_SIZE
   };
 }
 
 function rcpEventV2HarTemplate() {
   return {
     eventType: RCP_DEFAULT_EVENT_TYPE,
-    hitPolicies: [],
+    hitPolicies: "",
     version: RCP_DEFAULT_VERSION,
     status: RCP_DEFAULT_STATUS,
     snapshotVersion: RCP_DEFAULT_SNAPSHOT_VERSION,
@@ -1493,16 +1513,9 @@ function rcpEventV2HarTemplate() {
     realTimeOp: RCP_DEFAULT_REAL_TIME_OP,
     isPolicyTreeExperiment: false,
     conditionList: [],
-    grayFeature: false,
-    grayQueryStatus: false,
+    grayFeature: "",
+    grayQueryStatus: 0,
     region: RCP_DEFAULT_REGION
-  };
-}
-
-function rcpPaginationTemplate(page = RCP_DEFAULT_PAGE, pageSize = RCP_DEFAULT_PAGE_SIZE) {
-  return {
-    page,
-    pageSize
   };
 }
 
@@ -1513,9 +1526,9 @@ function rcpConditionList(input) {
   const condition = rcpConditionItem({
     key: "deviceId",
     value: input.device_id.trim(),
-    id: 1,
-    seq: 1,
-    description: "deviceId"
+    id: rcpConditionId(0),
+    seq: 0,
+    description: ""
   });
   return [
     [condition]
@@ -1525,14 +1538,18 @@ function rcpConditionList(input) {
 function rcpConditionItem({ key, value, id, seq, description }) {
   return {
     key,
-    logic: "=",
+    logic: "term",
     value,
     id,
     seq,
-    keyType: "event",
+    keyType: "主表",
     description,
-    rightDataType: "STRING"
+    rightDataType: "C"
   };
+}
+
+function rcpConditionId(seq) {
+  return `00000000-0000-4000-8000-${String(seq).padStart(12, "0")}`;
 }
 
 function classifyRcpApiError(value) {
@@ -1648,20 +1665,20 @@ function mockRcpSnapshotData(input) {
       currentTime: "YYYY-MM-DD HH:mm:ss",
       eventV2: {
         eventType: request.body.eventV2.eventType,
-        hitPolicies: "array",
+        hitPolicies: "string",
         version: "string",
-        status: "string",
+        status: "number",
         snapshotVersion: "string",
         sourceIds: "string",
         realTimeOp: "string",
         isPolicyTreeExperiment: "boolean",
         conditionList: "array_of_condition_groups",
-        grayFeature: "boolean",
-        grayQueryStatus: "boolean",
+        grayFeature: "string",
+        grayQueryStatus: "number",
         region: "string"
       },
-      conditionList: "array_of_condition_groups",
-      pagination: request.body.pagination
+      pageIndex: request.body.pageIndex,
+      pageSize: request.body.pageSize
     },
     rcp_snapshot: {
       response_wrapper_paths_present: {
@@ -1671,8 +1688,8 @@ function mockRcpSnapshotData(input) {
       },
       event_count: 1,
       pagination_summary: {
-        page: request.body.pagination.page,
-        pageSize: request.body.pagination.pageSize,
+        page: request.body.pageIndex,
+        pageSize: request.body.pageSize,
         total: 1
       },
       table_header_columns: request.body.tableHeaderList.map((column) => column.column_name),
