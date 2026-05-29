@@ -269,21 +269,34 @@ test("action execution uses the warmed page for the matching fixed origin", asyn
         completed: true,
         ok: true,
         status: 200,
-        bodyText: JSON.stringify({ count: 1, items: [{ id: "shape-only" }] }),
+        bodyText: JSON.stringify({
+          graphData: {
+            code: 0,
+            data: {
+              pointInfoMap: {
+                "demo-user": { nodeType: "user" },
+                ANDROID_shape_only_device: { nodeType: "device", deviceId: "ANDROID_shape_only_device" }
+              },
+              relationEdgeList: [{ from: "demo-user", to: "ANDROID_shape_only_device" }]
+            }
+          },
+          riskDataResults: []
+        }),
         bodyTruncated: false,
-        observedBytes: 48
+        observedBytes: 220
       }
     }
   });
   const service = new BrowserBackedApiService(config, fakeClient);
 
-  const response = await service.executeAction("weapon_inventory", { workspaceId: "demo" });
+  const response = await service.executeAction("weapon_inventory", { user_id: "demo-user" });
 
   assert.deepEqual(fakeClient.prewarmCalls, ["weapon"]);
   assert.equal(fakeClient.runCalls.length, 1);
   assert.equal(fakeClient.runCalls[0].domainKey, "weapon");
   assert.equal(fakeClient.runCalls[0].actionName, "weapon_inventory");
-  assert.equal(response.status, "ok");
+  assert.equal(fakeClient.runCalls[0].path.startsWith("/apiv2/graphData?"), true);
+  assert.equal(response.status, "completed");
   assert.equal(response.source_card.action_diagnostics.expected_origin, "https://weapon.example.test");
 });
 
@@ -345,20 +358,32 @@ test("lazy rewarm success allows the action fetch to continue", async () => {
         completed: true,
         ok: true,
         status: 200,
-        bodyText: JSON.stringify({ items: [{ id: "shape-only" }] }),
+        bodyText: JSON.stringify({
+          graphData: {
+            code: 0,
+            data: {
+              pointInfoMap: {
+                "demo-user": { nodeType: "user" },
+                ANDROID_shape_only_device: { nodeType: "device", deviceId: "ANDROID_shape_only_device" }
+              },
+              relationEdgeList: [{ from: "demo-user", to: "ANDROID_shape_only_device" }]
+            }
+          },
+          riskDataResults: []
+        }),
         bodyTruncated: false,
-        observedBytes: 38
+        observedBytes: 220
       }
     }
   });
   const service = new BrowserBackedApiService(config, fakeClient);
   service.warmState.set("weapon", warmStateReady(config, "weapon"));
 
-  const response = await service.executeAction("weapon_inventory", { workspaceId: "demo" });
+  const response = await service.executeAction("weapon_inventory", { user_id: "demo-user" });
 
   assert.equal(fakeClient.runCalls.length, 1);
-  assert.equal(response.status, "ok");
-  assert.equal(response.source_status, "ok");
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
   assert.equal(response.lazy_rewarm_attempted, true);
   assert.equal(response.lazy_rewarm_status, "ready");
   assert.equal(response.page_ready_before_fetch, true);
@@ -413,6 +438,357 @@ test("forbidden action input terms still return 400", async () => {
       (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
     );
   }
+});
+
+test("weapon_inventory missing typed params returns parameter_error without platform fetch", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("weapon_inventory", {});
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "parameter_error");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("weapon_inventory user_id builds graphData USER_ID to DEVICE_ID query", () => {
+  const request = buildActionBody(ACTIONS.weapon_inventory, {
+    user_id: "444946196"
+  });
+
+  assert.equal(request.method, "GET");
+  assert.equal(request.body && Object.keys(request.body).length, 0);
+  assert.equal(request.path.startsWith("/apiv2/graphData?"), true);
+  assert.equal(request.path.includes("product=KUAISHOU"), true);
+  assert.equal(request.path.includes("productName=KUAISHOU"), true);
+  assert.equal(request.path.includes("groupValue=444946196"), true);
+  assert.equal(request.path.includes("groupKey=USER_ID"), true);
+  assert.equal(request.path.includes("dimKey=DEVICE_ID"), true);
+  assert.equal(request.path.includes("searchLevel=2"), true);
+  assert.equal(request.displayPath.includes("444946196"), false);
+  assert.equal(request.followUp.type, "weapon_graph_risk");
+  assert.equal(request.followUp.riskDataPath, "/apiv2/riskData");
+  assert.equal(request.followUp.includeRiskData, true);
+  assert.equal(request.followUp.maxDeviceIds, 5);
+});
+
+test("weapon_inventory device_id builds graphData DEVICE_ID to USER_ID query", () => {
+  const request = buildActionBody(ACTIONS.weapon_inventory, {
+    device_id: "ANDROID_full_prefix_device"
+  });
+
+  assert.equal(request.method, "GET");
+  assert.equal(request.path.startsWith("/apiv2/graphData?"), true);
+  assert.equal(request.path.includes("groupValue=ANDROID_full_prefix_device"), true);
+  assert.equal(request.path.includes("groupKey=DEVICE_ID"), true);
+  assert.equal(request.path.includes("dimKey=USER_ID"), true);
+  assert.equal(request.displayPath.includes("ANDROID_full_prefix_device"), false);
+});
+
+test("weapon_inventory empty graphData returns completed_no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        graphData: {
+          code: 0,
+          data: {
+            pointInfoMap: {},
+            relationEdgeList: []
+          }
+        },
+        riskDataResults: [],
+        weapon_chain: {
+          riskData_status: "not_executed_missing_device_id"
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 120
+    },
+    {
+      latencyMs: 10,
+      originWarmed: true,
+      requestPath: "/apiv2/graphData?product=KUAISHOU&productName=KUAISHOU&groupValue=%5Btyped_user_id%5D&groupKey=USER_ID&dimKey=DEVICE_ID&searchLevel=2",
+      requestMethod: "GET"
+    }
+  );
+
+  assert.equal(response.status, "completed_no_data");
+  assert.equal(response.source_status, "completed_no_data");
+  assert.equal(response.error_type, null);
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(summary.graph_status, "completed_no_data");
+  assert.equal(summary.pointInfoMap_count, 0);
+  assert.equal(summary.relationEdgeList_count, 0);
+  assert.equal(summary.riskData_status, "not_executed_missing_device_id");
+  assert.equal(summary.no_data_not_risk_exclusion, true);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("weapon_inventory graphData device IDs drive riskData summary", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify(weaponCombinedResponse({
+        pointInfoMap: {
+          "444946196": { nodeType: "user" },
+          ANDROID_raw_device_1: { nodeType: "device", deviceId: "ANDROID_raw_device_1" },
+          IOS_raw_device_2: { nodeType: "device", deviceId: "IOS_raw_device_2" }
+        },
+        relationEdgeList: [{ from: "444946196", to: "ANDROID_raw_device_1" }]
+      })),
+      bodyTruncated: false,
+      observedBytes: 520
+    },
+    {
+      latencyMs: 20,
+      originWarmed: true,
+      requestPath: "/apiv2/graphData?product=KUAISHOU&productName=KUAISHOU&groupValue=%5Btyped_user_id%5D&groupKey=USER_ID&dimKey=DEVICE_ID&searchLevel=2",
+      requestMethod: "GET"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(summary.graph_status, "completed");
+  assert.equal(summary.pointInfoMap_present, true);
+  assert.equal(summary.pointInfoMap_count, 3);
+  assert.equal(summary.relationEdgeList_present, true);
+  assert.equal(summary.relationEdgeList_count, 1);
+  assert.equal(summary.related_device_count, 2);
+  assert.equal(summary.related_user_count, 1);
+  assert.equal(summary.masked_device_id_sample, "[masked_device_id:length=20]");
+  assert.equal(summary.raw_device_ids_for_internal_chaining_count, 2);
+  assert.equal(summary.riskData_status, "completed");
+  assert.equal(summary.risk_item_count, 1);
+  assert.equal(summary.risk_label_count > 0, true);
+  assert.deepEqual(summary.userLevel_observed, ["L3"]);
+});
+
+test("weapon_inventory graphData numeric keys are not treated as device IDs", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        graphData: {
+          code: 0,
+          data: {
+            pointInfoMap: {
+              "444946196": { nodeType: "user" },
+              "123456789": { nodeType: "user" }
+            },
+            relationEdgeList: [{ from: "444946196", to: "123456789" }]
+          }
+        },
+        riskDataResults: [],
+        weapon_chain: {
+          riskData_status: "not_executed_missing_device_id"
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 240
+    },
+    { latencyMs: 12, originWarmed: true, requestPath: "/apiv2/graphData", requestMethod: "GET" }
+  );
+
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(response.status, "completed");
+  assert.equal(summary.related_device_count, 0);
+  assert.equal(summary.related_user_count, 2);
+  assert.equal(summary.masked_device_id_sample, null);
+  assert.equal(summary.riskData_status, "not_executed_missing_device_id");
+});
+
+test("weapon_inventory riskData list parses labelInfo originalLog and userLevel without raw values", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { device_id: "ANDROID_raw_device_1" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify(weaponCombinedResponse({
+        pointInfoMap: {
+          ANDROID_raw_device_1: { nodeType: "device", deviceId: "ANDROID_raw_device_1" }
+        },
+        relationEdgeList: [{ from: "ANDROID_raw_device_1", to: "444946196" }],
+        riskDataResults: [
+          {
+            ok: true,
+            status: 200,
+            body: {
+              code: 0,
+              data: [
+                {
+                  deviceId: "ANDROID_raw_device_1",
+                  productName: "KUAISHOU",
+                  labelInfo: [
+                    {
+                      groupName: "risk_group",
+                      labelName: "readable_risk_label",
+                      secretValue: "raw-label-secret-value"
+                    }
+                  ],
+                  originalLog: {
+                    eventId: "raw-event-id",
+                    nested: {
+                      rawKey: "raw-original-log-value"
+                    }
+                  },
+                  userLevel: "L5"
+                }
+              ]
+            }
+          }
+        ]
+      })),
+      bodyTruncated: false,
+      observedBytes: 520
+    },
+    {
+      latencyMs: 20,
+      originWarmed: true,
+      requestPath: "/apiv2/graphData?product=KUAISHOU&productName=KUAISHOU&groupValue=%5Btyped_device_id%5D&groupKey=DEVICE_ID&dimKey=USER_ID&searchLevel=2",
+      requestMethod: "GET"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(summary.riskData_status, "completed");
+  assert.equal(summary.risk_item_count, 1);
+  assert.equal(summary.risk_label_summary.labelInfo_present, true);
+  assert.equal(summary.risk_label_count > 0, true);
+  assert.deepEqual(summary.risk_group_names_observed, ["risk_group"]);
+  assert.deepEqual(summary.readable_label_sample, ["readable_risk_label"]);
+  assert.deepEqual(summary.originalLog_key_summary.top_level_keys_observed, ["eventId", "nested"]);
+  assert.equal(summary.originalLog_key_summary.originalLog_present, true);
+  assert.deepEqual(summary.userLevel_observed, ["L5"]);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("ANDROID_raw_device_1"), false);
+  assert.equal(serialized.includes("raw-event-id"), false);
+  assert.equal(serialized.includes("raw-original-log-value"), false);
+  assert.equal(serialized.includes("raw-label-secret-value"), false);
+});
+
+test("weapon_inventory riskData failure leaves graph completed with partial risk status", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        graphData: {
+          code: 0,
+          data: {
+            pointInfoMap: {
+              "444946196": { nodeType: "user" },
+              ANDROID_raw_device_1: { nodeType: "device", deviceId: "ANDROID_raw_device_1" }
+            },
+            relationEdgeList: [{ from: "444946196", to: "ANDROID_raw_device_1" }]
+          }
+        },
+        riskDataResults: [
+          {
+            ok: false,
+            status: 500,
+            body: { code: 500, msg: "risk failed" }
+          }
+        ],
+        weapon_chain: {
+          riskData_status: "risk_partial_failed",
+          selected_device_count: 1
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 320
+    },
+    { latencyMs: 22, originWarmed: true, requestPath: "/apiv2/graphData", requestMethod: "GET" }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, "risk_partial_failed");
+  const summary = response.data.response_summary.weapon_inventory;
+  assert.equal(summary.graph_status, "completed");
+  assert.equal(summary.riskData_status, "risk_partial_failed");
+  assert.equal(summary.risk_item_count, 0);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+});
+
+test("weapon_inventory forbidden inputs are rejected and raw response body is not output", async () => {
+  const service = createService();
+  for (const key of ["url", "path", "header", "cookie", "token", "session", "secret", "raw_body"]) {
+    await assert.rejects(
+      () => service.executeAction("weapon_inventory", { user_id: "444946196", [key]: "blocked" }),
+      (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
+    );
+  }
+
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.weapon_inventory,
+    { user_id: "444946196" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify(weaponCombinedResponse({
+        pointInfoMap: {
+          "444946196": { nodeType: "user" },
+          ANDROID_raw_device_secret: { nodeType: "device", deviceId: "ANDROID_raw_device_secret" }
+        },
+        relationEdgeList: [{ from: "444946196", to: "ANDROID_raw_device_secret" }]
+      })),
+      bodyTruncated: false,
+      observedBytes: 420
+    },
+    {
+      latencyMs: 15,
+      originWarmed: true,
+      requestPath: "/apiv2/graphData?product=KUAISHOU&productName=KUAISHOU&groupValue=%5Btyped_user_id%5D&groupKey=USER_ID&dimKey=DEVICE_ID&searchLevel=2",
+      requestMethod: "GET"
+    }
+  );
+
+  const serialized = JSON.stringify(response);
+  assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
+  assert.equal(response.sensitive_output, false);
+  assert.equal(serialized.includes("ANDROID_raw_device_secret"), false);
+  assert.equal(serialized.includes("raw-risk-debug-value"), false);
 });
 
 test("rcp_snapshot builds fixed eventList body from typed params", () => {
@@ -1572,6 +1948,54 @@ test("track_analysis_summary getUseDuration platform and network errors stay sta
   assert.ok(networkResponse.source_card);
   assert.ok(networkResponse.source_quality);
 });
+
+function weaponCombinedResponse({
+  pointInfoMap,
+  relationEdgeList,
+  riskDataResults = [
+    {
+      ok: true,
+      status: 200,
+      body: {
+        code: 0,
+        data: [
+          {
+            deviceId: "ANDROID_raw_device_1",
+            productName: "KUAISHOU",
+            labelInfo: [
+              {
+                groupName: "risk_group",
+                labelName: "readable_risk_label",
+                debugValue: "raw-risk-debug-value"
+              }
+            ],
+            originalLog: {
+              eventId: "raw-event-id",
+              extra: "raw-original-log-value"
+            },
+            userLevel: "L3"
+          }
+        ]
+      }
+    }
+  ]
+}) {
+  return {
+    graphData: {
+      code: 0,
+      data: {
+        pointInfoMap,
+        relationEdgeList
+      }
+    },
+    riskDataResults,
+    weapon_chain: {
+      graphData_status: "completed",
+      riskData_status: riskDataResults.length > 0 ? "completed" : "not_executed_missing_device_id",
+      selected_device_count: riskDataResults.length
+    }
+  };
+}
 
 class FakeBrowserClient {
   constructor(config, options = {}) {

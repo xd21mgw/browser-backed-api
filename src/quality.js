@@ -126,5 +126,11 @@ function redactKeyName(key) {
   if (/(authorization|cookie|token|secret|session|password|credential|csrf|jwt)/i.test(key)) {
     return "[redacted_key]";
   }
+  if (/^(ANDROID|IOS)_[A-Za-z0-9_.:-]+$/.test(String(key))) {
+    return "[masked_device_id_key]";
+  }
+  if (/^\d{8,}$/.test(String(key))) {
+    return "[masked_numeric_id_key]";
+  }
   return key;
 }

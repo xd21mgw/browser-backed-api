@@ -156,6 +156,22 @@ RCP source status:
 - evidence use: strategy-hit or event-entry source; `hitFusePolicyCode`, `eventId`, and `_occurTime` are candidate chaining keys
 - `no_data`, `completed_no_hit_for_small_window`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
 
+`weapon_inventory` uses fixed Weapon `/apiv2/*` sources:
+
+- primary fixed path: `GET /apiv2/graphData`
+- optional chained fixed path: `GET /apiv2/riskData`
+- typed input: exactly one of `user_id` or `device_id`
+- optional typed input: `product`, `productName`, `searchLevel`, `include_risk_data`, `max_device_ids`
+- default input: `product=KUAISHOU`, `productName=KUAISHOU`, `searchLevel=2`, `include_risk_data=true`, `max_device_ids=5`
+- user input maps to graph query `groupKey=USER_ID`, `dimKey=DEVICE_ID`
+- device input maps to graph query `groupKey=DEVICE_ID`, `dimKey=USER_ID`
+- graph output is shape-only and summarizes `pointInfoMap`, `relationEdgeList`, related device/user counts, and masked device samples
+- `riskData` only runs when graph output contains device IDs with full `ANDROID_` or `IOS_` prefixes; pure numeric graph keys are treated as probable user IDs, not device IDs
+- risk output summarizes label counts, group names, readable label samples, originalLog keys, and userLevel values without returning raw `labelInfo`, raw `originalLog`, or raw device IDs
+- graph no-data is a source no-hit/no-data outcome and is not no-risk counterevidence
+- riskData failure is reported as partial risk status and does not overwrite graph success
+- no caller-provided URL, path, header, cookie, token, session, secret, or raw body is accepted
+
 `track_analysis_summary` supports fixed track-analysis sub-interfaces:
 
 - default sub-interface: `getLastestDateTime`
@@ -210,6 +226,9 @@ curl -X POST http://127.0.0.1:8787/prewarm
 curl -X POST http://127.0.0.1:8787/actions/rcp_snapshot \
   -H 'content-type: application/json' \
   -d '{"eventType":"USER_REGISTER_NEW","startTime":"2026-05-29 10:00:00","endTime":"2026-05-29 10:30:00"}'
+curl -X POST http://127.0.0.1:8787/actions/weapon_inventory \
+  -H 'content-type: application/json' \
+  -d '{"user_id":"demo"}'
 curl -X POST http://127.0.0.1:8787/actions/track_analysis_summary \
   -H 'content-type: application/json' \
   -d '{"user_id":"demo","appName":"KUAISHOU"}'

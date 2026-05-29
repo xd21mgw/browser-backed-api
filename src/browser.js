@@ -225,6 +225,221 @@ export class BrowserBackedClient {
       throw error;
     }
 
+    if (actionRequest.followUp?.type === "weapon_graph_risk") {
+      return page.evaluate(
+        async ({ graphPath, riskDataPath, product, includeRiskData, maxDeviceIds, timeoutMs, maxBodyBytes }) => {
+          const graph = await fetchCapped(graphPath, "GET", null, timeoutMs, maxBodyBytes);
+          const graphParsed = parseJson(graph.text);
+          if (!graphParsed.ok) {
+            return {
+              completed: true,
+              ok: graph.ok,
+              status: graph.status,
+              bodyText: graph.text,
+              bodyTruncated: graph.truncated,
+              observedBytes: graph.observedBytes
+            };
+          }
+
+          const deviceIds = extractDeviceIds(graphParsed.value).slice(0, maxDeviceIds);
+          const riskDataResults = [];
+          let riskDataStatus = "not_executed_missing_device_id";
+          let observedBytes = graph.observedBytes;
+          let bodyTruncated = graph.truncated;
+
+          if (!includeRiskData) {
+            riskDataStatus = "not_requested";
+          } else if (deviceIds.length > 0) {
+            riskDataStatus = "completed";
+            for (const deviceId of deviceIds) {
+              const params = new URLSearchParams({ product, deviceIds: deviceId });
+              const riskPath = `${riskDataPath}?${params.toString()}`;
+              try {
+                const risk = await fetchCapped(riskPath, "GET", null, timeoutMs, maxBodyBytes);
+                observedBytes += risk.observedBytes;
+                bodyTruncated = bodyTruncated || risk.truncated;
+                const parsedRisk = parseJson(risk.text);
+                if (!parsedRisk.ok) {
+                  riskDataStatus = "risk_partial_failed";
+                  riskDataResults.push({
+                    ok: risk.ok,
+                    status: risk.status,
+                    parse_error: true,
+                    body: null
+                  });
+                  continue;
+                }
+                if (!risk.ok) {
+                  riskDataStatus = "risk_partial_failed";
+                }
+                riskDataResults.push({
+                  ok: risk.ok,
+                  status: risk.status,
+                  body: parsedRisk.value
+                });
+              } catch {
+                riskDataStatus = "risk_partial_failed";
+                riskDataResults.push({
+                  ok: false,
+                  status: null,
+                  error_type: "network_error",
+                  body: null
+                });
+              }
+            }
+          }
+
+          return {
+            completed: true,
+            ok: graph.ok,
+            status: graph.status,
+            bodyText: JSON.stringify({
+              graphData: graphParsed.value,
+              riskDataResults,
+              weapon_chain: {
+                graphData_status: graph.ok ? "completed" : "platform_error",
+                riskData_status: riskDataStatus,
+                selected_device_count: deviceIds.length
+              }
+            }),
+            bodyTruncated,
+            observedBytes
+          };
+
+          async function fetchCapped(path, method, body, timeout, maxBytes) {
+            const controller = new AbortController();
+            const timeoutHandle = setTimeout(() => controller.abort(), timeout);
+            try {
+              const response = await fetch(path, {
+                method,
+                credentials: "include",
+                headers: {
+                  accept: "application/json",
+                  "content-type": "application/json"
+                },
+                body: method === "GET" ? undefined : JSON.stringify(body || {}),
+                signal: controller.signal
+              });
+              const readResult = await readCappedText(response, maxBytes);
+              return {
+                ok: response.ok,
+                status: response.status,
+                text: readResult.text,
+                truncated: readResult.truncated,
+                observedBytes: readResult.observedBytes
+              };
+            } finally {
+              clearTimeout(timeoutHandle);
+            }
+          }
+
+          async function readCappedText(response, maxBytes) {
+            if (!response.body) {
+              const text = await response.text();
+              return {
+                text: text.slice(0, maxBytes),
+                truncated: text.length > maxBytes,
+                observedBytes: Math.min(text.length, maxBytes)
+              };
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const chunks = [];
+            let observedBytes = 0;
+            let truncated = false;
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                break;
+              }
+
+              if (observedBytes + value.byteLength > maxBytes) {
+                const remaining = Math.max(maxBytes - observedBytes, 0);
+                if (remaining > 0) {
+                  chunks.push(value.slice(0, remaining));
+                  observedBytes += remaining;
+                }
+                truncated = true;
+                await reader.cancel();
+                break;
+              }
+
+              chunks.push(value);
+              observedBytes += value.byteLength;
+            }
+
+            const text = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("") + decoder.decode();
+            return { text, truncated, observedBytes };
+          }
+
+          function parseJson(text) {
+            try {
+              return { ok: true, value: JSON.parse(text) };
+            } catch {
+              return { ok: false, value: null };
+            }
+          }
+
+          function extractDeviceIds(value) {
+            const payload = value && typeof value === "object" && value.data && typeof value.data === "object"
+              ? value.data
+              : value;
+            const pointInfoMap = payload && typeof payload === "object" && !Array.isArray(payload)
+              ? payload.pointInfoMap
+              : null;
+            if (!pointInfoMap || typeof pointInfoMap !== "object" || Array.isArray(pointInfoMap)) {
+              return [];
+            }
+            const ids = [];
+            for (const [key, node] of Object.entries(pointInfoMap)) {
+              if (isDeviceId(key)) {
+                ids.push(key);
+              }
+              collectStrings(node, ids, 0);
+            }
+            return [...new Set(ids.filter(isDeviceId))];
+          }
+
+          function collectStrings(value, output, depth) {
+            if (depth > 4 || value === null || value === undefined) {
+              return;
+            }
+            if (typeof value === "string" || typeof value === "number") {
+              output.push(String(value));
+              return;
+            }
+            if (Array.isArray(value)) {
+              for (const item of value.slice(0, 100)) {
+                collectStrings(item, output, depth + 1);
+              }
+              return;
+            }
+            if (typeof value === "object") {
+              for (const [key, child] of Object.entries(value).slice(0, 100)) {
+                output.push(String(key));
+                collectStrings(child, output, depth + 1);
+              }
+            }
+          }
+
+          function isDeviceId(value) {
+            return /^(ANDROID|IOS)_[A-Za-z0-9_.:-]+$/.test(String(value || ""));
+          }
+        },
+        {
+          graphPath: actionRequest.path,
+          riskDataPath: actionRequest.followUp.riskDataPath,
+          product: actionRequest.followUp.product,
+          includeRiskData: actionRequest.followUp.includeRiskData,
+          maxDeviceIds: actionRequest.followUp.maxDeviceIds,
+          timeoutMs: this.config.browser.requestTimeoutMs,
+          maxBodyBytes: this.config.browser.maxLiveBodyBytes
+        }
+      );
+    }
+
     return page.evaluate(
       async ({ path, method, body, timeoutMs, maxBodyBytes }) => {
         const controller = new AbortController();

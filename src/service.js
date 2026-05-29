@@ -215,7 +215,7 @@ export class BrowserBackedApiService {
         actionDiagnostics,
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
-        requestPath: actionRequest.path,
+        requestPath: actionRequest.displayPath || actionRequest.path,
         requestMethod: actionRequest.method,
         ...lazyMeta
       });
@@ -227,7 +227,7 @@ export class BrowserBackedApiService {
         latencyMs: Date.now() - startedAt,
         originWarmed,
         actionDiagnostics,
-        requestPath: actionRequest.path,
+        requestPath: actionRequest.displayPath || actionRequest.path,
         requestMethod: actionRequest.method,
         ...lazyMeta
       });
@@ -239,7 +239,7 @@ export class BrowserBackedApiService {
         actionDiagnostics: this.browserClient.actionDiagnostics(action, originWarmed),
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
-        requestPath: actionRequest.path,
+        requestPath: actionRequest.displayPath || actionRequest.path,
         requestMethod: actionRequest.method,
         ...lazyMeta
       });

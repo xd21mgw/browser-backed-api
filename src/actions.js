@@ -18,6 +18,11 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "cursor",
   "query",
   "severity",
+  "product",
+  "productName",
+  "searchLevel",
+  "include_risk_data",
+  "max_device_ids",
   "eventType",
   "source_id",
   "sourceIds",
@@ -66,6 +71,15 @@ const RCP_COLUMN_COMMENTS = Object.freeze({
   hitFusePolicyCode: "hitFusePolicyCode",
   time: "time"
 });
+
+const WEAPON_GRAPH_DATA_PATH = "/apiv2/graphData";
+const WEAPON_RISK_DATA_PATH = "/apiv2/riskData";
+const WEAPON_DEFAULT_PRODUCT = "KUAISHOU";
+const WEAPON_DEFAULT_PRODUCT_NAME = "KUAISHOU";
+const WEAPON_DEFAULT_SEARCH_LEVEL = 2;
+const WEAPON_DEFAULT_INCLUDE_RISK_DATA = true;
+const WEAPON_DEFAULT_MAX_DEVICE_IDS = 5;
+const WEAPON_MAX_DEVICE_IDS = 20;
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -131,25 +145,22 @@ export const ACTIONS = Object.freeze({
   weapon_inventory: freezeAction({
     name: "weapon_inventory",
     domainKey: "weapon",
-    description: "Return a compact Weapon inventory/search summary for an allowed scope.",
-    method: "POST",
-    apiPath: "/api/weapon/inventory/search",
+    description: "Return a compact Weapon graphData and optional riskData shape summary for a typed entity.",
+    method: "GET",
+    apiPath: WEAPON_GRAPH_DATA_PATH,
     inputContract: {
-      workspaceId: "optional string",
-      query: "optional string",
-      filters: "optional object",
-      limit: "optional number <= 100"
+      user_id: "required string when device_id is absent; graphData USER_ID -> DEVICE_ID",
+      device_id: "required string when user_id is absent; graphData DEVICE_ID -> USER_ID",
+      product: "optional enum; default KUAISHOU",
+      productName: "optional enum; default KUAISHOU",
+      searchLevel: "optional positive integer; default 2",
+      include_risk_data: "optional boolean; default true",
+      max_device_ids: "optional positive integer <= 20; default 5"
     },
-    mockData: (input) => ({
-      query: typeof input.query === "string" ? input.query : null,
-      returned_count: 2,
-      total_estimate: 18,
-      items: [
-        { id: "mock-weapon-a", status: "ready", quality: "verified" },
-        { id: "mock-weapon-b", status: "review", quality: "partial" }
-      ],
-      generated_at: fixedMockTime()
-    })
+    validateParams: validateWeaponInventoryInput,
+    buildRequest: buildWeaponInventoryRequest,
+    summarizeLiveResponse: summarizeWeaponInventoryResponse,
+    mockData: mockWeaponInventoryData
   }),
   login_logs_search: freezeAction({
     name: "login_logs_search",
@@ -243,9 +254,13 @@ export function buildActionBody(action, input) {
   if (typeof action.buildRequest === "function") {
     const request = action.buildRequest(safeInput);
     return {
+      ...request,
       path: normalizeRelativePath(request.path, `${action.name}.requestPath`),
       method: request.method || action.method,
-      body: request.body || {}
+      body: request.body || {},
+      displayPath: request.displayPath
+        ? normalizeRelativePath(request.displayPath, `${action.name}.displayPath`)
+        : undefined
     };
   }
   return {
@@ -266,6 +281,9 @@ export function runMockAction(action, input, config, meta = {}) {
     });
   }
   const data = action.mockData(safeInput);
+  const sourceRequest = typeof action.buildRequest === "function"
+    ? action.buildRequest(safeInput)
+    : { path: action.apiPath, method: action.method };
   const fetchMeta = {
     ok: true,
     status: 200,
@@ -287,8 +305,8 @@ export function runMockAction(action, input, config, meta = {}) {
       mock: true,
       meta: {
         ...meta,
-        requestPath: typeof action.buildRequest === "function" ? action.buildRequest(safeInput).path : action.apiPath,
-        requestMethod: typeof action.buildRequest === "function" ? action.buildRequest(safeInput).method : action.method
+        requestPath: sourceRequest.displayPath || sourceRequest.path,
+        requestMethod: sourceRequest.method || action.method
       }
     }),
     source_quality: buildSourceQuality({ action, fetchMeta, mock: true, meta })
@@ -578,6 +596,566 @@ function classifyUnparseableBody(text) {
     return "auth_failed";
   }
   return "parse_error";
+}
+
+function validateWeaponInventoryInput(input) {
+  const hasUserId = isNonEmptyString(input.user_id);
+  const hasDeviceId = isNonEmptyString(input.device_id);
+  if (hasUserId === hasDeviceId) {
+    return {
+      message: "weapon_inventory requires exactly one of user_id or device_id",
+      required: ["user_id xor device_id"],
+      errorType: "parameter_error"
+    };
+  }
+
+  if (Object.hasOwn(input, "product") && input.product !== WEAPON_DEFAULT_PRODUCT) {
+    return {
+      message: "weapon_inventory product must be KUAISHOU",
+      required: ["product=KUAISHOU"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "productName") && input.productName !== WEAPON_DEFAULT_PRODUCT_NAME) {
+    return {
+      message: "weapon_inventory productName must be KUAISHOU",
+      required: ["productName=KUAISHOU"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "searchLevel") && !validPositiveInteger(input.searchLevel)) {
+    return {
+      message: "weapon_inventory searchLevel must be a positive integer",
+      required: ["searchLevel positive integer"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "include_risk_data") && typeof input.include_risk_data !== "boolean") {
+    return {
+      message: "weapon_inventory include_risk_data must be boolean",
+      required: ["include_risk_data boolean"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (
+    Object.hasOwn(input, "max_device_ids") &&
+    (!validPositiveInteger(input.max_device_ids) || input.max_device_ids > WEAPON_MAX_DEVICE_IDS)
+  ) {
+    return {
+      message: `weapon_inventory max_device_ids must be a positive integer <= ${WEAPON_MAX_DEVICE_IDS}`,
+      required: [`max_device_ids positive integer <= ${WEAPON_MAX_DEVICE_IDS}`],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  return null;
+}
+
+function buildWeaponInventoryRequest(input) {
+  const scope = weaponEntityScope(input);
+  const product = weaponProduct(input);
+  const productName = weaponProductName(input);
+  const searchLevel = weaponSearchLevel(input);
+  const params = new URLSearchParams({
+    product,
+    productName,
+    groupValue: scope.value,
+    groupKey: scope.groupKey,
+    dimKey: scope.dimKey,
+    searchLevel: String(searchLevel)
+  });
+  const displayParams = new URLSearchParams({
+    product,
+    productName,
+    groupValue: `[typed_${scope.entityType}]`,
+    groupKey: scope.groupKey,
+    dimKey: scope.dimKey,
+    searchLevel: String(searchLevel)
+  });
+
+  return {
+    path: `${WEAPON_GRAPH_DATA_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_GRAPH_DATA_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {},
+    followUp: {
+      type: "weapon_graph_risk",
+      riskDataPath: WEAPON_RISK_DATA_PATH,
+      product,
+      includeRiskData: weaponIncludeRiskData(input),
+      maxDeviceIds: weaponMaxDeviceIds(input)
+    }
+  };
+}
+
+function summarizeWeaponInventoryResponse(value, input) {
+  const graphValue = value && typeof value === "object" && Object.hasOwn(value, "graphData") ? value.graphData : value;
+  const graphErrorType = classifyWeaponGraphError(graphValue);
+  if (graphErrorType) {
+    return {
+      sourceStatus: "blocked",
+      errorType: graphErrorType,
+      summary: {
+        weapon_inventory: {
+          ...buildWeaponGraphSummary(graphValue),
+          riskData_status: "not_executed_graph_failed",
+          risk_item_count: 0,
+          risk_label_summary: emptyRiskLabelSummary(),
+          risk_label_count: 0,
+          risk_group_names_observed: [],
+          readable_label_sample: [],
+          originalLog_key_summary: emptyOriginalLogKeySummary(),
+          userLevel_observed: [],
+          no_data_not_risk_exclusion: true
+        }
+      }
+    };
+  }
+
+  const graphSummary = buildWeaponGraphSummary(graphValue);
+  const riskSummary = buildWeaponRiskSummary(value, graphSummary, input);
+  const graphNoData = graphSummary.pointInfoMap_count === 0 && graphSummary.relationEdgeList_count === 0;
+  const riskPartial = riskSummary.riskData_status === "risk_partial_failed";
+
+  return {
+    sourceStatus: graphNoData ? "completed_no_data" : "completed",
+    errorType: riskPartial ? "risk_partial_failed" : null,
+    summary: {
+      weapon_inventory: {
+        ...graphSummary,
+        ...riskSummary,
+        no_data_not_risk_exclusion: true
+      }
+    }
+  };
+}
+
+function buildWeaponGraphSummary(value) {
+  const payload = weaponPayload(value);
+  const pointInfoMap = payload && isPlainObject(payload.pointInfoMap) ? payload.pointInfoMap : null;
+  const relationEdgeList = Array.isArray(payload?.relationEdgeList) ? payload.relationEdgeList : [];
+  const deviceIds = collectWeaponDeviceIds(pointInfoMap);
+  const userIds = collectWeaponUserIds(pointInfoMap);
+  const graphNoData = Object.keys(pointInfoMap || {}).length === 0 && relationEdgeList.length === 0;
+
+  return {
+    graph_status: graphNoData ? "completed_no_data" : "completed",
+    graph_api_code: readApiCode(value),
+    graph_api_msg: sanitizeSummaryText(readApiMessage(value)),
+    pointInfoMap_present: Boolean(pointInfoMap),
+    pointInfoMap_count: Object.keys(pointInfoMap || {}).length,
+    relationEdgeList_present: Array.isArray(payload?.relationEdgeList),
+    relationEdgeList_count: relationEdgeList.length,
+    related_device_count: deviceIds.length,
+    related_user_count: userIds.length,
+    masked_device_id_sample: deviceIds.length > 0 ? maskDeviceId(deviceIds[0]) : null,
+    raw_device_ids_for_internal_chaining_count: deviceIds.length,
+    graph_no_data: graphNoData,
+    no_data: graphNoData,
+    no_data_not_risk_exclusion: true
+  };
+}
+
+function buildWeaponRiskSummary(value, graphSummary, input) {
+  const chain = value && typeof value === "object" ? value.weapon_chain || {} : {};
+  const riskResults = weaponRiskResults(value);
+  if (weaponIncludeRiskData(input) === false) {
+    return emptyRiskSummary("not_requested");
+  }
+  if (graphSummary.raw_device_ids_for_internal_chaining_count === 0) {
+    return emptyRiskSummary("not_executed_missing_device_id");
+  }
+  if (riskResults.length === 0) {
+    return emptyRiskSummary(chain.riskData_status || "not_executed_missing_device_id");
+  }
+
+  const riskItems = [];
+  let riskFailure = false;
+  for (const result of riskResults) {
+    if (!result || result.ok === false || result.parse_error || result.error_type || result.status >= 400) {
+      riskFailure = true;
+      continue;
+    }
+    if (classifyWeaponRiskError(result.body)) {
+      riskFailure = true;
+      continue;
+    }
+    riskItems.push(...extractWeaponRiskItems(result.body));
+  }
+
+  const labelSummary = buildRiskLabelSummary(riskItems);
+  const originalLogSummary = buildOriginalLogKeySummary(riskItems);
+  return {
+    riskData_status: riskFailure ? "risk_partial_failed" : riskItems.length > 0 ? "completed" : "no_data",
+    risk_item_count: riskItems.length,
+    risk_label_summary: labelSummary.summary,
+    risk_label_count: labelSummary.count,
+    risk_group_names_observed: labelSummary.groupNames,
+    readable_label_sample: labelSummary.readableSample,
+    originalLog_key_summary: originalLogSummary,
+    userLevel_observed: userLevelsObserved(riskItems),
+    no_data_not_risk_exclusion: true
+  };
+}
+
+function weaponEntityScope(input) {
+  if (isNonEmptyString(input.device_id)) {
+    return {
+      entityType: "device_id",
+      value: input.device_id.trim(),
+      groupKey: "DEVICE_ID",
+      dimKey: "USER_ID"
+    };
+  }
+  return {
+    entityType: "user_id",
+    value: input.user_id.trim(),
+    groupKey: "USER_ID",
+    dimKey: "DEVICE_ID"
+  };
+}
+
+function weaponProduct(input) {
+  return isNonEmptyString(input.product) ? input.product.trim() : WEAPON_DEFAULT_PRODUCT;
+}
+
+function weaponProductName(input) {
+  return isNonEmptyString(input.productName) ? input.productName.trim() : WEAPON_DEFAULT_PRODUCT_NAME;
+}
+
+function weaponSearchLevel(input) {
+  return Object.hasOwn(input, "searchLevel") ? Math.trunc(input.searchLevel) : WEAPON_DEFAULT_SEARCH_LEVEL;
+}
+
+function weaponIncludeRiskData(input) {
+  return Object.hasOwn(input, "include_risk_data") ? input.include_risk_data : WEAPON_DEFAULT_INCLUDE_RISK_DATA;
+}
+
+function weaponMaxDeviceIds(input) {
+  return Object.hasOwn(input, "max_device_ids") ? Math.trunc(input.max_device_ids) : WEAPON_DEFAULT_MAX_DEVICE_IDS;
+}
+
+function classifyWeaponGraphError(value) {
+  if (!value || typeof value !== "object") {
+    return "parse_error";
+  }
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
+    return "platform_error";
+  }
+  if (value.success === false || value.result === false) {
+    return "platform_error";
+  }
+  return null;
+}
+
+function classifyWeaponRiskError(value) {
+  if (!value || typeof value !== "object") {
+    return "parse_error";
+  }
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
+    return "platform_error";
+  }
+  if (value.success === false || value.result === false) {
+    return "platform_error";
+  }
+  return null;
+}
+
+function weaponPayload(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  if (isPlainObject(value.data)) {
+    return value.data;
+  }
+  return value;
+}
+
+function weaponRiskResults(value) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  if (Array.isArray(value.riskDataResults)) {
+    return value.riskDataResults;
+  }
+  if (Object.hasOwn(value, "riskData")) {
+    return [
+      {
+        ok: true,
+        status: 200,
+        body: value.riskData
+      }
+    ];
+  }
+  return [];
+}
+
+function collectWeaponDeviceIds(pointInfoMap) {
+  if (!isPlainObject(pointInfoMap)) {
+    return [];
+  }
+  const values = [];
+  for (const [key, node] of Object.entries(pointInfoMap)) {
+    if (isWeaponDeviceId(key)) {
+      values.push(key);
+    }
+    collectWeaponStrings(node, values, 0);
+  }
+  return [...new Set(values.filter(isWeaponDeviceId))];
+}
+
+function collectWeaponUserIds(pointInfoMap) {
+  if (!isPlainObject(pointInfoMap)) {
+    return [];
+  }
+  const values = [];
+  for (const [key, node] of Object.entries(pointInfoMap)) {
+    if (isProbableUserId(key)) {
+      values.push(key);
+    }
+    const strings = [];
+    collectWeaponStrings(node, strings, 0);
+    values.push(...strings.filter(isProbableUserId));
+  }
+  return [...new Set(values)];
+}
+
+function collectWeaponStrings(value, output, depth) {
+  if (depth > 4 || value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    output.push(String(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 100)) {
+      collectWeaponStrings(item, output, depth + 1);
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, child] of Object.entries(value).slice(0, 100)) {
+      output.push(String(key));
+      collectWeaponStrings(child, output, depth + 1);
+    }
+  }
+}
+
+function isWeaponDeviceId(value) {
+  return /^(ANDROID|IOS)_[A-Za-z0-9_.:-]+$/.test(String(value || ""));
+}
+
+function isProbableUserId(value) {
+  return /^\d{5,}$/.test(String(value || ""));
+}
+
+function extractWeaponRiskItems(value) {
+  const data = value && typeof value === "object" ? value.data : null;
+  if (Array.isArray(data)) {
+    return data.filter(isPlainObject);
+  }
+  if (isPlainObject(data)) {
+    for (const key of ["list", "rows", "records", "items", "data"]) {
+      if (Array.isArray(data[key])) {
+        return data[key].filter(isPlainObject);
+      }
+    }
+    return [data];
+  }
+  if (Array.isArray(value)) {
+    return value.filter(isPlainObject);
+  }
+  return [];
+}
+
+function buildRiskLabelSummary(items) {
+  const labelInfoValues = items
+    .map((item) => item.labelInfo)
+    .filter((item) => item !== null && item !== undefined);
+  const groupNames = [];
+  const readableSample = [];
+  let count = 0;
+
+  for (const labelInfo of labelInfoValues) {
+    const result = scanLabelInfo(labelInfo, 0);
+    count += result.count;
+    groupNames.push(...result.groupNames);
+    readableSample.push(...result.readableSample);
+  }
+
+  const uniqueGroupNames = uniqueSanitized(groupNames).slice(0, 20);
+  const uniqueReadableSample = uniqueSanitized(readableSample).slice(0, 5);
+  return {
+    count,
+    groupNames: uniqueGroupNames,
+    readableSample: uniqueReadableSample,
+    summary: {
+      labelInfo_present: labelInfoValues.length > 0,
+      labelInfo_items_observed: count,
+      group_names_count: uniqueGroupNames.length,
+      readable_label_sample_count: uniqueReadableSample.length
+    }
+  };
+}
+
+function scanLabelInfo(value, depth) {
+  if (depth > 5 || value === null || value === undefined) {
+    return { count: 0, groupNames: [], readableSample: [] };
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return {
+      count: 1,
+      groupNames: [],
+      readableSample: []
+    };
+  }
+  if (Array.isArray(value)) {
+    return mergeLabelScans(value.slice(0, 100).map((item) => scanLabelInfo(item, depth + 1)));
+  }
+  if (!isPlainObject(value)) {
+    return { count: 0, groupNames: [], readableSample: [] };
+  }
+
+  const groupNames = [];
+  const readableSample = [];
+  let count = 1;
+  for (const [key, child] of Object.entries(value).slice(0, 100)) {
+    const isGroupKey = /(group|groupName|category|分类|分组)/i.test(key);
+    if (isGroupKey) {
+      if (typeof child === "string" || typeof child === "number") {
+        groupNames.push(sanitizeSummaryText(child));
+      } else {
+        groupNames.push(sanitizeSummaryText(key));
+      }
+    }
+    if (!isGroupKey && /(label|labelName|name|title|tag|risk|desc|名称|标签)/i.test(key) && ["string", "number"].includes(typeof child)) {
+      readableSample.push(sanitizeSummaryText(child));
+    }
+    const childScan = scanLabelInfo(child, depth + 1);
+    count += childScan.count;
+    groupNames.push(...childScan.groupNames);
+    readableSample.push(...childScan.readableSample);
+  }
+  return { count, groupNames, readableSample };
+}
+
+function mergeLabelScans(scans) {
+  return scans.reduce(
+    (merged, scan) => ({
+      count: merged.count + scan.count,
+      groupNames: [...merged.groupNames, ...scan.groupNames],
+      readableSample: [...merged.readableSample, ...scan.readableSample]
+    }),
+    { count: 0, groupNames: [], readableSample: [] }
+  );
+}
+
+function buildOriginalLogKeySummary(items) {
+  const logs = items.map((item) => item.originalLog).filter(isPlainObject);
+  const topLevelKeys = [];
+  let nestedKeyCount = 0;
+  for (const log of logs) {
+    const keys = observedKeys(log);
+    topLevelKeys.push(...keys);
+    nestedKeyCount += countNestedKeys(log, 1);
+  }
+  return {
+    originalLog_present: logs.length > 0,
+    originalLog_items_observed: logs.length,
+    top_level_keys_observed: [...new Set(topLevelKeys)].slice(0, 50),
+    nested_key_count: nestedKeyCount
+  };
+}
+
+function countNestedKeys(value, depth) {
+  if (depth > 5 || !value || typeof value !== "object") {
+    return 0;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).reduce((sum, item) => sum + countNestedKeys(item, depth + 1), 0);
+  }
+  let count = 0;
+  for (const child of Object.values(value).slice(0, 100)) {
+    if (child && typeof child === "object") {
+      count += Object.keys(child).length;
+      count += countNestedKeys(child, depth + 1);
+    }
+  }
+  return count;
+}
+
+function userLevelsObserved(items) {
+  return uniqueSanitized(
+    items
+      .map((item) => item.userLevel)
+      .filter((item) => item !== null && item !== undefined)
+  ).slice(0, 20);
+}
+
+function emptyRiskSummary(status) {
+  return {
+    riskData_status: status,
+    risk_item_count: 0,
+    risk_label_summary: emptyRiskLabelSummary(),
+    risk_label_count: 0,
+    risk_group_names_observed: [],
+    readable_label_sample: [],
+    originalLog_key_summary: emptyOriginalLogKeySummary(),
+    userLevel_observed: [],
+    no_data_not_risk_exclusion: true
+  };
+}
+
+function emptyRiskLabelSummary() {
+  return {
+    labelInfo_present: false,
+    labelInfo_items_observed: 0,
+    group_names_count: 0,
+    readable_label_sample_count: 0
+  };
+}
+
+function emptyOriginalLogKeySummary() {
+  return {
+    originalLog_present: false,
+    originalLog_items_observed: 0,
+    top_level_keys_observed: [],
+    nested_key_count: 0
+  };
+}
+
+function uniqueSanitized(values) {
+  return [...new Set(values.map(sanitizeSummaryText).filter(Boolean))];
+}
+
+function sanitizeSummaryText(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return String(value)
+    .replace(/\b(?:ANDROID|IOS)_[A-Za-z0-9_.:-]+/g, "[masked_device_id]")
+    .replace(/\b\d{8,}\b/g, "[masked_numeric_id]")
+    .replace(/\bhttps?:\/\/\S+/gi, "[redacted_url]")
+    .slice(0, 160);
+}
+
+function readApiMessage(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  for (const key of ["message", "msg", "error", "errorMsg", "error_message"]) {
+    if (typeof value[key] === "string") {
+      return value[key];
+    }
+  }
+  return null;
 }
 
 function validateRcpSnapshotInput(input) {
@@ -1384,6 +1962,10 @@ function isEmptyPayload(value) {
   return false;
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -1699,6 +2281,88 @@ function mockRcpSnapshotData(input) {
       no_data: false,
       no_data_not_risk_exclusion: true
     },
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponInventoryData(input) {
+  const request = buildWeaponInventoryRequest(input);
+  const scope = weaponEntityScope(input);
+  const deviceId = scope.entityType === "device_id" ? scope.value : "ANDROID_mock_device_id";
+  const graphValue = {
+    code: 0,
+    data: {
+      pointInfoMap: scope.entityType === "device_id"
+        ? {
+            [deviceId]: { nodeType: "device", deviceId },
+            "123456789": { nodeType: "user" }
+          }
+        : {
+            [scope.value]: { nodeType: "user" },
+            [deviceId]: { nodeType: "device", deviceId }
+          },
+      relationEdgeList: [
+        { from: scope.value, to: deviceId, relation: "mock_relation" }
+      ]
+    }
+  };
+  const riskValue = {
+    code: 0,
+    data: [
+      {
+        deviceId,
+        productName: weaponProductName(input),
+        labelInfo: [
+          { groupName: "mock_group", labelName: "mock_label" }
+        ],
+        originalLog: {
+          eventId: "mock_event",
+          occurTime: "2026-05-29 10:00:00"
+        },
+        userLevel: "mock_level"
+      }
+    ]
+  };
+  const summary = summarizeWeaponInventoryResponse(
+    {
+      graphData: graphValue,
+      riskDataResults: [
+        {
+          ok: true,
+          status: 200,
+          body: riskValue
+        }
+      ],
+      weapon_chain: {
+        graphData_status: "completed",
+        riskData_status: "completed",
+        selected_device_count: 1
+      }
+    },
+    input
+  ).summary.weapon_inventory;
+
+  return {
+    shape_summary_only: true,
+    fixed_paths: {
+      graphData: WEAPON_GRAPH_DATA_PATH,
+      riskData: WEAPON_RISK_DATA_PATH
+    },
+    graph_request: {
+      method: request.method,
+      display_path: request.displayPath,
+      groupKey: scope.groupKey,
+      dimKey: scope.dimKey,
+      product: weaponProduct(input),
+      productName: weaponProductName(input),
+      searchLevel: weaponSearchLevel(input)
+    },
+    risk_chaining: {
+      include_risk_data: weaponIncludeRiskData(input),
+      max_device_ids: weaponMaxDeviceIds(input),
+      device_ids_exposed_raw: false
+    },
+    weapon_inventory: summary,
     generated_at: fixedMockTime()
   };
 }
