@@ -575,6 +575,15 @@ test("login_logs_search successful records return completed summary without raw 
   assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=24]");
   assert.ok(summary.returned_fields_observed.includes("loginTime"));
   assert.equal(summary.no_data_not_risk_exclusion, true);
+  assert.equal(summary.diagnostics.upstream_http_status, 200);
+  assert.equal(summary.diagnostics.response_format, "json");
+  assert.ok(summary.diagnostics.top_level_keys.includes("code"));
+  assert.ok(summary.diagnostics.top_level_keys.includes("data"));
+  assert.equal(summary.diagnostics.records_array_path_detected, "data.records");
+  assert.equal(summary.diagnostics.records_count_before_limit, 2);
+  assert.equal(summary.diagnostics.summary_limit, 20);
+  assert.equal(summary.diagnostics.response_too_large, false);
+  assert.equal(summary.diagnostics.parse_error_detail_sanitized, null);
   const serialized = JSON.stringify(response);
   assert.equal(serialized.includes("SUCCESS_RAW_VALUE"), false);
   assert.equal(serialized.includes("DENY_RAW_VALUE"), false);
@@ -610,6 +619,267 @@ test("login_logs_search empty records returns no_data without risk exclusion", (
   assert.equal(response.data.response_summary.login_logs.records_count, 0);
   assert.equal(response.data.response_summary.login_logs.no_data, true);
   assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("login_logs_search logSearchModels records return completed summary without raw records", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "444946196",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          logSearchModels: [
+            {
+              logContent: "raw-login-record-secret",
+              logTags: ["login"],
+              userIds: ["444946196"],
+              dids: ["ANDROID_log_device_abc"],
+              ip: "10.20.30.42",
+              logSource: "APP_RAW_VALUE",
+              method: "LOGIN_RAW_METHOD",
+              date: "2026-05-29",
+              index: 1,
+              timestamp: 1780000003000
+            }
+          ],
+          totalCount: 1
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 520
+    },
+    { latencyMs: 11, originWarmed: true }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "completed");
+  assert.equal(summary.records_count, 1);
+  assert.equal(summary.first_login_time_observed, 1780000003000);
+  assert.equal(summary.last_login_time_observed, 1780000003000);
+  assert.equal(summary.device_fields_present, true);
+  assert.equal(summary.ip_fields_present, true);
+  assert.equal(summary.origin_fields_present, true);
+  assert.equal(summary.ip_sample_masked, "10.20.*.*");
+  assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=22]");
+  assert.deepEqual(summary.returned_fields_observed, [
+    "logContent",
+    "logTags",
+    "userIds",
+    "dids",
+    "ip",
+    "logSource",
+    "method",
+    "date",
+    "index",
+    "timestamp"
+  ]);
+  assert.equal(summary.diagnostics.records_array_path_detected, "data.logSearchModels");
+  assert.equal(summary.diagnostics.records_count_before_limit, 1);
+  assert.equal(summary.diagnostics.response_too_large, false);
+  assert.equal(summary.diagnostics.parse_error_detail_sanitized, null);
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("raw-login-record-secret"), false);
+  assert.equal(serialized.includes("APP_RAW_VALUE"), false);
+  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), false);
+  assert.equal(serialized.includes("ANDROID_log_device_abc"), false);
+  assert.equal(serialized.includes("10.20.30.42"), false);
+});
+
+test("login_logs_search empty logSearchModels returns no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "444946196",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({ code: 0, data: { logSearchModels: [], totalCount: 0 } }),
+      bodyTruncated: false,
+      observedBytes: 58
+    },
+    { latencyMs: 8, originWarmed: true }
+  );
+
+  assert.equal(response.status, "no_data");
+  assert.equal(response.source_status, "no_data");
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "no_data");
+  assert.equal(summary.records_count, 0);
+  assert.equal(summary.no_data, true);
+  assert.equal(summary.no_data_not_risk_exclusion, true);
+  assert.equal(summary.diagnostics.records_array_path_detected, "data.logSearchModels");
+  assert.equal(summary.diagnostics.records_count_before_limit, 0);
+});
+
+test("login_logs_search default seven day large response falls back to 24h logSearchModels completed", async () => {
+  const config = createLiveConfig();
+  const largePartialBody = JSON.stringify({
+    code: 0,
+    data: {
+      records: [
+        {
+          loginTime: 1780000001000,
+          deviceId: "ANDROID_raw_login_device",
+          ip: "10.20.30.40",
+          rawRecordValue: "raw-login-record-secret"
+        }
+      ]
+    }
+  }).slice(0, -2);
+  const fakeClient = new FakeBrowserClient(config, {
+    fetchResults: {
+      login_logs_search: [
+        {
+          completed: true,
+          ok: true,
+          status: 200,
+          bodyText: largePartialBody,
+          bodyTruncated: true,
+          observedBytes: config.browser.maxLiveBodyBytes
+        },
+        {
+          completed: true,
+          ok: true,
+          status: 200,
+          bodyText: JSON.stringify({
+            code: 0,
+            data: {
+              logSearchModels: [
+                {
+                  logContent: "raw-login-record-secret",
+                  logTags: ["login"],
+                  userIds: ["2871834924"],
+                  dids: ["ANDROID_login_device_abc"],
+                  ip: "10.20.30.43",
+                  logSource: "APP_RAW_VALUE",
+                  method: "LOGIN_RAW_METHOD",
+                  date: "2026-05-29",
+                  index: 1,
+                  timestamp: 1780000004000
+                }
+              ],
+              totalCount: 1
+            }
+          }),
+          bodyTruncated: false,
+          observedBytes: 540
+        }
+      ]
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("login_logs", warmStateReady(config, "login_logs"));
+
+  const response = await service.executeAction("login_logs_search", { user_id: "2871834924" });
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(fakeClient.runCalls.length, 2);
+  const firstQuery = new URL(fakeClient.runCalls[0].path, config.domains.login_logs.origin);
+  const fallbackQuery = new URL(fakeClient.runCalls[1].path, config.domains.login_logs.origin);
+  assert.equal(
+    Number(firstQuery.searchParams.get("to_timestamp")) - Number(firstQuery.searchParams.get("from_timestamp")),
+    7 * 24 * 60 * 60 * 1000
+  );
+  assert.equal(
+    Number(fallbackQuery.searchParams.get("to_timestamp")) - Number(fallbackQuery.searchParams.get("from_timestamp")),
+    24 * 60 * 60 * 1000
+  );
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "completed");
+  assert.equal(summary.records_count, 1);
+  assert.equal(summary.no_data, false);
+  assert.equal(summary.first_login_time_observed, 1780000004000);
+  assert.equal(summary.last_login_time_observed, 1780000004000);
+  assert.equal(summary.device_fields_present, true);
+  assert.equal(summary.ip_fields_present, true);
+  assert.equal(summary.ip_sample_masked, "10.20.*.*");
+  assert.equal(summary.device_id_sample_masked, "[masked_device_id:length=24]");
+  assert.ok(summary.returned_fields_observed.includes("logContent"));
+  assert.ok(summary.returned_fields_observed.includes("dids"));
+  assert.ok(summary.returned_fields_observed.includes("timestamp"));
+  assert.equal(summary.diagnostics.upstream_http_status, 200);
+  assert.equal(summary.diagnostics.response_format, "json");
+  assert.equal(summary.diagnostics.records_array_path_detected, "data.logSearchModels");
+  assert.equal(summary.diagnostics.records_count_before_limit, 1);
+  assert.equal(summary.diagnostics.summary_limit, 20);
+  assert.equal(summary.diagnostics.response_too_large, false);
+  assert.equal(summary.diagnostics.parse_error_detail_sanitized, null);
+  assert.equal(summary.diagnostics.fallback_attempted, true);
+  assert.equal(summary.diagnostics.fallback_reason, "response_too_large");
+  assert.equal(summary.diagnostics.fallback_window_ms, 24 * 60 * 60 * 1000);
+  assert.equal(summary.diagnostics.initial_attempt.upstream_http_status, 200);
+  assert.equal(summary.diagnostics.initial_attempt.response_format, "non_json_or_unparseable");
+  assert.equal(summary.diagnostics.initial_attempt.records_array_path_detected, null);
+  assert.equal(summary.diagnostics.initial_attempt.records_count_before_limit, 0);
+  assert.equal(summary.diagnostics.initial_attempt.response_too_large, true);
+  assert.equal(
+    summary.diagnostics.initial_attempt.parse_error_detail_sanitized,
+    "response_body_truncated_at_max_live_body_bytes"
+  );
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("2871834924"), false);
+  assert.equal(serialized.includes("444946196"), false);
+  assert.equal(serialized.includes("ANDROID_login_device_abc"), false);
+  assert.equal(serialized.includes("ANDROID_raw_login_device"), false);
+  assert.equal(serialized.includes("10.20.30.43"), false);
+  assert.equal(serialized.includes("raw-login-record-secret"), false);
+  assert.equal(serialized.includes("APP_RAW_VALUE"), false);
+  assert.equal(serialized.includes("LOGIN_RAW_METHOD"), false);
+});
+
+test("login_logs_search parse failure returns parse_error diagnostics instead of network_error", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.login_logs_search,
+    {
+      user_id: "444946196",
+      from_timestamp: 1780000000000,
+      to_timestamp: 1780086400000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "{\"code\":0,\"data\":{\"records\":[",
+      bodyTruncated: false,
+      observedBytes: 29
+    },
+    { latencyMs: 9, originWarmed: true }
+  );
+
+  assert.equal(response.status, "parse_error");
+  assert.equal(response.source_status, "parse_error");
+  assert.equal(response.error_type, "parse_error");
+  const summary = response.data.response_summary.login_logs;
+  assert.equal(summary.source_status, "parse_error");
+  assert.equal(summary.records_count, 0);
+  assert.equal(summary.diagnostics.upstream_http_status, 200);
+  assert.equal(summary.diagnostics.response_format, "non_json_or_unparseable");
+  assert.equal(summary.diagnostics.response_too_large, false);
+  assert.equal(summary.diagnostics.parse_error_detail_sanitized, "invalid_or_unparseable_json");
+  assert.equal(JSON.stringify(response).includes("network_error"), false);
 });
 
 test("login_logs_search HTML login page is classified as auth_failed", () => {
@@ -678,6 +948,12 @@ test("login_logs_search platform and network errors stay standardized", async ()
   assert.equal(networkResponse.sensitive_output, false);
   assert.ok(networkResponse.source_card);
   assert.ok(networkResponse.source_quality);
+  assert.equal(networkResponse.data.response_summary.login_logs.source_status, "blocked");
+  assert.equal(networkResponse.data.response_summary.login_logs.diagnostics.upstream_http_status, null);
+  assert.equal(networkResponse.data.response_summary.login_logs.diagnostics.response_format, "not_available");
+  assert.equal(networkResponse.data.response_summary.login_logs.diagnostics.records_array_path_detected, null);
+  assert.equal(networkResponse.data.response_summary.login_logs.diagnostics.response_too_large, false);
+  assert.equal(networkResponse.data.response_summary.login_logs.diagnostics.parse_error_detail_sanitized, null);
 });
 
 test("login_logs_search forbidden inputs are rejected", async () => {
@@ -2313,7 +2589,12 @@ class FakeBrowserClient {
       method: actionRequest.method,
       body: actionRequest.body
     });
-    return this.fetchResults[action.name] || {
+    const configuredResult = this.fetchResults[action.name];
+    if (Array.isArray(configuredResult)) {
+      const actionCallIndex = this.runCalls.filter((call) => call.actionName === action.name).length - 1;
+      return configuredResult[Math.min(actionCallIndex, configuredResult.length - 1)];
+    }
+    return configuredResult || {
       completed: true,
       ok: true,
       status: 200,

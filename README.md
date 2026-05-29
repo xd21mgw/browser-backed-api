@@ -204,6 +204,8 @@ Weapon source status:
 - generated query: `userId`, `from_timestamp`, `to_timestamp`, `recallSource`
 - time fields must be epoch milliseconds; windows larger than 7 days are rejected as `query_window_too_large`
 - live output is shape-only and summarizes record count, observed time range, result/device/IP/origin field presence, and returned field names
+- records arrays are detected from known response wrappers including `data.records` and `data.logSearchModels`
+- when the default 7-day response is too large or unparseable JSON, the action retries once with a 24-hour window and keeps the first-attempt diagnostics
 - raw login log records, raw IP values, raw device IDs, and raw upstream full bodies are not output
 - empty records are a source no-data outcome and are not no-risk counterevidence
 - no caller-provided URL, path, header, cookie, token, session, secret, or raw query is accepted

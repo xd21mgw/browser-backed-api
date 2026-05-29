@@ -87,6 +87,7 @@ const WEAPON_MAX_DEVICE_IDS = 20;
 const LOGIN_LOGS_SEARCH_PATH = "/rest/unified/log/search";
 const LOGIN_LOGS_DEFAULT_RECALL_SOURCE = "2,0,1,3";
 const LOGIN_LOGS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGIN_LOGS_FALLBACK_WINDOW_MS = 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
@@ -190,6 +191,8 @@ export const ACTIONS = Object.freeze({
     validateParams: validateLoginLogsInput,
     buildRequest: buildLoginLogsRequest,
     summarizeLiveResponse: summarizeLoginLogsResponse,
+    summarizeParseFailureResponse: summarizeLoginLogsParseFailureResponse,
+    summarizeFailureResponse: summarizeLoginLogsFailureResponse,
     mockData: mockLoginLogsData
   }),
   track_analysis_summary: freezeAction({
@@ -326,8 +329,21 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
   const parsed = parseJson(fetchResult.bodyText);
   const httpErrorType = classifyHttpStatus(fetchResult.status);
   const parseErrorType = parsed.ok ? null : classifyUnparseableBody(fetchResult.bodyText);
+  const responseFormat = parsed.ok ? "json" : "non_json_or_unparseable";
+  const parseErrorDetailSanitized = parsed.ok ? null : parseErrorDetail(fetchResult, parseErrorType);
+  const summaryMeta = {
+    ...meta,
+    config,
+    fetchResult,
+    responseFormat,
+    httpErrorType,
+    parseErrorType,
+    parseErrorDetailSanitized
+  };
   const actionSummary = parsed.ok && typeof action.summarizeLiveResponse === "function"
-    ? action.summarizeLiveResponse(parsed.value, safeInput)
+    ? action.summarizeLiveResponse(parsed.value, safeInput, summaryMeta)
+    : !parsed.ok && typeof action.summarizeParseFailureResponse === "function"
+      ? action.summarizeParseFailureResponse(fetchResult.bodyText, safeInput, summaryMeta)
     : {};
   const transportErrorType = httpErrorType || parseErrorType;
   const errorType = transportErrorType || actionSummary.errorType || null;
@@ -341,13 +357,14 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
     observed_bytes: fetchResult.observedBytes,
     response_summary: parsed.ok
       ? {
-          format: "json",
+          format: responseFormat,
           shape: summarizeJsonShape(parsed.value),
           ...(actionSummary.summary || {})
         }
       : {
-          format: "non_json_or_unparseable",
-          shape: null
+          format: responseFormat,
+          shape: null,
+          ...(actionSummary.summary || {})
         }
   };
 
@@ -385,6 +402,7 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
 
 export function buildLiveActionFailureResponse(action, input, config, meta = {}) {
   validateActionInput(input);
+  const safeInput = sanitizeInput(input);
   const errorType = meta.errorType || "page_load_error";
   const sourceStatus = meta.sourceStatus || sourceStatusFromErrorType(errorType);
   const fetchMeta = {
@@ -394,6 +412,15 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
     bodyTruncated: false,
     observedBytes: 0
   };
+  const actionSummary = typeof action.summarizeFailureResponse === "function"
+    ? action.summarizeFailureResponse(safeInput, {
+        ...meta,
+        fetchResult: fetchMeta,
+        responseFormat: "not_available",
+        sourceStatus,
+        errorType
+      })
+    : null;
 
   return {
     action: action.name,
@@ -415,7 +442,13 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
       ok: false,
       body_truncated: false,
       observed_bytes: 0,
-      response_summary: null
+      response_summary: actionSummary?.summary
+        ? {
+            format: "not_available",
+            shape: null,
+            ...actionSummary.summary
+          }
+        : null
     },
     source_card: buildSourceCard({ action, config, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } }),
     source_quality: buildSourceQuality({ action, fetchMeta, mock: false, meta: { ...meta, sourceStatus, errorType } })
@@ -466,6 +499,33 @@ export function buildActionParameterErrorResponse(action, config, meta = {}) {
       mock: config.mode === "mock",
       meta: { ...meta, sourceStatus, errorType }
     })
+  };
+}
+
+export function loginLogsFallbackReason(action, input, fetchResult) {
+  if (action?.name !== "login_logs_search" || !usesDefaultLoginLogsWindow(input || {})) {
+    return null;
+  }
+  if (classifyHttpStatus(fetchResult?.status)) {
+    return null;
+  }
+  if (fetchResult?.bodyTruncated) {
+    return "response_too_large";
+  }
+  const parsed = parseJson(fetchResult?.bodyText);
+  if (!parsed.ok && classifyUnparseableBody(fetchResult?.bodyText) === "parse_error") {
+    return "parse_error";
+  }
+  return null;
+}
+
+export function buildLoginLogsFallbackInput(input) {
+  const safeInput = sanitizeInput(input);
+  const window = loginLogsTimeWindow(safeInput);
+  return {
+    ...safeInput,
+    from_timestamp: window.to - LOGIN_LOGS_FALLBACK_WINDOW_MS,
+    to_timestamp: window.to
   };
 }
 
@@ -603,6 +663,16 @@ function classifyUnparseableBody(text) {
     return "auth_failed";
   }
   return "parse_error";
+}
+
+function parseErrorDetail(fetchResult, parseErrorType) {
+  if (fetchResult?.bodyTruncated) {
+    return "response_body_truncated_at_max_live_body_bytes";
+  }
+  if (parseErrorType === "auth_failed") {
+    return "html_auth_or_login_response";
+  }
+  return "invalid_or_unparseable_json";
 }
 
 function validateWeaponInventoryInput(input) {
@@ -1249,7 +1319,15 @@ function buildLoginLogsRequest(input) {
   };
 }
 
-function summarizeLoginLogsResponse(value, input) {
+function summarizeLoginLogsResponse(value, input, meta = {}) {
+  const diagnosticsBase = buildLoginLogsDiagnostics({
+    value,
+    input,
+    fetchResult: meta.fetchResult,
+    responseFormat: meta.responseFormat || "json",
+    parseErrorDetailSanitized: null
+  });
+  const diagnostics = withLoginLogsFallbackDiagnostics(diagnosticsBase, meta);
   const apiCode = readApiCode(value);
   if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
     return {
@@ -1261,20 +1339,68 @@ function summarizeLoginLogsResponse(value, input) {
           api_code: apiCode,
           records_count: 0,
           no_data: false,
-          no_data_not_risk_exclusion: true
+          no_data_not_risk_exclusion: true,
+          diagnostics
         }
       }
     };
   }
 
-  const records = extractLoginLogRecords(value).slice(0, loginLogsLimit(input));
+  const detectedRecords = detectLoginLogRecords(value);
+  const records = detectedRecords.records.slice(0, loginLogsLimit(input));
   const noData = records.length === 0;
-  const summary = buildLoginLogsSummary(records, input, noData);
+  const summary = buildLoginLogsSummary(records, input, noData, diagnostics);
   return {
     sourceStatus: noData ? "no_data" : "completed",
     errorType: null,
     summary: {
       login_logs: summary
+    }
+  };
+}
+
+function summarizeLoginLogsParseFailureResponse(_bodyText, input, meta = {}) {
+  const errorType = meta.httpErrorType || meta.parseErrorType || "parse_error";
+  const sourceStatus = sourceStatusFromErrorType(errorType);
+  const diagnosticsBase = buildLoginLogsDiagnostics({
+    value: null,
+    input,
+    fetchResult: meta.fetchResult,
+    responseFormat: meta.responseFormat || "non_json_or_unparseable",
+    parseErrorDetailSanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json"
+  });
+  return {
+    sourceStatus,
+    errorType,
+    summary: {
+      login_logs: {
+        source_status: sourceStatus,
+        records_count: 0,
+        no_data: false,
+        no_data_not_risk_exclusion: true,
+        diagnostics: withLoginLogsFallbackDiagnostics(diagnosticsBase, meta)
+      }
+    }
+  };
+}
+
+function summarizeLoginLogsFailureResponse(input, meta = {}) {
+  const diagnosticsBase = buildLoginLogsDiagnostics({
+    value: null,
+    input,
+    fetchResult: meta.fetchResult,
+    responseFormat: meta.responseFormat || "not_available",
+    parseErrorDetailSanitized: null
+  });
+  return {
+    summary: {
+      login_logs: {
+        source_status: meta.sourceStatus || sourceStatusFromErrorType(meta.errorType || "page_load_error"),
+        records_count: 0,
+        no_data: false,
+        no_data_not_risk_exclusion: true,
+        diagnostics: withLoginLogsFallbackDiagnostics(diagnosticsBase, meta)
+      }
     }
   };
 }
@@ -1321,31 +1447,56 @@ function loginLogsLimit(input) {
   return Object.hasOwn(input, "limit") ? Math.trunc(input.limit) : LOGIN_LOGS_DEFAULT_LIMIT;
 }
 
+function usesDefaultLoginLogsWindow(input) {
+  if (Object.hasOwn(input, "from_timestamp") || Object.hasOwn(input, "to_timestamp")) {
+    return false;
+  }
+  const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
+    ? input.time_window
+    : null;
+  if (!rawWindow) {
+    return true;
+  }
+  return !["from_timestamp", "to_timestamp", "from", "to", "startTime", "endTime"].some((key) => Object.hasOwn(rawWindow, key));
+}
+
 function validRecallSource(value) {
   return typeof value === "string" && /^\d+(,\d+)*$/.test(value.trim());
 }
 
-function extractLoginLogRecords(value) {
+function detectLoginLogRecords(value) {
   const data = value && typeof value === "object" ? value.data : value;
   if (Array.isArray(data)) {
-    return data.filter(isPlainObject);
+    return {
+      path: Array.isArray(value?.data) ? "data[]" : "response[]",
+      records: data.filter(isPlainObject),
+      count: data.length
+    };
   }
   if (!isPlainObject(data)) {
-    return [];
+    return { path: null, records: [], count: 0 };
   }
 
-  for (const key of ["records", "rows", "list", "items", "logs", "result", "data"]) {
+  for (const key of ["logSearchModels", "records", "rows", "list", "items", "logs", "result", "data"]) {
     if (Array.isArray(data[key])) {
-      return data[key].filter(isPlainObject);
+      return {
+        path: `data.${safeFieldName(key)}`,
+        records: data[key].filter(isPlainObject),
+        count: data[key].length
+      };
     }
   }
   if (isPlainObject(data.page) && Array.isArray(data.page.list)) {
-    return data.page.list.filter(isPlainObject);
+    return {
+      path: "data.page.list",
+      records: data.page.list.filter(isPlainObject),
+      count: data.page.list.length
+    };
   }
-  return [];
+  return { path: null, records: [], count: 0 };
 }
 
-function buildLoginLogsSummary(records, input, noData) {
+function buildLoginLogsSummary(records, input, noData, diagnostics) {
   const window = loginLogsTimeWindow(input);
   const timeValues = records.map(loginRecordTime).filter((value) => value !== null).sort((a, b) => a - b);
   const returnedFields = returnedLoginLogFields(records);
@@ -1366,7 +1517,35 @@ function buildLoginLogsSummary(records, input, noData) {
     origin_fields_present: fieldsPresent(returnedFields, /(origin|source|channel|platform|app|端|来源)/i),
     returned_fields_observed: returnedFields,
     no_data: noData,
-    no_data_not_risk_exclusion: true
+    no_data_not_risk_exclusion: true,
+    diagnostics
+  };
+}
+
+function buildLoginLogsDiagnostics({ value, input, fetchResult, responseFormat, parseErrorDetailSanitized }) {
+  const detectedRecords = value === null ? { path: null, records: [], count: 0 } : detectLoginLogRecords(value);
+  return {
+    upstream_http_status: typeof fetchResult?.status === "number" ? fetchResult.status : null,
+    response_format: responseFormat,
+    top_level_keys: value && typeof value === "object" && !Array.isArray(value) ? observedKeys(value) : [],
+    records_array_path_detected: detectedRecords.path,
+    records_count_before_limit: detectedRecords.count,
+    summary_limit: loginLogsLimit(input),
+    response_too_large: Boolean(fetchResult?.bodyTruncated),
+    parse_error_detail_sanitized: parseErrorDetailSanitized
+  };
+}
+
+function withLoginLogsFallbackDiagnostics(diagnostics, meta) {
+  if (!meta?.loginLogsFallbackAttempted) {
+    return diagnostics;
+  }
+  return {
+    ...diagnostics,
+    fallback_attempted: true,
+    fallback_reason: meta.loginLogsFallbackReason || null,
+    fallback_window_ms: LOGIN_LOGS_FALLBACK_WINDOW_MS,
+    initial_attempt: meta.loginLogsInitialDiagnostics || null
   };
 }
 
@@ -1406,8 +1585,11 @@ function fieldsPresent(fields, pattern) {
 function firstLoginIp(records) {
   for (const record of records) {
     for (const [key, value] of Object.entries(record)) {
-      if (/(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(key) && isNonEmptyString(value)) {
-        return value.trim();
+      if (/(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(key)) {
+        const sample = firstStringLike(value);
+        if (sample) {
+          return sample;
+        }
       }
     }
   }
@@ -1417,8 +1599,26 @@ function firstLoginIp(records) {
 function firstLoginDeviceId(records) {
   for (const record of records) {
     for (const [key, value] of Object.entries(record)) {
-      if (/(deviceId|device_id|did|deviceDid|设备)/i.test(key) && (isNonEmptyString(value) || typeof value === "number")) {
-        return String(value);
+      if (/(deviceId|device_id|did|deviceDid|设备)/i.test(key)) {
+        const sample = firstStringLike(value);
+        if (sample) {
+          return sample;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function firstStringLike(value) {
+  if (isNonEmptyString(value) || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 20)) {
+      const sample = firstStringLike(item);
+      if (sample) {
+        return sample;
       }
     }
   }
@@ -2212,6 +2412,12 @@ function observedKeys(value) {
 function safeFieldName(key) {
   if (/(authorization|cookie|token|secret|session|password|credential|csrf|jwt)/i.test(key)) {
     return "[redacted_key]";
+  }
+  if (/^(ANDROID|IOS)_[A-Za-z0-9_.:-]+$/.test(String(key))) {
+    return "[masked_device_id_key]";
+  }
+  if (/^\d{8,}$/.test(String(key))) {
+    return "[masked_numeric_id_key]";
   }
   return String(key).slice(0, 128);
 }

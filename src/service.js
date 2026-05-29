@@ -2,11 +2,13 @@ import {
   ACTIONS,
   buildActionBody,
   buildActionParameterErrorResponse,
+  buildLoginLogsFallbackInput,
   buildLiveActionFailureResponse,
   buildLiveActionResponse,
   getAction,
   getActionParameterError,
   listActions,
+  loginLogsFallbackReason,
   runMockAction,
   validateActionInput
 } from "./actions.js";
@@ -223,6 +225,31 @@ export class BrowserBackedApiService {
 
     try {
       const fetchResult = await this.browserClient.runAction(action, actionRequest);
+      const fallbackReason = loginLogsFallbackReason(action, input, fetchResult);
+      if (fallbackReason) {
+        const firstAttemptResponse = buildLiveActionResponse(action, input, this.config, fetchResult, {
+          latencyMs: Date.now() - startedAt,
+          originWarmed,
+          actionDiagnostics,
+          requestPath: actionRequest.displayPath || actionRequest.path,
+          requestMethod: actionRequest.method,
+          ...lazyMeta
+        });
+        const fallbackInput = buildLoginLogsFallbackInput(input);
+        const fallbackRequest = buildActionBody(action, fallbackInput);
+        const fallbackFetchResult = await this.browserClient.runAction(action, fallbackRequest);
+        return buildLiveActionResponse(action, fallbackInput, this.config, fallbackFetchResult, {
+          latencyMs: Date.now() - startedAt,
+          originWarmed,
+          actionDiagnostics,
+          requestPath: fallbackRequest.displayPath || fallbackRequest.path,
+          requestMethod: fallbackRequest.method,
+          loginLogsFallbackAttempted: true,
+          loginLogsFallbackReason: fallbackReason,
+          loginLogsInitialDiagnostics: firstAttemptResponse.data?.response_summary?.login_logs?.diagnostics || null,
+          ...lazyMeta
+        });
+      }
       return buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         originWarmed,
