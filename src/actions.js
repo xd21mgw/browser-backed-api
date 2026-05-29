@@ -18,12 +18,48 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "cursor",
   "query",
   "severity",
+  "eventType",
+  "source_id",
+  "sourceIds",
+  "startTime",
+  "endTime",
+  "page",
+  "pageSize",
+  "selected_columns",
   "user_id",
   "device_id",
   "appName",
   "time_window",
   "sub_interface"
 ]);
+
+const RCP_EVENT_LIST_PATH = "/v2/rest/event/eventList";
+const RCP_DEFAULT_EVENT_TYPE = "REGISTER";
+const RCP_DEFAULT_WINDOW_MS = 30 * 60 * 1000;
+const RCP_DEFAULT_PAGE = 1;
+const RCP_DEFAULT_PAGE_SIZE = 200;
+const RCP_MAX_PAGE_SIZE = 500;
+const RCP_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const RCP_DEFAULT_TABLE_COLUMNS = Object.freeze([
+  "sourceId",
+  "eventId",
+  "_occurTime",
+  "_realTimeOp",
+  "_errorCode",
+  "deviceId",
+  "hitFusePolicyCode",
+  "time"
+]);
+const RCP_COLUMN_COMMENTS = Object.freeze({
+  sourceId: "sourceId",
+  eventId: "eventId",
+  _occurTime: "_occurTime",
+  _realTimeOp: "_realTimeOp",
+  _errorCode: "_errorCode",
+  deviceId: "deviceId",
+  hitFusePolicyCode: "hitFusePolicyCode",
+  time: "time"
+});
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -56,6 +92,7 @@ const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "secret",
   "session",
   "sessionid",
+  "rawbody",
   "csrf",
   "jwt"
 ]);
@@ -64,25 +101,25 @@ export const ACTIONS = Object.freeze({
   rcp_snapshot: freezeAction({
     name: "rcp_snapshot",
     domainKey: "rcp",
-    description: "Return a compact RCP status snapshot for an allowed account/workspace scope.",
+    description: "Return a compact RCP eventList shape summary for an allowed typed event query.",
     method: "POST",
-    apiPath: "/api/rcp/snapshot",
+    apiPath: RCP_EVENT_LIST_PATH,
     inputContract: {
-      accountId: "optional string",
-      workspaceId: "optional string",
-      dateRange: "optional { from, to }",
-      filters: "optional object"
+      eventType: "optional string; default REGISTER",
+      source_id: "optional string; maps to eventV2.sourceIds",
+      sourceIds: "optional string or string[]; maps to eventV2.sourceIds string",
+      device_id: "optional string; maps to conditionList",
+      startTime: "optional YYYY-MM-DD HH:mm:ss",
+      endTime: "optional YYYY-MM-DD HH:mm:ss",
+      time_window: "optional { startTime, endTime } in YYYY-MM-DD HH:mm:ss",
+      page: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 500; default 200",
+      selected_columns: "optional string[]; converted to tableHeaderList object array"
     },
-    mockData: (input) => ({
-      snapshot_id: "mock-rcp-001",
-      scope: scopeFromInput(input),
-      totals: {
-        active_items: 42,
-        blocked_items: 3,
-        pending_review: 7
-      },
-      generated_at: fixedMockTime()
-    })
+    validateParams: validateRcpSnapshotInput,
+    buildRequest: buildRcpSnapshotRequest,
+    summarizeLiveResponse: summarizeRcpSnapshotResponse,
+    mockData: mockRcpSnapshotData
   }),
   weapon_inventory: freezeAction({
     name: "weapon_inventory",
@@ -354,8 +391,8 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
 }
 
 export function buildActionParameterErrorResponse(action, config, meta = {}) {
-  const errorType = "parameter_error";
-  const sourceStatus = "parameter_error";
+  const errorType = meta.parameterError?.errorType || "parameter_error";
+  const sourceStatus = meta.parameterError?.sourceStatus || "parameter_error";
   const fetchMeta = {
     completed: false,
     ok: false,
@@ -410,7 +447,7 @@ export function validateActionInput(input) {
     const error = new Error(`Forbidden action input: ${violation}`);
     error.statusCode = 400;
     error.code = "forbidden_action_input";
-    error.publicMessage = "Action input may not include URLs, paths, headers, cookies, tokens, sessions, or secrets";
+    error.publicMessage = "Action input may not include URLs, paths, headers, cookies, tokens, sessions, secrets, or raw bodies";
     throw error;
   }
 }
@@ -534,6 +571,196 @@ function classifyUnparseableBody(text) {
     return "auth_failed";
   }
   return "parse_error";
+}
+
+function validateRcpSnapshotInput(input) {
+  const timeValidation = validateRcpTimeInput(input);
+  if (timeValidation) {
+    return timeValidation;
+  }
+
+  if (Object.hasOwn(input, "eventType") && !isNonEmptyString(input.eventType)) {
+    return {
+      message: "rcp_snapshot eventType must be a non-empty string",
+      required: ["eventType string"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "source_id") && !isNonEmptyString(input.source_id)) {
+    return {
+      message: "rcp_snapshot source_id must be a non-empty string",
+      required: ["source_id string"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "sourceIds") && rcpSourceIdsString(input) === null) {
+    return {
+      message: "rcp_snapshot sourceIds must be a string or string array",
+      required: ["sourceIds string|string[]"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "device_id") && !isNonEmptyString(input.device_id)) {
+    return {
+      message: "rcp_snapshot device_id must be a non-empty string",
+      required: ["device_id string"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "selected_columns") && !validRcpSelectedColumns(input.selected_columns)) {
+    return {
+      message: "rcp_snapshot selected_columns must be an array of column names",
+      required: ["selected_columns string[]"],
+      errorType: "wrong_request_body_shape"
+    };
+  }
+
+  if (Object.hasOwn(input, "page") && !validPositiveInteger(input.page)) {
+    return {
+      message: "rcp_snapshot page must be a positive integer",
+      required: ["page positive integer"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  if (Object.hasOwn(input, "pageSize") && (!validPositiveInteger(input.pageSize) || input.pageSize > RCP_MAX_PAGE_SIZE)) {
+    return {
+      message: `rcp_snapshot pageSize must be a positive integer <= ${RCP_MAX_PAGE_SIZE}`,
+      required: [`pageSize positive integer <= ${RCP_MAX_PAGE_SIZE}`],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  return null;
+}
+
+function validateRcpTimeInput(input) {
+  const directStart = Object.hasOwn(input, "startTime") ? input.startTime : undefined;
+  const directEnd = Object.hasOwn(input, "endTime") ? input.endTime : undefined;
+  const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
+    ? input.time_window
+    : {};
+  const windowStart = Object.hasOwn(rawWindow, "startTime") ? rawWindow.startTime : undefined;
+  const windowEnd = Object.hasOwn(rawWindow, "endTime") ? rawWindow.endTime : undefined;
+  const providedStart = directStart ?? windowStart;
+  const providedEnd = directEnd ?? windowEnd;
+
+  if ((providedStart === undefined) !== (providedEnd === undefined)) {
+    return {
+      message: "rcp_snapshot requires startTime and endTime together",
+      required: ["startTime and endTime"],
+      errorType: "wrong_time_field_format"
+    };
+  }
+
+  if (providedStart === undefined && providedEnd === undefined) {
+    return null;
+  }
+
+  if (!validRcpTimeString(providedStart) || !validRcpTimeString(providedEnd)) {
+    return {
+      message: "rcp_snapshot time fields must use YYYY-MM-DD HH:mm:ss",
+      required: ["startTime/endTime format YYYY-MM-DD HH:mm:ss"],
+      errorType: "wrong_time_field_format"
+    };
+  }
+
+  if (providedEnd <= providedStart) {
+    return {
+      message: "rcp_snapshot endTime must be later than startTime",
+      required: ["endTime > startTime"],
+      errorType: "invalid_parameter"
+    };
+  }
+
+  return null;
+}
+
+function buildRcpSnapshotRequest(input) {
+  const timeWindow = rcpTimeWindow(input);
+  const tableHeaderList = rcpTableHeaderList(input.selected_columns);
+  const page = Object.hasOwn(input, "page") ? Math.trunc(input.page) : RCP_DEFAULT_PAGE;
+  const pageSize = Object.hasOwn(input, "pageSize") ? Math.trunc(input.pageSize) : RCP_DEFAULT_PAGE_SIZE;
+
+  return {
+    path: RCP_EVENT_LIST_PATH,
+    method: "POST",
+    body: {
+      tableHeaderList,
+      startTime: timeWindow.startTime,
+      endTime: timeWindow.endTime,
+      currentTime: timeWindow.currentTime,
+      eventV2: {
+        eventType: isNonEmptyString(input.eventType) ? input.eventType.trim() : RCP_DEFAULT_EVENT_TYPE,
+        sourceIds: rcpSourceIdsString(input) || ""
+      },
+      conditionList: rcpConditionList(input),
+      pagination: {
+        page,
+        pageSize
+      }
+    }
+  };
+}
+
+function summarizeRcpSnapshotResponse(value) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 200].includes(apiCode)) {
+    const errorType = classifyRcpApiError(value);
+    return {
+      sourceStatus: ["wrong_request_body_shape", "wrong_time_field_format", "invalid_parameter"].includes(errorType)
+        ? "parameter_error"
+        : "blocked",
+      errorType,
+      summary: {
+        rcp_snapshot: {
+          api_code: apiCode,
+          response_wrapper_paths_present: rcpWrapperPresence(value),
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const data = value && typeof value === "object" ? value.data : null;
+  const eventList = Array.isArray(data?.eventList) ? data.eventList.filter((item) => item && typeof item === "object") : null;
+  if (!data || eventList === null) {
+    return {
+      sourceStatus: "parse_error",
+      errorType: "parse_error",
+      summary: {
+        rcp_snapshot: {
+          response_wrapper_paths_present: rcpWrapperPresence(value),
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const tableHeaderColumns = rcpTableHeaderColumns(data.tableHeaderList);
+  const returnedColumns = rcpReturnedColumns(eventList);
+  const noData = eventList.length === 0;
+  return {
+    sourceStatus: noData ? "completed_no_hit_for_small_window" : "completed",
+    errorType: null,
+    summary: {
+      rcp_snapshot: {
+        response_wrapper_paths_present: rcpWrapperPresence(value),
+        event_count: eventList.length,
+        pagination_summary: rcpPaginationSummary(data.pagination),
+        table_header_columns: tableHeaderColumns,
+        returned_columns_observed: returnedColumns,
+        first_event_shape_keys: returnedColumnsFromFirstEvent(eventList),
+        dynamic_columns_observed: returnedColumns.filter((column) => !tableHeaderColumns.includes(column)),
+        no_data: noData,
+        no_data_not_risk_exclusion: true
+      }
+    }
+  };
 }
 
 function validateTrackAnalysisInput(input) {
@@ -1127,6 +1354,238 @@ function isEmptyPayload(value) {
     return Object.keys(value).length === 0;
   }
   return false;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function validPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function validRcpTimeString(value) {
+  if (typeof value !== "string" || !RCP_TIME_PATTERN.test(value)) {
+    return false;
+  }
+
+  const [datePart, timePart] = value.split(" ");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute, second] = timePart.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day &&
+    date.getHours() === hour &&
+    date.getMinutes() === minute &&
+    date.getSeconds() === second
+  );
+}
+
+function rcpTimeWindow(input) {
+  const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
+    ? input.time_window
+    : {};
+  const startTime = Object.hasOwn(input, "startTime") ? input.startTime : rawWindow.startTime;
+  const endTime = Object.hasOwn(input, "endTime") ? input.endTime : rawWindow.endTime;
+
+  if (typeof startTime === "string" && typeof endTime === "string") {
+    return {
+      startTime,
+      endTime,
+      currentTime: endTime
+    };
+  }
+
+  const end = new Date();
+  const start = new Date(end.getTime() - RCP_DEFAULT_WINDOW_MS);
+  return {
+    startTime: formatRcpTimestamp(start),
+    endTime: formatRcpTimestamp(end),
+    currentTime: formatRcpTimestamp(end)
+  };
+}
+
+function formatRcpTimestamp(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-") + " " + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join(":");
+}
+
+function rcpSourceIdsString(input) {
+  if (Object.hasOwn(input, "source_id")) {
+    return isNonEmptyString(input.source_id) ? input.source_id.trim() : null;
+  }
+  if (!Object.hasOwn(input, "sourceIds")) {
+    return "";
+  }
+  if (isNonEmptyString(input.sourceIds)) {
+    return input.sourceIds.trim();
+  }
+  if (Array.isArray(input.sourceIds) && input.sourceIds.length > 0 && input.sourceIds.every(isNonEmptyString)) {
+    return input.sourceIds.map((item) => item.trim()).join(",");
+  }
+  return null;
+}
+
+function validRcpSelectedColumns(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= 50 && value.every(validRcpColumnName);
+}
+
+function validRcpColumnName(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(value);
+}
+
+function rcpTableHeaderList(selectedColumns) {
+  const columns = validRcpSelectedColumns(selectedColumns) ? selectedColumns : RCP_DEFAULT_TABLE_COLUMNS;
+  return columns.map((column) => ({
+    column_name: column,
+    column_comment: RCP_COLUMN_COMMENTS[column] || column
+  }));
+}
+
+function rcpConditionList(input) {
+  if (!isNonEmptyString(input.device_id)) {
+    return [];
+  }
+  return [
+    [
+      {
+        field: "deviceId",
+        operator: "=",
+        value: input.device_id.trim()
+      }
+    ]
+  ];
+}
+
+function classifyRcpApiError(value) {
+  const text = rcpErrorText(value);
+  if (/(time|starttime|endtime|yyyy|date|时间|日期)/i.test(text)) {
+    return "wrong_time_field_format";
+  }
+  if (/(tableheaderlist|conditionlist|eventv2|sourceids|body|shape|字段|参数体|请求体)/i.test(text)) {
+    return "wrong_request_body_shape";
+  }
+  if (/(param|parameter|invalid|illegal|参数|无效|非法)/i.test(text)) {
+    return "invalid_parameter";
+  }
+  return "platform_error";
+}
+
+function rcpErrorText(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  return ["message", "msg", "error", "errorMsg", "error_message"]
+    .map((key) => value[key])
+    .filter((item) => typeof item === "string")
+    .join(" ");
+}
+
+function rcpWrapperPresence(value) {
+  const data = value && typeof value === "object" ? value.data : null;
+  return {
+    data_eventList: Array.isArray(data?.eventList),
+    data_pagination: Boolean(data?.pagination && typeof data.pagination === "object" && !Array.isArray(data.pagination)),
+    data_tableHeaderList: Array.isArray(data?.tableHeaderList)
+  };
+}
+
+function rcpPaginationSummary(pagination) {
+  if (!pagination || typeof pagination !== "object" || Array.isArray(pagination)) {
+    return null;
+  }
+  const keys = ["page", "pageSize", "total", "totalCount", "totalPage", "pages", "hasNext"];
+  const summary = {};
+  for (const key of keys) {
+    if (Object.hasOwn(pagination, key) && ["number", "boolean", "string"].includes(typeof pagination[key])) {
+      summary[key] = pagination[key];
+    }
+  }
+  return summary;
+}
+
+function rcpTableHeaderColumns(tableHeaderList) {
+  if (!Array.isArray(tableHeaderList)) {
+    return [];
+  }
+  return tableHeaderList
+    .map((item) => {
+      if (typeof item === "string") {
+        return safeFieldName(item);
+      }
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const raw = item.column_name || item.columnName || item.name || item.key || item.dataIndex;
+      return typeof raw === "string" ? safeFieldName(raw) : null;
+    })
+    .filter(Boolean)
+    .slice(0, 80);
+}
+
+function rcpReturnedColumns(eventList) {
+  const columns = [];
+  for (const item of eventList.slice(0, 20)) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      columns.push(...observedKeys(item));
+    }
+  }
+  return [...new Set(columns)].slice(0, 80);
+}
+
+function returnedColumnsFromFirstEvent(eventList) {
+  const first = eventList.find((item) => item && typeof item === "object" && !Array.isArray(item));
+  return observedKeys(first);
+}
+
+function mockRcpSnapshotData(input) {
+  const request = buildRcpSnapshotRequest(input);
+  return {
+    shape_summary_only: true,
+    fixed_path: RCP_EVENT_LIST_PATH,
+    request_body_shape: {
+      tableHeaderList: "object_array",
+      startTime: "YYYY-MM-DD HH:mm:ss",
+      endTime: "YYYY-MM-DD HH:mm:ss",
+      currentTime: "YYYY-MM-DD HH:mm:ss",
+      eventV2: {
+        eventType: request.body.eventV2.eventType,
+        sourceIds: "string"
+      },
+      conditionList: "array_of_condition_groups",
+      pagination: request.body.pagination
+    },
+    rcp_snapshot: {
+      response_wrapper_paths_present: {
+        data_eventList: true,
+        data_pagination: true,
+        data_tableHeaderList: true
+      },
+      event_count: 1,
+      pagination_summary: {
+        page: request.body.pagination.page,
+        pageSize: request.body.pagination.pageSize,
+        total: 1
+      },
+      table_header_columns: request.body.tableHeaderList.map((column) => column.column_name),
+      returned_columns_observed: ["sourceId", "eventId", "_occurTime", "deviceId"],
+      first_event_shape_keys: ["sourceId", "eventId", "_occurTime", "deviceId"],
+      dynamic_columns_observed: [],
+      no_data: false,
+      no_data_not_risk_exclusion: true
+    },
+    generated_at: fixedMockTime()
+  };
 }
 
 function scopeFromInput(input) {

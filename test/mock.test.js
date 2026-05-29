@@ -407,12 +407,253 @@ test("lazy rewarm failure still returns source card, quality, and sensitivity fl
 
 test("forbidden action input terms still return 400", async () => {
   const service = createService();
-  for (const key of ["url", "path", "header", "cookie", "token", "session", "secret"]) {
+  for (const key of ["url", "path", "header", "cookie", "token", "session", "secret", "raw_body"]) {
     await assert.rejects(
       () => service.executeAction("rcp_snapshot", { [key]: "blocked" }),
       (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
     );
   }
+});
+
+test("rcp_snapshot builds fixed eventList body from typed params", () => {
+  const request = buildActionBody(ACTIONS.rcp_snapshot, {
+    eventType: "REGISTER",
+    source_id: "source-demo",
+    device_id: "device-demo",
+    startTime: "2026-05-29 10:00:00",
+    endTime: "2026-05-29 10:30:00",
+    page: 2,
+    pageSize: 100,
+    selected_columns: ["sourceId", "eventId", "_occurTime", "deviceId"]
+  });
+
+  assert.equal(request.method, "POST");
+  assert.equal(request.path, "/v2/rest/event/eventList");
+  assert.deepEqual(request.body.tableHeaderList, [
+    { column_name: "sourceId", column_comment: "sourceId" },
+    { column_name: "eventId", column_comment: "eventId" },
+    { column_name: "_occurTime", column_comment: "_occurTime" },
+    { column_name: "deviceId", column_comment: "deviceId" }
+  ]);
+  assert.equal(request.body.startTime, "2026-05-29 10:00:00");
+  assert.equal(request.body.endTime, "2026-05-29 10:30:00");
+  assert.equal(request.body.currentTime, "2026-05-29 10:30:00");
+  assert.deepEqual(request.body.eventV2, {
+    eventType: "REGISTER",
+    sourceIds: "source-demo"
+  });
+  assert.deepEqual(request.body.conditionList, [
+    [
+      {
+        field: "deviceId",
+        operator: "=",
+        value: "device-demo"
+      }
+    ]
+  ]);
+  assert.deepEqual(request.body.pagination, {
+    page: 2,
+    pageSize: 100
+  });
+});
+
+test("rcp_snapshot epoch time input returns wrong_time_field_format without platform fetch", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("rcp_snapshot", {
+    startTime: 1780000000000,
+    endTime: 1780001800000
+  });
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "wrong_time_field_format");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("rcp_snapshot successful eventList JSON returns completed shape summary", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    {
+      eventType: "REGISTER",
+      source_id: "source-demo",
+      startTime: "2026-05-29 10:00:00",
+      endTime: "2026-05-29 10:30:00"
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          eventList: [
+            {
+              sourceId: "raw-source-id",
+              eventId: "raw-event-id",
+              _occurTime: "2026-05-29 10:01:00",
+              deviceId: "raw-device-id",
+              dynamicScore: "raw-dynamic-value"
+            }
+          ],
+          pagination: {
+            page: 1,
+            pageSize: 200,
+            total: 1
+          },
+          tableHeaderList: [
+            { column_name: "sourceId", column_comment: "sourceId" },
+            { column_name: "eventId", column_comment: "eventId" },
+            { column_name: "_occurTime", column_comment: "_occurTime" },
+            { column_name: "deviceId", column_comment: "deviceId" }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 480
+    },
+    {
+      latencyMs: 18,
+      originWarmed: true,
+      requestPath: "/v2/rest/event/eventList",
+      requestMethod: "POST"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(response.source_card.path, "/v2/rest/event/eventList");
+  assert.equal(response.source_card.method, "POST");
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  const summary = response.data.response_summary.rcp_snapshot;
+  assert.deepEqual(summary.response_wrapper_paths_present, {
+    data_eventList: true,
+    data_pagination: true,
+    data_tableHeaderList: true
+  });
+  assert.equal(summary.event_count, 1);
+  assert.deepEqual(summary.pagination_summary, {
+    page: 1,
+    pageSize: 200,
+    total: 1
+  });
+  assert.deepEqual(summary.table_header_columns, ["sourceId", "eventId", "_occurTime", "deviceId"]);
+  assert.deepEqual(summary.first_event_shape_keys, ["sourceId", "eventId", "_occurTime", "deviceId", "dynamicScore"]);
+  assert.ok(summary.dynamic_columns_observed.includes("dynamicScore"));
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("raw-source-id"), false);
+  assert.equal(serialized.includes("raw-event-id"), false);
+  assert.equal(serialized.includes("raw-device-id"), false);
+  assert.equal(serialized.includes("raw-dynamic-value"), false);
+});
+
+test("rcp_snapshot empty eventList returns source no-hit without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    { startTime: "2026-05-29 10:00:00", endTime: "2026-05-29 10:30:00" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          eventList: [],
+          pagination: { page: 1, pageSize: 200, total: 0 },
+          tableHeaderList: [{ column_name: "sourceId", column_comment: "sourceId" }]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 180
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(response.status, "completed_no_hit_for_small_window");
+  assert.equal(response.source_status, "completed_no_hit_for_small_window");
+  assert.equal(response.error_type, null);
+  assert.equal(response.data.response_summary.rcp_snapshot.event_count, 0);
+  assert.equal(response.data.response_summary.rcp_snapshot.no_data, true);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("rcp_snapshot HTML login page is classified as auth_failed", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    {},
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "<html><title>SSO Login</title><body>rcp login required</body></html>",
+      bodyTruncated: false,
+      observedBytes: 71
+    },
+    { latencyMs: 12, originWarmed: true }
+  );
+
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(JSON.stringify(response).includes("rcp login required"), false);
+});
+
+test("rcp_snapshot platform and network errors stay standardized", async () => {
+  const config = createLiveConfig();
+  const platformResponse = buildLiveActionResponse(
+    ACTIONS.rcp_snapshot,
+    {},
+    config,
+    {
+      completed: true,
+      ok: false,
+      status: 500,
+      bodyText: JSON.stringify({ code: 500, message: "eventList query failed" }),
+      bodyTruncated: false,
+      observedBytes: 48
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(platformResponse.status, "blocked");
+  assert.equal(platformResponse.error_type, "platform_error");
+  assert.ok(platformResponse.source_card);
+  assert.ok(platformResponse.source_quality);
+  assert.equal(JSON.stringify(platformResponse).includes("eventList query failed"), false);
+
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      rcp: prewarmResult(config, "rcp")
+    },
+    runErrors: {
+      rcp_snapshot: new Error("Failed to fetch")
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("rcp", warmStateReady(config, "rcp"));
+  const networkResponse = await service.executeAction("rcp_snapshot", {});
+
+  assert.equal(networkResponse.status, "blocked");
+  assert.equal(networkResponse.error_type, "network_error");
+  assert.equal(networkResponse.sensitive_output, false);
+  assert.ok(networkResponse.source_card);
+  assert.ok(networkResponse.source_quality);
 });
 
 test("live response shape summary does not include raw response body values", () => {
