@@ -21,11 +21,14 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "user_id",
   "device_id",
   "appName",
-  "time_window"
+  "time_window",
+  "sub_interface"
 ]);
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
+const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
 const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
+const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration"]);
 const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
 
 const FORBIDDEN_INPUT_KEYS = Object.freeze([
@@ -127,25 +130,39 @@ export const ACTIONS = Object.freeze({
   track_analysis_summary: freezeAction({
     name: "track_analysis_summary",
     domainKey: "track_analysis",
-    description: "Return a compact track-analysis getLastestDateTime shape summary for a fixed track-analysis origin.",
+    description: "Return a compact track-analysis shape and activity summary for a fixed track-analysis origin.",
     method: "GET",
     apiPath: TRACK_ANALYSIS_LATEST_DATE_PATH,
     inputContract: {
       user_id: "required string when device_id is absent",
       device_id: "required string when user_id is absent",
       appName: "required enum: KUAISHOU | NEBULA",
-      time_window: "optional object; not used by getLastestDateTime"
+      sub_interface: "optional enum: getLastestDateTime | getUseDuration; default getLastestDateTime",
+      time_window: "optional object; getUseDuration defaults to the platform contract window"
     },
     validateParams: validateTrackAnalysisInput,
-    buildRequest: buildTrackAnalysisLatestDateRequest,
-    summarizeLiveResponse: summarizeTrackAnalysisLatestDateResponse,
+    buildRequest: buildTrackAnalysisRequest,
+    summarizeLiveResponse: summarizeTrackAnalysisResponse,
     mockData: (input) => ({
-      sub_interface: "getLastestDateTime",
+      sub_interface: trackAnalysisSubInterface(input),
       entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
       appName: input.appName,
       shape_summary_only: true,
-      latest_datetime_present: true,
-      uid_did_relation_latest_datetime_present: true,
+      latest_datetime_present: trackAnalysisSubInterface(input) === "getLastestDateTime",
+      uid_did_relation_latest_datetime_present: trackAnalysisSubInterface(input) === "getLastestDateTime",
+      activity_summary: trackAnalysisSubInterface(input) === "getUseDuration"
+        ? {
+            rows_count: 3,
+            total_duration: 150,
+            peak_duration: 90,
+            peak_date: "2026-05-28",
+            nonzero_days_count: 2,
+            date_range_observed: {
+              from: "2026-05-26",
+              to: "2026-05-28"
+            }
+          }
+        : null,
       generated_at: fixedMockTime()
     })
   })
@@ -226,7 +243,17 @@ export function runMockAction(action, input, config, meta = {}) {
     origin_warmed: Boolean(meta.originWarmed),
     sensitive_output: false,
     data,
-    source_card: buildSourceCard({ action, config, fetchMeta, mock: true, meta }),
+    source_card: buildSourceCard({
+      action,
+      config,
+      fetchMeta,
+      mock: true,
+      meta: {
+        ...meta,
+        requestPath: typeof action.buildRequest === "function" ? action.buildRequest(safeInput).path : action.apiPath,
+        requestMethod: typeof action.buildRequest === "function" ? action.buildRequest(safeInput).method : action.method
+      }
+    }),
     source_quality: buildSourceQuality({ action, fetchMeta, mock: true, meta })
   };
 }
@@ -519,10 +546,17 @@ function classifyUnparseableBody(text) {
 function validateTrackAnalysisInput(input) {
   const hasUserId = typeof input.user_id === "string" && input.user_id.trim().length > 0;
   const hasDeviceId = typeof input.device_id === "string" && input.device_id.trim().length > 0;
+  const subInterface = trackAnalysisSubInterface(input);
   if (hasUserId === hasDeviceId) {
     return {
       message: "track_analysis_summary requires exactly one of user_id or device_id",
       required: ["user_id xor device_id", "appName"]
+    };
+  }
+  if (!TRACK_ANALYSIS_SUB_INTERFACES.includes(subInterface)) {
+    return {
+      message: "track_analysis_summary sub_interface must be getLastestDateTime or getUseDuration",
+      required: ["sub_interface=getLastestDateTime|getUseDuration"]
     };
   }
   if (typeof input.appName !== "string" || !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
@@ -532,6 +566,14 @@ function validateTrackAnalysisInput(input) {
     };
   }
   return null;
+}
+
+function buildTrackAnalysisRequest(input) {
+  const subInterface = trackAnalysisSubInterface(input);
+  if (subInterface === "getUseDuration") {
+    return buildTrackAnalysisUseDurationRequest(input);
+  }
+  return buildTrackAnalysisLatestDateRequest(input);
 }
 
 function buildTrackAnalysisLatestDateRequest(input) {
@@ -547,6 +589,28 @@ function buildTrackAnalysisLatestDateRequest(input) {
     method: "GET",
     body: {}
   };
+}
+
+function buildTrackAnalysisUseDurationRequest(input) {
+  const entityKey = Object.hasOwn(input, "device_id") ? "deviceId" : "userId";
+  return {
+    path: TRACK_ANALYSIS_USE_DURATION_PATH,
+    method: "POST",
+    body: {
+      appName: input.appName,
+      funcType: TRACK_ANALYSIS_FUNC_TYPE,
+      _t: String(Date.now()),
+      [entityKey]: input[entityKey === "deviceId" ? "device_id" : "user_id"]
+    }
+  };
+}
+
+function summarizeTrackAnalysisResponse(value, input) {
+  const subInterface = trackAnalysisSubInterface(input);
+  if (subInterface === "getUseDuration") {
+    return summarizeTrackAnalysisUseDurationResponse(value, input);
+  }
+  return summarizeTrackAnalysisLatestDateResponse(value, input);
 }
 
 function summarizeTrackAnalysisLatestDateResponse(value, input) {
@@ -581,11 +645,110 @@ function summarizeTrackAnalysisLatestDateResponse(value, input) {
         uid_did_relation_latest_datetime_present: Boolean(
           data && typeof data === "object" && Object.hasOwn(data, "uidDidRelLatestDateTime")
         ),
+        output_fields_observed: observedKeys(data).map((key) => `data.${key}`),
         no_data: noData,
         no_data_not_risk_exclusion: true
       }
     }
   };
+}
+
+function summarizeTrackAnalysisUseDurationResponse(value, input) {
+  const apiCode = readApiCode(value);
+  if (apiCode !== null && ![0, 200].includes(apiCode)) {
+    return {
+      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
+      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
+      summary: {
+        track_analysis: {
+          sub_interface: "getUseDuration",
+          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+          appName: input.appName,
+          api_code: apiCode,
+          no_data: false
+        }
+      }
+    };
+  }
+
+  const rows = extractUseDurationRows(value);
+  const activitySummary = buildActivitySummary(rows);
+  const noData = rows.length === 0;
+  return {
+    sourceStatus: noData ? "no_data" : "completed",
+    errorType: null,
+    summary: {
+      track_analysis: {
+        sub_interface: "getUseDuration",
+        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
+        appName: input.appName,
+        output_fields_observed: rows.length > 0 ? ["data.rows[].date", "data.rows[].duration"] : [],
+        no_data: noData,
+        no_data_not_risk_exclusion: true,
+        activity_summary: activitySummary
+      }
+    }
+  };
+}
+
+function trackAnalysisSubInterface(input) {
+  return typeof input.sub_interface === "string" ? input.sub_interface : "getLastestDateTime";
+}
+
+function extractUseDurationRows(value) {
+  const data = value && typeof value === "object" ? value.data : null;
+  if (Array.isArray(data?.rows)) {
+    return data.rows.filter((row) => row && typeof row === "object");
+  }
+  if (Array.isArray(data)) {
+    return data.filter((row) => row && typeof row === "object");
+  }
+  return [];
+}
+
+function buildActivitySummary(rows) {
+  let totalDuration = 0;
+  let peakDuration = null;
+  let peakDate = null;
+  let nonzeroDaysCount = 0;
+  const dates = [];
+
+  for (const row of rows) {
+    const date = typeof row.date === "string" ? row.date : null;
+    const duration = typeof row.duration === "number" ? row.duration : Number(row.duration);
+    const safeDuration = Number.isFinite(duration) ? duration : 0;
+    totalDuration += safeDuration;
+    if (safeDuration > 0) {
+      nonzeroDaysCount += 1;
+    }
+    if (date) {
+      dates.push(date);
+    }
+    if (peakDuration === null || safeDuration > peakDuration) {
+      peakDuration = safeDuration;
+      peakDate = date;
+    }
+  }
+
+  dates.sort();
+  return {
+    rows_count: rows.length,
+    total_duration: totalDuration,
+    peak_duration: peakDuration ?? 0,
+    peak_date: peakDate,
+    nonzero_days_count: nonzeroDaysCount,
+    date_range_observed: {
+      from: dates[0] || null,
+      to: dates[dates.length - 1] || null
+    }
+  };
+}
+
+function observedKeys(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value).slice(0, 50);
 }
 
 function readApiCode(value) {

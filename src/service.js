@@ -216,6 +216,7 @@ export class BrowserBackedApiService {
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
         requestPath: actionRequest.path,
+        requestMethod: actionRequest.method,
         ...lazyMeta
       });
     }
@@ -227,6 +228,7 @@ export class BrowserBackedApiService {
         originWarmed,
         actionDiagnostics,
         requestPath: actionRequest.path,
+        requestMethod: actionRequest.method,
         ...lazyMeta
       });
     } catch (error) {
@@ -238,6 +240,7 @@ export class BrowserBackedApiService {
         errorType,
         sourceStatus: sourceStatusFromErrorType(errorType),
         requestPath: actionRequest.path,
+        requestMethod: actionRequest.method,
         ...lazyMeta
       });
     }

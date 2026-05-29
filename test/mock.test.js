@@ -485,6 +485,42 @@ test("track_analysis_summary builds fixed getLastestDateTime relative path from 
   assert.equal(request.path.includes("demo-user"), false);
 });
 
+test("track_analysis_summary getUseDuration missing typed params returns parameter_error", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("track_analysis_summary", {
+    sub_interface: "getUseDuration",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(response.status, "parameter_error");
+  assert.equal(response.source_status, "parameter_error");
+  assert.equal(response.error_type, "parameter_error");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("track_analysis_summary builds fixed getUseDuration request from typed params", () => {
+  const request = buildActionBody(ACTIONS.track_analysis_summary, {
+    sub_interface: "getUseDuration",
+    device_id: "ANDROID_demo",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(request.method, "POST");
+  assert.equal(request.path, "/dp/platform/app/analytics/v2/sequence/getUseDuration");
+  assert.equal(request.body.appName, "KUAISHOU");
+  assert.equal(request.body.funcType, "USER_PROFILE_QUERY");
+  assert.equal(request.body.deviceId, "ANDROID_demo");
+  assert.equal(typeof request.body._t, "string");
+  assert.equal(Object.hasOwn(request.body, "user_id"), false);
+  assert.equal(Object.hasOwn(request.body, "url"), false);
+});
+
 test("track_analysis_summary successful live JSON returns completed shape-only source result", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -525,6 +561,61 @@ test("track_analysis_summary successful live JSON returns completed shape-only s
   assert.equal(serialized.includes("raw-relation-value"), false);
 });
 
+test("track_analysis_summary getUseDuration successful rows returns activity summary", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getUseDuration", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          rows: [
+            { date: "2026-05-26", duration: 0, debugValue: "raw-duration-debug-value" },
+            { date: "2026-05-27", duration: 60 },
+            { date: "2026-05-28", duration: 120 }
+          ]
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 180
+    },
+    {
+      latencyMs: 18,
+      originWarmed: true,
+      requestPath: "/dp/platform/app/analytics/v2/sequence/getUseDuration",
+      requestMethod: "POST"
+    }
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.source_status, "completed");
+  assert.equal(response.error_type, null);
+  assert.equal(response.source_card.method, "POST");
+  assert.equal(response.source_card.path, "/dp/platform/app/analytics/v2/sequence/getUseDuration");
+  const summary = response.data.response_summary.track_analysis.activity_summary;
+  assert.deepEqual(summary, {
+    rows_count: 3,
+    total_duration: 180,
+    peak_duration: 120,
+    peak_date: "2026-05-28",
+    nonzero_days_count: 2,
+    date_range_observed: {
+      from: "2026-05-26",
+      to: "2026-05-28"
+    }
+  });
+  assert.deepEqual(response.data.response_summary.track_analysis.output_fields_observed, [
+    "data.rows[].date",
+    "data.rows[].duration"
+  ]);
+  assert.equal(JSON.stringify(response).includes("raw-duration-debug-value"), false);
+});
+
 test("track_analysis_summary HTML login page is classified as auth_failed without raw body", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -551,6 +642,32 @@ test("track_analysis_summary HTML login page is classified as auth_failed withou
   assert.equal(JSON.stringify(response).includes("login required"), false);
 });
 
+test("track_analysis_summary getUseDuration HTML login page is classified as auth_failed", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getUseDuration", device_id: "ANDROID_demo", appName: "NEBULA" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: "<html><title>SSO Login</title><body>duration login required</body></html>",
+      bodyTruncated: false,
+      observedBytes: 73
+    },
+    { latencyMs: 12, originWarmed: true }
+  );
+
+  assert.equal(response.status, "auth_failed");
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.sensitive_output, false);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(JSON.stringify(response).includes("duration login required"), false);
+});
+
 test("track_analysis_summary empty data returns no_data without risk exclusion", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
@@ -572,6 +689,31 @@ test("track_analysis_summary empty data returns no_data without risk exclusion",
   assert.equal(response.source_status, "no_data");
   assert.equal(response.error_type, null);
   assert.equal(response.data.response_summary.track_analysis.no_data, true);
+  assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
+});
+
+test("track_analysis_summary getUseDuration empty rows returns no_data without risk exclusion", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getUseDuration", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({ code: 0, data: { rows: [] } }),
+      bodyTruncated: false,
+      observedBytes: 29
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(response.status, "no_data");
+  assert.equal(response.source_status, "no_data");
+  assert.equal(response.error_type, null);
+  assert.equal(response.data.response_summary.track_analysis.no_data, true);
+  assert.equal(response.data.response_summary.track_analysis.activity_summary.rows_count, 0);
   assert.equal(response.source_quality.no_data_not_risk_exclusion, true);
 });
 
@@ -608,6 +750,51 @@ test("track_analysis_summary platform and network errors stay standardized", asy
   const service = new BrowserBackedApiService(config, fakeClient);
   service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
   const networkResponse = await service.executeAction("track_analysis_summary", {
+    user_id: "demo-user",
+    appName: "KUAISHOU"
+  });
+
+  assert.equal(networkResponse.status, "blocked");
+  assert.equal(networkResponse.error_type, "network_error");
+  assert.equal(networkResponse.sensitive_output, false);
+  assert.ok(networkResponse.source_card);
+  assert.ok(networkResponse.source_quality);
+});
+
+test("track_analysis_summary getUseDuration platform and network errors stay standardized", async () => {
+  const config = createLiveConfig();
+  const platformResponse = buildLiveActionResponse(
+    ACTIONS.track_analysis_summary,
+    { sub_interface: "getUseDuration", user_id: "demo-user", appName: "KUAISHOU" },
+    config,
+    {
+      completed: true,
+      ok: false,
+      status: 500,
+      bodyText: JSON.stringify({ code: 500, data: null }),
+      bodyTruncated: false,
+      observedBytes: 28
+    },
+    { latencyMs: 10, originWarmed: true }
+  );
+
+  assert.equal(platformResponse.status, "blocked");
+  assert.equal(platformResponse.error_type, "platform_error");
+  assert.ok(platformResponse.source_card);
+  assert.ok(platformResponse.source_quality);
+
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      track_analysis: prewarmResult(config, "track_analysis")
+    },
+    runErrors: {
+      track_analysis_summary: new Error("Failed to fetch")
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("track_analysis", warmStateReady(config, "track_analysis"));
+  const networkResponse = await service.executeAction("track_analysis_summary", {
+    sub_interface: "getUseDuration",
     user_id: "demo-user",
     appName: "KUAISHOU"
   });

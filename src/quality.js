@@ -5,7 +5,7 @@ export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) 
     action: action.name,
     domain: domain.label,
     origin: mock ? "mock" : domain.origin,
-    method: action.method,
+    method: meta.requestMethod || action.method,
     path: meta.requestPath || action.apiPath,
     mode: mock ? "mock" : "live",
     captured_at: new Date().toISOString(),
