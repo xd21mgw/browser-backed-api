@@ -148,6 +148,16 @@ Each live action uses the configured domain page and calls `fetch()` with a fixe
 - live output is shape-only; `getUseDuration` returns an `activity_summary`, `profile` returns a `profile_summary`, and `getDeviceIds` returns a `device_summary`
 - no caller-provided URL, path, header, cookie, token, session, or secret is accepted
 
+Track Analysis source status:
+
+- source contract: `TRACK_ANALYSIS_SOURCE_CONTRACT.md`
+- source_name: `track_analysis_summary`
+- access_method: `browser_backed_api_service`
+- origin: `https://track-analysis.corp.kuaishou.com`
+- live validated sub-interfaces: `getLastestDateTime`, `getUseDuration`, `profile`, `getDeviceIds`
+- evidence use: activity summary, profile summary, device relation summary, and recency shape evidence
+- `no_data`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
+
 Every action response includes:
 
 - `latency_ms`
