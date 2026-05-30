@@ -102,21 +102,34 @@ export function updateOriginWarmState(refreshState, origin, warmResult, { now = 
     return state;
   }
 
-  const ready = Boolean(
-    warmResult?.warmed === true &&
-      warmResult?.page_ready === true &&
-      ["ready", "simulated"].includes(warmResult?.status)
-  );
-  const errorType = ready ? null : normalizeErrorType(warmResult?.error_type || warmResult?.last_error_type || "refresh_failed");
-  const lastRefreshAt = toIsoString(now);
+  const originValue = normalizeOriginString(origin?.origin || origin?.defaultOrigin || warmResult?.configured_origin || warmResult?.origin);
+  const finalOrigin = normalizeOriginString(warmResult?.final_origin || warmResult?.current_origin || warmResult?.final_origin_after_landing);
+  const pageReady = Boolean(warmResult?.page_ready);
+  const errorType = normalizeErrorType(warmResult?.error_type || warmResult?.last_error_type);
+  const sameOriginActual = warmResult?.same_origin_actual === true || Boolean(originValue && finalOrigin && finalOrigin === originValue);
+  const readyStatus = warmResult?.status === undefined || ["ready", "simulated"].includes(warmResult?.status);
+  const ready = Boolean(pageReady && sameOriginActual && !errorType && readyStatus);
+  const optional = isOptionalOrigin(origin);
+  const requiredForRefresh = isRequiredForRefresh(origin);
+  const requiredForHealth = isRequiredForHealth(origin);
+  const failedErrorType = ready ? null : errorType || "refresh_failed";
+  const refreshedAt = toIsoString(now);
+  const status = ready ? "ready" : statusFromErrorType(failedErrorType, { optional });
   const nextOriginStatus = {
     ...state.origin_status,
     [originKey]: sanitizeOriginStatusEntry({
-      status: ready ? "ready" : statusFromErrorType(errorType),
-      last_refresh_at: lastRefreshAt,
-      last_error_type: errorType,
+      origin: originValue,
+      final_origin: finalOrigin,
+      status,
+      error_type: failedErrorType,
+      refreshed_at: refreshedAt,
+      last_refresh_at: refreshedAt,
+      last_error_type: failedErrorType,
+      optional,
+      required_for_refresh: requiredForRefresh,
+      required_for_health: requiredForHealth,
       warmed: ready,
-      page_ready: Boolean(warmResult?.page_ready)
+      page_ready: pageReady
     })
   };
 
@@ -126,9 +139,9 @@ export function updateOriginWarmState(refreshState, origin, warmResult, { now = 
 
   return sanitizeRefreshState({
     ...state,
-    last_refresh_at: lastRefreshAt,
+    last_refresh_at: refreshedAt,
     origin_status: nextOriginStatus,
-    last_error_type: errorType || state.last_error_type,
+    last_error_type: topLevelErrorType(nextOriginStatus),
     warmed_origins: warmedOrigins,
     service_version: serviceVersion
   });
@@ -141,11 +154,11 @@ export function shouldRefreshOrigin(origin, refreshState, nowMs = Date.now()) {
   if (!originKey || !status) {
     return true;
   }
-  if (status.status !== "ready" || status.warmed !== true || status.page_ready !== true) {
+  if (status.status !== "ready" || status.page_ready !== true) {
     return true;
   }
 
-  const lastRefreshMs = Date.parse(status.last_refresh_at || state.last_refresh_at || "");
+  const lastRefreshMs = Date.parse(status.refreshed_at || status.last_refresh_at || state.last_refresh_at || "");
   if (!Number.isFinite(lastRefreshMs)) {
     return true;
   }
@@ -206,11 +219,14 @@ function resolveAuthState({ profileExists: exists, stateFileExists, state, origi
     return "auth_required";
   }
 
-  const enabledOrigins = origins.filter((origin) => origin?.enabled !== false);
-  if (enabledOrigins.some((origin) => shouldRefreshOrigin(origin, state, nowMs))) {
+  const requiredOrigins = origins.filter((origin) => origin?.enabled !== false && isRequiredForHealth(origin));
+  if (requiredOrigins.some((origin) => state.origin_status[origin.key || origin.name]?.status === "auth_required")) {
+    return "auth_required";
+  }
+  if (requiredOrigins.some((origin) => shouldRefreshOrigin(origin, state, nowMs))) {
     return hasAnyReadyOrigin(state) ? "expired" : "unknown";
   }
-  if (enabledOrigins.length > 0) {
+  if (requiredOrigins.length > 0) {
     return "ready";
   }
   return "unknown";
@@ -224,9 +240,16 @@ function buildOriginStatus(origins, state) {
       continue;
     }
     originStatus[originKey] = {
+      origin: normalizeOriginString(origin.origin || origin.defaultOrigin),
+      final_origin: null,
       status: "unknown",
+      error_type: null,
+      refreshed_at: null,
       last_refresh_at: null,
       last_error_type: null,
+      optional: isOptionalOrigin(origin),
+      required_for_refresh: isRequiredForRefresh(origin),
+      required_for_health: isRequiredForHealth(origin),
       warmed: false,
       page_ready: false
     };
@@ -255,9 +278,17 @@ function sanitizeOriginStatusMap(value) {
 
 function sanitizeOriginStatusEntry(value) {
   const entry = value && typeof value === "object" ? value : {};
+  const optional = Boolean(entry.optional);
   return {
+    origin: normalizeOriginString(entry.origin),
+    final_origin: normalizeOriginString(entry.final_origin),
     status: normalizeOriginStatus(entry.status),
-    last_refresh_at: normalizeIsoOrNull(entry.last_refresh_at),
+    error_type: normalizeErrorType(entry.error_type || entry.last_error_type),
+    refreshed_at: normalizeIsoOrNull(entry.refreshed_at || entry.last_refresh_at),
+    optional,
+    required_for_refresh: entry.required_for_refresh === false ? false : !optional,
+    required_for_health: entry.required_for_health === false ? false : !optional,
+    last_refresh_at: normalizeIsoOrNull(entry.last_refresh_at || entry.refreshed_at),
     last_error_type: normalizeErrorType(entry.last_error_type || entry.error_type),
     warmed: Boolean(entry.warmed),
     page_ready: Boolean(entry.page_ready)
@@ -273,7 +304,10 @@ function sanitizeStringArray(value) {
 
 function normalizeOriginStatus(value) {
   const status = safeString(value);
-  if (["ready", "auth_required", "expired", "refresh_failed", "unknown", "disabled"].includes(status)) {
+  if (status === "refresh_failed") {
+    return "failed";
+  }
+  if (["ready", "auth_required", "expired", "failed", "optional_failed", "unknown", "disabled"].includes(status)) {
     return status;
   }
   return "unknown";
@@ -301,14 +335,52 @@ function normalizeErrorType(value) {
   return SAFE_ERROR_TYPES.has(errorType) ? errorType : "refresh_failed";
 }
 
-function statusFromErrorType(errorType) {
+function statusFromErrorType(errorType, { optional = false } = {}) {
+  if (optional) {
+    return "optional_failed";
+  }
   if (["auth_required", "auth_redirect", "landing_flow_blocked", "login_page"].includes(errorType)) {
     return "auth_required";
   }
   if (errorType === "expired") {
     return "expired";
   }
-  return "refresh_failed";
+  return "failed";
+}
+
+function topLevelErrorType(originStatus) {
+  for (const entry of Object.values(originStatus)) {
+    if (entry.required_for_refresh === false || entry.optional === true || entry.status === "ready") {
+      continue;
+    }
+    return entry.error_type || entry.last_error_type || "refresh_failed";
+  }
+  return null;
+}
+
+function isOptionalOrigin(origin) {
+  return Boolean(origin?.optional);
+}
+
+function isRequiredForRefresh(origin) {
+  return origin?.enabled !== false && origin?.requiredForRefresh !== false && !isOptionalOrigin(origin);
+}
+
+function isRequiredForHealth(origin) {
+  return origin?.enabled !== false && origin?.requiredForHealth !== false && !isOptionalOrigin(origin);
+}
+
+function normalizeOriginString(value) {
+  const text = safeString(value);
+  if (!text) {
+    return null;
+  }
+  try {
+    const parsed = new URL(text);
+    return parsed.origin === "null" ? null : parsed.origin;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeIsoOrNull(value) {

@@ -16,6 +16,7 @@ import { loadConfig } from "../src/config.js";
 import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../src/originRegistry.js";
 import { BrowserBackedApiService } from "../src/service.js";
 import { buildRefreshDaemonEvent } from "../scripts/refresh-daemon.js";
+import { refreshExitCode, runRefreshOnce } from "../scripts/refresh-profile.js";
 
 const MOCK_ACTION_INPUTS = Object.freeze({
   rcp_snapshot: {
@@ -162,6 +163,9 @@ test("origin registry contains the four core default origins", () => {
     assert.equal(origin.enabled, true);
     assert.deepEqual(origin.requiredForActions, origin.actions);
   }
+  assert.equal(ORIGIN_REGISTRY.archives.optional, true);
+  assert.equal(ORIGIN_REGISTRY.archives.requiredForHealth, false);
+  assert.equal(ORIGIN_REGISTRY.archives.requiredForRefresh, false);
 });
 
 test("adding an origin through registry config does not change the fixed action allowlist", () => {
@@ -445,15 +449,131 @@ test("health exposes profile and refresh-state metadata", () => {
 
 test("refresh ttl decides when an origin should refresh", () => {
   const nowMs = Date.parse("2026-05-30T04:00:00.000Z");
-  const origin = { key: "rcp", refreshTtlMs: DEFAULT_REFRESH_TTL_MS };
+  const origin = { key: "rcp", origin: "https://rcp.example.test", refreshTtlMs: DEFAULT_REFRESH_TTL_MS };
   const state = updateOriginWarmState(defaultRefreshState(), origin, {
     status: "ready",
+    final_origin: "https://rcp.example.test",
     warmed: true,
     page_ready: true
   }, { now: new Date(nowMs - DEFAULT_REFRESH_TTL_MS + 1) });
 
   assert.equal(shouldRefreshOrigin(origin, state, nowMs), false);
   assert.equal(shouldRefreshOrigin(origin, state, nowMs + 1), true);
+});
+
+test("page_ready true with matching final_origin and no error_type records origin ready", () => {
+  const state = updateOriginWarmState(defaultRefreshState(), {
+    key: "rcp",
+    origin: "https://rcp.example.test",
+    requiredForRefresh: true
+  }, {
+    status: "ready",
+    page_ready: true,
+    final_origin: "https://rcp.example.test",
+    error_type: null
+  }, { now: new Date("2026-05-30T02:00:00.000Z") });
+
+  assert.equal(state.origin_status.rcp.status, "ready");
+  assert.equal(state.origin_status.rcp.page_ready, true);
+  assert.equal(state.origin_status.rcp.final_origin, "https://rcp.example.test");
+  assert.equal(state.origin_status.rcp.error_type, null);
+  assert.equal(state.last_error_type, null);
+});
+
+test("refresh once all required origins ready returns ok true and exit code 0", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const summary = await runRefreshOnce({
+    config,
+    browserClient: new FakeBrowserClient(config),
+    now: new Date("2026-05-30T02:00:00.000Z")
+  });
+
+  assert.equal(summary.ok, true);
+  assert.equal(refreshExitCode(summary), 0);
+  assert.equal(summary.auth_state, "ready");
+  for (const key of CORE_ORIGIN_KEYS) {
+    assert.equal(summary.origin_status[key].status, "ready");
+  }
+});
+
+test("refresh once optional origin failure records optional_failed without failing required origins", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const summary = await runRefreshOnce({
+    config,
+    browserClient: new FakeBrowserClient(config, {
+      prewarmResults: {
+        archives: prewarmResult(config, "archives", {
+          finalOrigin: "https://account.p.adm-corp.kuaishou.com",
+          errorType: "auth_redirect",
+          pageReady: false,
+          status: "auth_failed"
+        })
+      }
+    }),
+    now: new Date("2026-05-30T02:00:00.000Z")
+  });
+
+  assert.equal(config.domains.archives.optional, true);
+  assert.equal(summary.ok, true);
+  assert.equal(refreshExitCode(summary), 0);
+  assert.equal(summary.auth_state, "ready");
+  assert.equal(summary.origin_status.archives.status, "optional_failed");
+  assert.equal(summary.origin_status.archives.error_type, "auth_redirect");
+  for (const key of CORE_ORIGIN_KEYS) {
+    assert.equal(summary.origin_status[key].status, "ready");
+  }
+});
+
+test("refresh once required origin failure returns ok false and exit code 1", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const summary = await runRefreshOnce({
+    config,
+    browserClient: new FakeBrowserClient(config, {
+      prewarmResults: {
+        rcp: prewarmResult(config, "rcp", {
+          finalOrigin: "https://sso.corp.kuaishou.com",
+          errorType: "auth_redirect",
+          pageReady: false,
+          status: "auth_failed"
+        })
+      }
+    }),
+    now: new Date("2026-05-30T02:00:00.000Z")
+  });
+
+  assert.equal(summary.ok, false);
+  assert.equal(refreshExitCode(summary), 1);
+  assert.equal(summary.origin_status.rcp.status, "auth_required");
+  assert.equal(summary.auth_state, "auth_required");
+});
+
+test("health reads refresh state as ready when required origins are ready", () => {
+  const env = createAuthEnv();
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...env
+  });
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let state = defaultRefreshState();
+  const now = new Date();
+  for (const key of CORE_ORIGIN_KEYS) {
+    state = updateOriginWarmState(state, config.domains[key], prewarmResult(config, key), {
+      now
+    });
+  }
+  state = saveRefreshState(state, config.stateFile);
+  const service = new BrowserBackedApiService(config);
+
+  const health = service.health();
+
+  assert.equal(health.auth_state, "ready");
+  assert.equal(health.last_refresh_at, now.toISOString());
+  assert.equal(health.origin_status.rcp.status, "ready");
 });
 
 test("refresh daemon event output does not include credential material", () => {
@@ -3477,6 +3597,8 @@ class FakeBrowserClient {
   }
 
   async start() {}
+
+  async close() {}
 
   async prewarmDomain(domainKey) {
     this.prewarmCalls.push(domainKey);

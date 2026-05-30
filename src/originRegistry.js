@@ -22,7 +22,10 @@ export const ORIGIN_REGISTRY = Object.freeze({
       "rcp_policy_tree_lookup"
     ],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
-    enabled: true
+    enabled: true,
+    requiredForHealth: true,
+    requiredForRefresh: true,
+    optional: false
   }),
   weapon: freezeOrigin({
     name: "weapon",
@@ -33,7 +36,10 @@ export const ORIGIN_REGISTRY = Object.freeze({
     warmupPath: "/",
     actions: ["weapon_inventory"],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
-    enabled: true
+    enabled: true,
+    requiredForHealth: true,
+    requiredForRefresh: true,
+    optional: false
   }),
   login_logs: freezeOrigin({
     name: "login_logs",
@@ -44,7 +50,10 @@ export const ORIGIN_REGISTRY = Object.freeze({
     warmupPath: "/",
     actions: ["login_logs_search"],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
-    enabled: true
+    enabled: true,
+    requiredForHealth: true,
+    requiredForRefresh: true,
+    optional: false
   }),
   archives: freezeOrigin({
     name: "archives",
@@ -60,7 +69,10 @@ export const ORIGIN_REGISTRY = Object.freeze({
       "archives_related_users"
     ],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
-    enabled: true
+    enabled: true,
+    requiredForHealth: false,
+    requiredForRefresh: false,
+    optional: true
   }),
   track_analysis: freezeOrigin({
     name: "track_analysis",
@@ -71,7 +83,10 @@ export const ORIGIN_REGISTRY = Object.freeze({
     warmupPath: "/",
     actions: ["track_analysis_summary", "track_analysis_check_data_ready"],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
-    enabled: true
+    enabled: true,
+    requiredForHealth: true,
+    requiredForRefresh: true,
+    optional: false
   })
 });
 
@@ -95,9 +110,13 @@ export function listEnabledOriginKeys(registry = ORIGIN_REGISTRY) {
 
 function freezeOrigin(origin) {
   const actions = Object.freeze([...(origin.actions || [])]);
+  const optional = Boolean(origin.optional);
   return Object.freeze({
     ...origin,
+    optional,
     actions,
-    requiredForActions: Object.freeze([...(origin.requiredForActions || actions)])
+    requiredForActions: Object.freeze([...(origin.requiredForActions || actions)]),
+    requiredForHealth: origin.requiredForHealth ?? !optional,
+    requiredForRefresh: origin.requiredForRefresh ?? !optional
   });
 }

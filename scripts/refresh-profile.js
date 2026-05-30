@@ -21,13 +21,28 @@ export async function runRefreshOnce({
 
   try {
     await browserClient.start();
-    for (const domain of Object.values(config.domains).filter((item) => item.enabled !== false && item.origin)) {
-      const result = await browserClient.prewarmDomain(domain.key);
+    const refreshDomains = Object.values(config.domains).filter((item) => item.enabled !== false && item.origin);
+    for (const domain of refreshDomains) {
+      let result;
+      try {
+        result = await browserClient.prewarmDomain(domain.key);
+      } catch {
+        result = {
+          key: domain.key,
+          origin: domain.origin,
+          configured_origin: domain.origin,
+          final_origin: null,
+          same_origin_actual: false,
+          status: "error",
+          page_ready: false,
+          error_type: "refresh_failed"
+        };
+      }
       refreshState = updateOriginWarmState(refreshState, domain, result, { now });
       refreshedOriginCount += 1;
     }
-    ok = Object.values(config.domains)
-      .filter((item) => item.enabled !== false && item.origin)
+    ok = refreshDomains
+      .filter((domain) => isRequiredForRefresh(domain))
       .every((domain) => refreshState.origin_status?.[domain.key]?.status === "ready");
   } catch {
     refreshState = {
@@ -48,7 +63,8 @@ export async function runRefreshOnce({
     profileDir: config.profileDir,
     stateFile: config.stateFile,
     origins: Object.values(config.domains),
-    refreshState
+    refreshState,
+    nowMs: Date.parse(toIsoString(now))
   });
 
   return sanitizeRefreshSummary({
@@ -71,6 +87,10 @@ export function sanitizeRefreshSummary(summary) {
   };
 }
 
+export function refreshExitCode(summary) {
+  return summary?.ok === true ? 0 : 1;
+}
+
 function loadLiveConfig() {
   process.env.SERVICE_MODE = "live";
   return loadConfig();
@@ -87,6 +107,10 @@ function safeCount(value) {
   return Number.isInteger(number) && number >= 0 ? number : 0;
 }
 
+function isRequiredForRefresh(domain) {
+  return domain?.enabled !== false && domain?.requiredForRefresh !== false && domain?.optional !== true;
+}
+
 function toIsoString(value) {
   if (value instanceof Date) {
     return value.toISOString();
@@ -101,5 +125,5 @@ function isDirectRun() {
 if (isDirectRun()) {
   const summary = await runRefreshOnce();
   console.log(JSON.stringify(summary, null, 2));
-  process.exit(summary.ok ? 0 : 1);
+  process.exit(refreshExitCode(summary));
 }

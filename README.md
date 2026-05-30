@@ -143,6 +143,7 @@ Profile, state, and credential material are different:
 - Token/cookie/session/localStorage values are credential material. The service lets the browser use them but does not read, parse, or output them.
 - The profile is the browser login-state directory used by Playwright.
 - The state file is refresh bookkeeping only: `last_refresh_at`, `origin_status`, `last_error_type`, `warmed_origins`, `service_version`, and `refresh_count`.
+- `/health` reports `profile_dir_configured` as a boolean instead of echoing the local profile path. This is intentional so a local filesystem path is not exposed through the API.
 
 Do not commit profile directories, refresh state, `.env`, HAR files, screenshots, or temporary captures. On macOS, a future launchd plist can run `npm run refresh:once` on a schedule; this repo does not include that plist yet.
 
@@ -157,9 +158,14 @@ Origin configuration lives in `src/originRegistry.js`. Each origin defines:
 - `refreshTtlMs`
 - `warmupPath`
 - `requiredForActions`
+- `requiredForHealth`
+- `requiredForRefresh`
+- `optional`
 - `enabled`
 
 The core default origins are `rcp`, `weapon`, `login_logs`, and `track_analysis`. The current registry also keeps `archives` for the existing fixed archives actions. Future sources such as video/content, private message, live, dashboard, or Grafana should be added by extending the registry first; this does not change the fixed action allowlist by itself.
+
+`rcp`, `weapon`, `login_logs`, and `track_analysis` are required for health and refresh. `archives` is enabled but optional by default, so an archives warmup failure is recorded as `optional_failed` and does not make `refresh:once` fail when the four required origins are ready.
 
 ## API
 
@@ -180,7 +186,14 @@ Returns readiness metadata for Dennis runtime integration:
   "auth_state": "auth_required",
   "origin_status": {
     "rcp": {
+      "origin": "https://rcp.corp.kuaishou.com",
+      "final_origin": null,
       "status": "unknown",
+      "error_type": null,
+      "refreshed_at": null,
+      "optional": false,
+      "required_for_refresh": true,
+      "required_for_health": true,
       "last_refresh_at": null,
       "last_error_type": null,
       "warmed": false,
@@ -194,6 +207,8 @@ Returns readiness metadata for Dennis runtime integration:
 ```
 
 `auth_state` is one of `ready`, `auth_required`, `expired`, or `unknown`. `origin_status` comes from the sanitized refresh-state file. `warmed_origins` contains one entry per fixed origin with `status`, `latency_ms`, and `error_type`.
+
+Per-origin refresh state records only non-credential metadata: `origin`, `page_ready`, `final_origin`, `status`, `error_type`, and `refreshed_at`. Status is `ready`, `auth_required`, `failed`, or `optional_failed`.
 
 ### `GET /actions`
 
