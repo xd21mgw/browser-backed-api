@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_USER_DATA_DIR = "/Users/pengcheng/chrome-agent-auth-profile";
+const PLATFORM_KEYS = Object.freeze(["rcp", "weapon", "login_logs", "archives", "track_analysis"]);
 
 export function loadConfig(env = process.env) {
   const effectiveEnv = env === process.env ? loadLocalEnv(env) : env;
@@ -10,8 +11,14 @@ export function loadConfig(env = process.env) {
     throw new Error("SERVICE_MODE must be either mock or live");
   }
 
+  const enabledPlatforms = mode === "live"
+    ? parseEnabledPlatforms(effectiveEnv.ENABLED_PLATFORMS, PLATFORM_KEYS)
+    : [...PLATFORM_KEYS];
+  const enabledPlatformSet = new Set(enabledPlatforms);
   const config = {
     mode,
+    enabledPlatforms,
+    enabledPlatformsExplicit: mode === "live" && typeof effectiveEnv.ENABLED_PLATFORMS === "string",
     port: parsePort(effectiveEnv.PORT || "8787"),
     host: effectiveEnv.HOST || "127.0.0.1",
     userDataDir: path.resolve(effectiveEnv.USER_DATA_DIR || DEFAULT_USER_DATA_DIR),
@@ -22,31 +29,46 @@ export function loadConfig(env = process.env) {
       maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || "65536", "MAX_LIVE_BODY_BYTES")
     },
     domains: {
-      rcp: domainConfig("rcp", "RCP", effectiveEnv.RCP_ORIGIN, effectiveEnv.RCP_PREWARM_PATH || "/"),
-      weapon: domainConfig("weapon", "Weapon", effectiveEnv.WEAPON_ORIGIN, effectiveEnv.WEAPON_PREWARM_PATH || "/"),
+      rcp: domainConfig(
+        "rcp",
+        "RCP",
+        effectiveEnv.RCP_ORIGIN,
+        effectiveEnv.RCP_PREWARM_PATH || "/",
+        enabledPlatformSet.has("rcp")
+      ),
+      weapon: domainConfig(
+        "weapon",
+        "Weapon",
+        effectiveEnv.WEAPON_ORIGIN,
+        effectiveEnv.WEAPON_PREWARM_PATH || "/",
+        enabledPlatformSet.has("weapon")
+      ),
       login_logs: domainConfig(
         "login_logs",
         "Login Logs",
         effectiveEnv.LOGIN_LOGS_ORIGIN,
-        effectiveEnv.LOGIN_LOGS_PREWARM_PATH || "/"
+        effectiveEnv.LOGIN_LOGS_PREWARM_PATH || "/",
+        enabledPlatformSet.has("login_logs")
       ),
       archives: domainConfig(
         "archives",
         "Archives Center",
         effectiveEnv.ARCHIVES_ORIGIN,
-        effectiveEnv.ARCHIVES_PREWARM_PATH || "/"
+        effectiveEnv.ARCHIVES_PREWARM_PATH || "/",
+        enabledPlatformSet.has("archives")
       ),
       track_analysis: domainConfig(
         "track_analysis",
         "Track Analysis",
         effectiveEnv.TRACK_ANALYSIS_ORIGIN,
-        effectiveEnv.TRACK_ANALYSIS_PREWARM_PATH || "/"
+        effectiveEnv.TRACK_ANALYSIS_PREWARM_PATH || "/",
+        enabledPlatformSet.has("track_analysis")
       )
     }
   };
 
   if (mode === "live") {
-    validateLiveDomains(config.domains);
+    validateLiveDomains(config.domains, enabledPlatforms);
   }
 
   return config;
@@ -107,17 +129,41 @@ function parsePositiveInt(raw, name) {
   return value;
 }
 
-function domainConfig(key, label, rawOrigin, rawPrewarmPath) {
+function domainConfig(key, label, rawOrigin, rawPrewarmPath, enabled = true) {
   return {
     key,
     label,
-    origin: rawOrigin ? normalizeOrigin(rawOrigin, `${key.toUpperCase()}_ORIGIN`) : null,
-    prewarmPath: normalizeRelativePath(rawPrewarmPath, `${key.toUpperCase()}_PREWARM_PATH`)
+    enabled,
+    origin: enabled && rawOrigin ? normalizeOrigin(rawOrigin, `${key.toUpperCase()}_ORIGIN`) : null,
+    prewarmPath: enabled ? normalizeRelativePath(rawPrewarmPath, `${key.toUpperCase()}_PREWARM_PATH`) : "/"
   };
 }
 
-function validateLiveDomains(domains) {
+function parseEnabledPlatforms(rawValue, platformKeys) {
+  if (rawValue === undefined || rawValue === null) {
+    return [...platformKeys];
+  }
+
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
+    throw new Error("ENABLED_PLATFORMS must be a comma-separated list of supported platform keys");
+  }
+
+  const requested = rawValue
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const unknown = requested.filter((item) => !platformKeys.includes(item));
+  if (requested.length === 0 || unknown.length > 0) {
+    throw new Error(`ENABLED_PLATFORMS must only include: ${platformKeys.join(", ")}`);
+  }
+
+  return [...new Set(requested)];
+}
+
+function validateLiveDomains(domains, enabledPlatforms) {
+  const enabledSet = new Set(enabledPlatforms);
   const missing = Object.values(domains)
+    .filter((domain) => enabledSet.has(domain.key))
     .filter((domain) => !domain.origin)
     .map((domain) => `${domain.key.toUpperCase()}_ORIGIN`);
 

@@ -26,7 +26,7 @@ try {
     acceptDownloads: false
   });
 
-  for (const domain of Object.values(config.domains)) {
+  for (const domain of Object.values(config.domains).filter((item) => item.enabled !== false)) {
     const page = await context.newPage();
     const target = domain.origin;
     try {

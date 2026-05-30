@@ -1,6 +1,7 @@
 import {
   ACTIONS,
   buildActionBody,
+  buildActionDisabledByPlatformScopeResponse,
   buildActionParameterErrorResponse,
   buildLoginLogsFallbackInput,
   buildLiveActionFailureResponse,
@@ -53,7 +54,7 @@ export class BrowserBackedApiService {
 
   async prewarm() {
     const results = [];
-    for (const domain of Object.values(this.config.domains)) {
+    for (const domain of enabledDomains(this.config)) {
       results.push(await this.prewarmDomain(domain.key));
     }
 
@@ -67,6 +68,11 @@ export class BrowserBackedApiService {
     const domain = this.config.domains[domainKey];
     if (!domain) {
       throw publicError(404, "unknown_origin", "Unknown origin");
+    }
+    if (this.config.mode === "live" && !isPlatformEnabled(this.config, domain.key)) {
+      const result = disabledWarmState(domain, this.config);
+      this.warmState.set(domain.key, result);
+      return result;
     }
 
     const startedAt = Date.now();
@@ -166,6 +172,13 @@ export class BrowserBackedApiService {
     validateActionInput(input);
 
     const startedAt = Date.now();
+    if (this.config.mode === "live" && !isPlatformEnabled(this.config, action.domainKey)) {
+      return buildActionDisabledByPlatformScopeResponse(action, this.config, {
+        latencyMs: Date.now() - startedAt,
+        outputScope: input?.output_scope
+      });
+    }
+
     const parameterError = getActionParameterError(action, input);
     if (parameterError) {
       const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
@@ -302,6 +315,7 @@ function defaultWarmState(domain, config) {
   return {
     key: domain.key,
     domain: domain.label,
+    platform_enabled: domain.enabled !== false,
     origin: config.mode === "mock" ? "mock" : domain.origin || "unconfigured",
     configured_origin: config.mode === "mock" ? "mock" : domain.origin || "unconfigured",
     prewarm_path: domain.prewarmPath,
@@ -327,6 +341,31 @@ function defaultWarmState(domain, config) {
     allowed_clicks_executed: 0,
     final_origin_after_landing: null
   };
+}
+
+function disabledWarmState(domain, config) {
+  return {
+    ...defaultWarmState(domain, config),
+    status: "disabled",
+    navigation_status: "disabled",
+    error_type: "platform_not_enabled",
+    error_message_sanitized: "Platform disabled by ENABLED_PLATFORMS",
+    last_error_type: "platform_not_enabled"
+  };
+}
+
+function enabledDomains(config) {
+  if (config.mode !== "live") {
+    return Object.values(config.domains);
+  }
+  return Object.values(config.domains).filter((domain) => isPlatformEnabled(config, domain.key));
+}
+
+function isPlatformEnabled(config, domainKey) {
+  if (config.mode !== "live") {
+    return true;
+  }
+  return Array.isArray(config.enabledPlatforms) && config.enabledPlatforms.includes(domainKey);
 }
 
 function classifyError(error) {

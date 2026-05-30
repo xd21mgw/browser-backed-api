@@ -38,7 +38,7 @@ export class BrowserBackedClient {
     await this.start();
 
     const results = [];
-    for (const domain of Object.values(this.config.domains)) {
+    for (const domain of Object.values(this.config.domains).filter((item) => item.enabled !== false)) {
       results.push(await this.prewarmDomain(domain.key));
     }
     return results;

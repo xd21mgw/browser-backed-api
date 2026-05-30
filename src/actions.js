@@ -486,6 +486,7 @@ export function listActions(config) {
       domain: domain.label,
       method: action.method,
       registry_status: action.registryStatus || "service_registered",
+      platform_enabled: domain.enabled !== false,
       default_runtime_routing: false,
       live_verified: false,
       input_contract: action.inputContract,
@@ -769,6 +770,58 @@ export function buildActionParameterErrorResponse(action, config, meta = {}) {
       action,
       fetchMeta,
       mock: config.mode === "mock",
+      meta: { ...meta, sourceStatus, errorType }
+    })
+  };
+}
+
+export function buildActionDisabledByPlatformScopeResponse(action, config, meta = {}) {
+  const errorType = "platform_not_enabled";
+  const sourceStatus = "blocked";
+  const fetchMeta = {
+    completed: false,
+    ok: false,
+    status: null,
+    bodyTruncated: false,
+    observedBytes: 0
+  };
+  const enabledPlatforms = Array.isArray(config.enabledPlatforms) ? config.enabledPlatforms : [];
+
+  return {
+    action: action.name,
+    mode: config.mode,
+    status: sourceStatus,
+    source_status: sourceStatus,
+    error_type: errorType,
+    failure_reason: "action_disabled_by_platform_scope",
+    latency_ms: meta.latencyMs ?? null,
+    origin_warmed: false,
+    output_scope: meta.outputScope || DEFAULT_OUTPUT_SCOPE,
+    field_classification: fieldClassificationSummary(),
+    sensitive_output: false,
+    data: {
+      http_status: null,
+      ok: false,
+      body_truncated: false,
+      observed_bytes: 0,
+      response_summary: null,
+      platform_scope: {
+        action_platform: action.domainKey,
+        enabled_platforms: enabledPlatforms,
+        action_disabled_by_platform_scope: true
+      }
+    },
+    source_card: buildSourceCard({
+      action,
+      config,
+      fetchMeta,
+      mock: false,
+      meta: { ...meta, sourceStatus, errorType }
+    }),
+    source_quality: buildSourceQuality({
+      action,
+      fetchMeta,
+      mock: false,
       meta: { ...meta, sourceStatus, errorType }
     })
   };

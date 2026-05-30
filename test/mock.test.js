@@ -110,6 +110,18 @@ function createLiveConfig() {
   });
 }
 
+function createScopedLiveConfig() {
+  return loadConfig({
+    SERVICE_MODE: "live",
+    ENABLED_PLATFORMS: "archives,rcp,track_analysis",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    RCP_ORIGIN: "https://rcp.example.test",
+    ARCHIVES_ORIGIN: "https://archives.example.test",
+    TRACK_ANALYSIS_ORIGIN: "https://track-analysis.example.test"
+  });
+}
+
 test("health exposes Dennis runtime readiness fields", () => {
   const service = createService();
   const health = service.health();
@@ -142,6 +154,97 @@ test("actions endpoint exposes the fixed allowlist only", () => {
     "rcp_policy_tree_lookup",
     "track_analysis_check_data_ready"
   ]);
+});
+
+test("live mode without ENABLED_PLATFORMS still requires every fixed origin", () => {
+  assert.throws(
+    () => loadConfig({
+      SERVICE_MODE: "live",
+      RCP_ORIGIN: "https://rcp.example.test",
+      ARCHIVES_ORIGIN: "https://archives.example.test",
+      TRACK_ANALYSIS_ORIGIN: "https://track-analysis.example.test"
+    }),
+    /WEAPON_ORIGIN.*LOGIN_LOGS_ORIGIN/
+  );
+});
+
+test("ENABLED_PLATFORMS scopes live fixed-origin requirements", async () => {
+  const config = createScopedLiveConfig();
+
+  assert.deepEqual(config.enabledPlatforms, ["archives", "rcp", "track_analysis"]);
+  assert.equal(config.domains.archives.enabled, true);
+  assert.equal(config.domains.rcp.enabled, true);
+  assert.equal(config.domains.track_analysis.enabled, true);
+  assert.equal(config.domains.weapon.enabled, false);
+  assert.equal(config.domains.login_logs.enabled, false);
+  assert.equal(config.domains.weapon.origin, null);
+  assert.equal(config.domains.login_logs.origin, null);
+
+  const service = new BrowserBackedApiService(config, new FakeBrowserClient(config));
+  const prewarm = await service.prewarm();
+  assert.deepEqual(
+    prewarm.results.map((result) => result.key),
+    ["rcp", "archives", "track_analysis"]
+  );
+});
+
+test("live scoped platform disables actions outside ENABLED_PLATFORMS without fetch", async () => {
+  const config = createScopedLiveConfig();
+  const fakeClient = new FakeBrowserClient(config);
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("weapon_inventory", { user_id: "2871834924" });
+
+  assert.equal(response.action, "weapon_inventory");
+  assert.equal(response.status, "blocked");
+  assert.equal(response.source_status, "blocked");
+  assert.equal(response.error_type, "platform_not_enabled");
+  assert.equal(response.failure_reason, "action_disabled_by_platform_scope");
+  assert.equal(response.data.platform_scope.action_platform, "weapon");
+  assert.deepEqual(response.data.platform_scope.enabled_platforms, ["archives", "rcp", "track_analysis"]);
+  assert.equal(response.data.platform_scope.action_disabled_by_platform_scope, true);
+  assert.deepEqual(fakeClient.prewarmCalls, []);
+  assert.deepEqual(fakeClient.runCalls, []);
+});
+
+test("live scoped origins still reject path query and hash values", () => {
+  assert.throws(
+    () => loadConfig({
+      SERVICE_MODE: "live",
+      ENABLED_PLATFORMS: "archives",
+      ARCHIVES_ORIGIN: "https://archives.example.test/path"
+    }),
+    /ARCHIVES_ORIGIN must be an origin only/
+  );
+  assert.throws(
+    () => loadConfig({
+      SERVICE_MODE: "live",
+      ENABLED_PLATFORMS: "archives",
+      ARCHIVES_ORIGIN: "https://archives.example.test?x=1"
+    }),
+    /ARCHIVES_ORIGIN must be an origin only/
+  );
+});
+
+test("live scoped prewarm paths still require safe relative paths", () => {
+  assert.throws(
+    () => loadConfig({
+      SERVICE_MODE: "live",
+      ENABLED_PLATFORMS: "archives",
+      ARCHIVES_ORIGIN: "https://archives.example.test",
+      ARCHIVES_PREWARM_PATH: "https://archives.example.test/home"
+    }),
+    /ARCHIVES_PREWARM_PATH must be a same-origin relative path starting with \//
+  );
+  assert.throws(
+    () => loadConfig({
+      SERVICE_MODE: "live",
+      ENABLED_PLATFORMS: "archives",
+      ARCHIVES_ORIGIN: "https://archives.example.test",
+      ARCHIVES_PREWARM_PATH: "/../admin"
+    }),
+    /ARCHIVES_PREWARM_PATH must not contain path traversal/
+  );
 });
 
 test("prewarm reports per-origin status, latency, and error type", async () => {
