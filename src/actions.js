@@ -443,8 +443,8 @@ export const ACTIONS = Object.freeze({
     registryStatus: "service_registered",
     inputContract: {
       policyTreeCode: "required safe policy tree code",
-      policyTreeVersion: "required positive integer; maps to treeSnapshot",
-      targetPolicyCode: "optional safe policy code; used for source-quality context only"
+      policyTreeVersion: "required positive integer; HAR-derived query key policyTreeVersion",
+      targetPolicyCode: "optional safe policy code; included in the HAR-derived query when provided"
     },
     validateParams: validateRcpPolicyTreeLookupInput,
     buildRequest: buildRcpPolicyTreeLookupRequest,
@@ -1134,9 +1134,11 @@ function validateRcpPolicyTreeLookupInput(input) {
 function buildRcpPolicyTreeLookupRequest(input) {
   const params = new URLSearchParams({
     policyTreeCode: input.policyTreeCode.trim(),
-    treeSnapshot: String(input.policyTreeVersion),
-    _t: String(Date.now())
+    policyTreeVersion: String(input.policyTreeVersion)
   });
+  if (isNonEmptyString(input.targetPolicyCode)) {
+    params.set("targetPolicyCode", input.targetPolicyCode.trim());
+  }
   return {
     path: `${RCP_POLICY_TREE_LOOKUP_PATH}?${params.toString()}`,
     displayPath: `${RCP_POLICY_TREE_LOOKUP_PATH}?${params.toString()}`,

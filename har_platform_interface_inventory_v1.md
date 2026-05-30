@@ -32,7 +32,7 @@ inventory, not a runtime-routing promotion list.
 | `archives_related_users` | Archives Center | `POST /archives/user/search/device` | decimal `user_id`, fixed relation type enum | `live_smoke_verified` | none |
 | `rcp_event_detail` | RCP | `GET /v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, epoch-ms `queryTime` | `live_smoke_verified` | none |
 | `rcp_event_feature_list` | RCP | `GET /v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, epoch-ms `queryTime`, empty `featureGroup` | `partial_observation_available` | exact full feature count still needs a narrower query or dedicated bounded extraction contract |
-| `rcp_policy_tree_lookup` | RCP | `GET /v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, integer `policyTreeVersion`, optional safe `targetPolicyCode` | `blocked_missing_real_sample` | real policy tree code and version |
+| `rcp_policy_tree_lookup` | RCP | `GET /v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, integer `policyTreeVersion`, optional safe `targetPolicyCode` | `live_smoke_verified` | none; recommended minimum is `policyTreeCode + policyTreeVersion` |
 
 ## Supporting Probe
 
@@ -76,8 +76,9 @@ and large-response source-quality flags without returning raw records.
 `partial_observation_available` when the HTTP 200 body is capped at
 `MAX_LIVE_BODY_BYTES=65536`; the summary includes top-level keys, feature count
 estimate, feature group summary, and key event entity fields without returning
-the raw body. `rcp_policy_tree_lookup` still requires a real policy tree
-versioned sample.
+the raw body. `rcp_policy_tree_lookup` is live-smoke verified after aligning the
+builder with the HAR-derived query keys: `policyTreeCode`, `policyTreeVersion`,
+and optional `targetPolicyCode`.
 
 ### Track Analysis
 

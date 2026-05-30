@@ -496,6 +496,20 @@ test("rcp_event_feature_list external_share masks partial observation entities",
   assert.equal(JSON.stringify(response).includes("raw-feature-name"), false);
 });
 
+test("rcp_policy_tree_lookup uses HAR-derived policy tree query keys", () => {
+  const request = buildActionBody(ACTIONS.rcp_policy_tree_lookup, MOCK_ACTION_INPUTS.rcp_policy_tree_lookup);
+  const parsed = new URL(request.path, "https://rcp.example.test");
+
+  assert.equal(parsed.pathname, "/v2/rest/pro/policyTree/queryProPolicyTree");
+  assert.equal(parsed.searchParams.get("policyTreeCode"), "USER_REGISTER_NEW");
+  assert.equal(parsed.searchParams.get("policyTreeVersion"), "887");
+  assert.equal(parsed.searchParams.get("targetPolicyCode"), "mock_policy_code");
+  assert.equal(parsed.searchParams.has("treeSnapshot"), false);
+  assert.equal(parsed.searchParams.has("_t"), false);
+  assert.equal(request.method, "GET");
+  assert.deepEqual(request.body, {});
+});
+
 test("arbitrary URL input is forbidden", async () => {
   const service = createService();
 

@@ -57,7 +57,7 @@ summaries. Credential material remains forbidden in every output scope.
 | `archives_related_users` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with one related-users result path observed. |
 | `rcp_event_detail` | `blocked`; placeholder sample produced platform error | `live_smoke_verified` | Used a shape-only `rcp_snapshot` probe to obtain a real event sample; downstream detail completed with `api_code=200`. |
 | `rcp_event_feature_list` | `blocked_response_too_large`; real event sample reached HTTP 200 but truncated at `MAX_LIVE_BODY_BYTES=65536` | `partial_observation_available` | Capped partial extraction now returns top-level keys, feature count estimate, feature group summary, key event entity, and `source_quality.large_response_limited=true`; exact full feature count still requires a narrower platform query or dedicated bounded extraction contract. |
-| `rcp_policy_tree_lookup` | `blocked`; placeholder policy tree sample produced platform error | `blocked_missing_real_sample` | Needs real `policyTreeCode` and `policyTreeVersion`; do not derive or guess from hit policy code. |
+| `rcp_policy_tree_lookup` | `blocked_platform_error_real_sample`; old builder used `treeSnapshot` and omitted query `targetPolicyCode` | `live_smoke_verified` | Builder now uses HAR-derived `policyTreeVersion`; A/B/C/D matrix completed with HTTP 200 and body-level `api_code=200`. |
 
 No second-stage action is only `implemented_mock_only` after this pass.
 
@@ -187,7 +187,7 @@ Downstream retest results:
 | --- | --- | --- | --- | --- | --- |
 | `rcp_event_detail` | `200` | `completed` | `completed` | `null` | none |
 | `rcp_event_feature_list` | `200` | `parse_error` | `parse_error` | `parse_error` | superseded by latest partial-observation retest below |
-| `rcp_policy_tree_lookup` | not retested | `blocked_missing_real_sample` | `blocked_missing_real_sample` | n/a | missing real `policyTreeCode` and `policyTreeVersion` |
+| `rcp_policy_tree_lookup` | `200` | `completed` | `completed` | `null` | fixed query param mapping; supersedes earlier `api_code=500` |
 
 The superseded `rcp_event_feature_list` diagnostics were:
 
@@ -223,14 +223,69 @@ Latest `rcp_event_feature_list` retest after the large-response summarizer fix:
 - raw records full dump returned: `false`
 - credential secret values returned: `false`
 
+Superseded `rcp_policy_tree_lookup` retest with HAR-confirmed sample:
+
+- service scope: `ENABLED_PLATFORMS=rcp`
+- sample: `policyTreeCode=USER_REGISTER_NEW`, `policyTreeVersion=887`,
+  `targetPolicyCode=BS_fake_account_register_thirdPlatformAll_bindphone`
+- HTTP status: `200`
+- action status: `blocked`
+- source status: `blocked`
+- error_type: `platform_error`
+- upstream/body-level api_code: `500`
+- body_truncated: `false`
+- observed_bytes: `377`
+- top-level keys: `status`, `message`, `host`, `port`, `timestamp`,
+  `traceId`, `traceSampled`
+- raw full body returned: `false`
+- raw records full dump returned: `false`
+- source_card present: `true`
+- source_quality present: `true`
+- latest classification: `blocked_platform_error_real_sample`, not
+  `blocked_missing_real_sample`
+
+Latest `rcp_policy_tree_lookup` parameter-matrix retest after builder fix:
+
+- HAR-derived query mapping: `policyTreeCode`, `policyTreeVersion`, optional
+  `targetPolicyCode`
+- builder fix: replaced `treeSnapshot` with `policyTreeVersion` and included
+  `targetPolicyCode` in the query when provided
+- `policyTreeNodeCode=53187346034508` was treated as non-required input for this
+  action; it is resolved from `queryProPolicyTree`, not required by the
+  `queryProPolicyTree` request
+
+| case | input variant | HTTP status | action status | source status | api_code | observed_bytes |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | `policyTreeCode + policyTreeVersion` | `200` | `completed` | `completed` | `200` | `5830` |
+| B | A + `targetPolicyCode` | `200` | `completed` | `completed` | `200` | `5830` |
+| C | A + `policyTreeNodeCode` | `200` | `completed` | `completed` | `200` | `5830` |
+| D | A + `policyTreeNodeCode + targetPolicyCode` | `200` | `completed` | `completed` | `200` | `5830` |
+
+Recommended minimal parameters:
+
+- `policyTreeCode=USER_REGISTER_NEW`
+- `policyTreeVersion=887`
+- optional `targetPolicyCode` when caller wants target-policy context
+
+Safety observations:
+
+- body_truncated: `false`
+- top-level keys: `status`, `message`, `data`, `host`, `port`, `timestamp`,
+  `traceId`, `traceSampled`
+- traceId presence recorded as boolean only
+- raw full body returned: `false`
+- raw records full dump returned: `false`
+- source_card present: `true`
+- source_quality present: `true`
+
 ## Minimal Human Inputs Needed
 
 - Archives: no current human login action needed for the verified visible
   service context. If future headless or fresh service runs return
   `api_code=302`, rerun with `BROWSER_HEADLESS=false` and complete the auth flow
   in that service-owned visible browser context.
-- RCP policy tree: provide a real `policyTreeCode` and matching
-  `policyTreeVersion`.
+- RCP policy tree: no current blocker for smoke. The verified minimum is
+  `policyTreeCode + policyTreeVersion`; `targetPolicyCode` is optional.
 - RCP feature list: partial observation is available. Exact full feature counts
   still require a narrower platform query or a dedicated bounded extraction
   contract. This is no longer a missing event sample issue.
