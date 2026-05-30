@@ -17,10 +17,17 @@ platform URLs.
   excluded-noise capabilities.
 - `BROWSER_BACKED_AGENT_SKILL.md` - Agent Skill draft for using the service as a
   browser-backed risk platform access layer.
+- `PASSTHROUGH_SERVICE_CONTRACT.md` - future `response_mode=passthrough`
+  service contract; current `compat_summary` behavior remains the stable
+  baseline.
 - `TEAM_LOCAL_SETUP.md` - teammate setup guide for installing, opening profile,
   refreshing auth state, and starting the local service.
 - `TROUBLESHOOTING.md` - common local setup, profile, auth, origin readiness,
   and action error troubleshooting.
+
+Passthrough means forwarding upstream business response bodies, not forwarding
+browser auth material, request headers, cookies, tokens, sessions, or profile
+storage.
 
 ## Current Stable Capabilities
 
