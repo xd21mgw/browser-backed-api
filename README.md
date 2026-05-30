@@ -1,6 +1,40 @@
-# Browser-Backed API Service POC
+# Browser-Backed Risk Source Service
 
-Local service skeleton for fixed browser-backed actions using an existing Chrome profile.
+Local browser-backed risk platform access service for fixed, typed risk evidence
+actions. It is the first version of the team-facing "risk unified local
+hand-and-foot layer", not a Dennis-only adapter.
+
+Each teammate runs the service on their own computer, with their own Chrome
+profile and their own internal platform permissions. Agent, Skill, or local
+scripts call only fixed local source actions on `127.0.0.1`; they do not read
+cookies, tokens, sessions, request headers, Chrome cookie DBs, or arbitrary
+platform URLs.
+
+## Team-Facing Entry Points
+
+- `RISK_SOURCE_CAPABILITY_REGISTRY.md` - capability menu organized by risk
+  evidence domain, including stable, beta/explicit, inventory-pending, and
+  excluded-noise capabilities.
+- `BROWSER_BACKED_AGENT_SKILL.md` - Agent Skill draft for using the service as a
+  browser-backed risk platform access layer.
+- `TEAM_LOCAL_SETUP.md` - teammate setup guide for installing, opening profile,
+  refreshing auth state, and starting the local service.
+- `TROUBLESHOOTING.md` - common local setup, profile, auth, origin readiness,
+  and action error troubleshooting.
+
+## Current Stable Capabilities
+
+| capability | action_name | evidence_domain | Use for |
+| --- | --- | --- | --- |
+| User activity/profile/device evidence summary | `track_analysis_summary` | 用户域 / 设备域 / 行为域 | User profile shape, use duration, active evidence, device list. |
+| Strategy event entry snapshot | `rcp_snapshot` | 策略域 | Event list, sourceId/eventId/deviceId/hitFusePolicyCode clues. |
+| Device graph and device-risk inventory | `weapon_inventory` | 设备域 / 社交域 | User-device graph, device risk labels, relation counts. |
+| Login behavior evidence | `login_logs_search` | 行为域 / 登录链路 | Recent login logs, login device/IP/source/method evidence. |
+
+These stable capabilities are evidence sources only. They do not perform
+automatic disposal, permission bypass, DataAgent/Hive calls, or final risk
+classification. See `RISK_SOURCE_CAPABILITY_REGISTRY.md` before calling beta or
+explicit capabilities.
 
 The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and does not touch real platforms.
 
