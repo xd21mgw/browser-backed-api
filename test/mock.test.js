@@ -312,6 +312,37 @@ test("live-smoke-ready contracts are registered and build fixed service-side req
   }
 });
 
+test("fixed-shape body-level redirect code is classified as auth_failed", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.archives_user_analysis,
+    MOCK_ACTION_INPUTS.archives_user_analysis,
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: JSON.stringify({
+        result: 302,
+        message: "redirect",
+        currentTime: 1780000000000
+      }),
+      bodyTruncated: false,
+      observedBytes: 64
+    },
+    {
+      originWarmed: true,
+      requestPath: "/v3/user/log/coreLogs/fetch",
+      requestMethod: "POST"
+    }
+  );
+
+  assert.equal(response.source_status, "auth_failed");
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.data.response_summary.archives_user_analysis.api_code, 302);
+  assert.equal(response.data.response_summary.archives_user_analysis.raw_full_body_suppressed, true);
+});
+
 test("arbitrary URL input is forbidden", async () => {
   const service = createService();
 
@@ -360,6 +391,27 @@ test("prewarm auth redirect waits for automatic return to the configured origin"
   assert.equal(result.landing_flow_attempted, true);
   assert.equal(result.allowed_clicks_executed, 0);
   assert.equal(result.landing_flow_status, "auto_returned");
+});
+
+test("prewarm recognizes Archives account landing origin as auth redirect", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://account.p.adm-corp.kuaishou.com/login",
+    waitOutcomes: ["timeout"]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.page_ready, false);
+  assert.equal(result.auth_redirect_detected, true);
+  assert.equal(result.landing_flow_attempted, true);
+  assert.equal(result.error_type, "landing_flow_blocked");
+  assert.equal(result.final_origin_after_landing, "https://account.p.adm-corp.kuaishou.com");
+  assert.equal(result.landing_flow_status, "landing_flow_blocked");
 });
 
 test("prewarm auth redirect can use one allowlisted next click before becoming ready", async () => {

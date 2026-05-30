@@ -1,6 +1,9 @@
 const SENSITIVE_NAME_PATTERN = /(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)/i;
 const SENSITIVE_NAME_GLOBAL_PATTERN = /(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)/gi;
-const FIXED_AUTH_REDIRECT_ORIGINS = new Set(["https://sso.corp.kuaishou.com"]);
+const FIXED_AUTH_REDIRECT_ORIGINS = new Set([
+  "https://sso.corp.kuaishou.com",
+  "https://account.p.adm-corp.kuaishou.com"
+]);
 
 export function sanitizeUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string") {

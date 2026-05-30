@@ -3914,12 +3914,13 @@ function summarizeFixedShapeActionResponse(sectionName) {
   return (value, input = {}) => {
     const apiCode = readApiCode(value);
     if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
+      const errorType = apiCode === 302 ? "auth_failed" : "platform_error";
       return {
-        sourceStatus: "blocked",
-        errorType: "platform_error",
+        sourceStatus: sourceStatusFromErrorType(errorType),
+        errorType,
         summary: {
           [sectionName]: {
-            source_status: "blocked",
+            source_status: sourceStatusFromErrorType(errorType),
             api_code: apiCode,
             top_level_keys: observedKeys(value),
             raw_full_body_suppressed: true,
