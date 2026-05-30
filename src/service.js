@@ -13,6 +13,7 @@ import {
   runMockAction,
   validateActionInput
 } from "./actions.js";
+import { computeAuthState, loadRefreshState, saveRefreshState, updateOriginWarmState } from "./authState.js";
 import { BrowserBackedClient } from "./browser.js";
 import { isAuthRedirectTarget, sanitizeErrorMessage, sourceStatusFromErrorType } from "./diagnostics.js";
 
@@ -22,6 +23,7 @@ export class BrowserBackedApiService {
     this.startedAtMs = Date.now();
     this.browserClient = browserClient || (config.mode === "live" ? new BrowserBackedClient(config) : null);
     this.warmState = new Map(Object.values(config.domains).map((domain) => [domain.key, defaultWarmState(domain, config)]));
+    this.refreshState = loadRefreshState(config.stateFile);
   }
 
   async init() {
@@ -35,11 +37,23 @@ export class BrowserBackedApiService {
 
   health() {
     const browserStatus = this.browserClient ? this.browserClient.status() : null;
+    const authState = computeAuthState({
+      profileDir: this.config.profileDir,
+      stateFile: this.config.stateFile,
+      origins: Object.values(this.config.domains),
+      refreshState: this.refreshState
+    });
     return {
       ok: true,
       service_mode: this.config.mode,
       browser_initialized: Boolean(browserStatus?.browser_initialized),
       context_initialized: Boolean(browserStatus?.context_initialized),
+      profile_dir_configured: authState.profile_dir_configured,
+      profile_exists: authState.profile_exists,
+      state_file_configured: authState.state_file_configured,
+      last_refresh_at: authState.last_refresh_at,
+      auth_state: authState.auth_state,
+      origin_status: authState.origin_status,
       warmed_origins: this.warmedOrigins(),
       uptime_ms: Date.now() - this.startedAtMs,
       action_count: Object.keys(ACTIONS).length
@@ -57,6 +71,7 @@ export class BrowserBackedApiService {
     for (const domain of enabledDomains(this.config)) {
       results.push(await this.prewarmDomain(domain.key));
     }
+    this.persistRefreshState({ incrementRefreshCount: this.config.mode === "live" && results.length > 0 });
 
     return {
       service_mode: this.config.mode,
@@ -107,6 +122,7 @@ export class BrowserBackedApiService {
           final_origin_after_landing: "mock"
         };
         this.warmState.set(domain.key, result);
+        this.recordOriginWarmState(domain, result);
         return result;
       }
 
@@ -128,6 +144,7 @@ export class BrowserBackedApiService {
         last_landing_flow_status: liveResult.landing_flow_status || "not_needed"
       };
       this.warmState.set(domain.key, result);
+      this.recordOriginWarmState(domain, result);
       return result;
     } catch (error) {
       const result = {
@@ -159,6 +176,7 @@ export class BrowserBackedApiService {
         final_origin_after_landing: null
       };
       this.warmState.set(domain.key, result);
+      this.recordOriginWarmState(domain, result);
       return result;
     }
   }
@@ -308,6 +326,27 @@ export class BrowserBackedApiService {
     if (this.browserClient) {
       await this.browserClient.close();
     }
+  }
+
+  recordOriginWarmState(domain, result) {
+    if (this.config.mode !== "live") {
+      return;
+    }
+    this.refreshState = updateOriginWarmState(this.refreshState, domain, result);
+    this.persistRefreshState();
+  }
+
+  persistRefreshState({ incrementRefreshCount = false } = {}) {
+    if (this.config.mode !== "live") {
+      return;
+    }
+    if (incrementRefreshCount) {
+      this.refreshState = {
+        ...this.refreshState,
+        refresh_count: (Number(this.refreshState.refresh_count) || 0) + 1
+      };
+    }
+    this.refreshState = saveRefreshState(this.refreshState, this.config.stateFile);
   }
 }
 

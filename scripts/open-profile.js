@@ -4,6 +4,7 @@ import { loadConfig } from "../src/config.js";
 import { sanitizeErrorMessage, sanitizeUrl } from "../src/diagnostics.js";
 
 process.env.SERVICE_MODE = "live";
+process.env.BROWSER_HEADLESS = "false";
 
 const config = loadConfig();
 const { chromium } = await import("playwright");
@@ -19,16 +20,16 @@ process.on("SIGTERM", () => {
 });
 
 try {
-  context = await chromium.launchPersistentContext(config.userDataDir, {
+  context = await chromium.launchPersistentContext(config.profileDir, {
     channel: config.browser.channel,
     headless: false,
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: false
   });
 
-  for (const domain of Object.values(config.domains).filter((item) => item.enabled !== false)) {
+  for (const domain of Object.values(config.domains).filter((item) => item.enabled !== false && item.origin)) {
     const page = await context.newPage();
-    const target = domain.origin;
+    const target = new URL(domain.prewarmPath, domain.origin).toString();
     try {
       await page.goto(target, {
         waitUntil: "domcontentloaded",
@@ -42,7 +43,7 @@ try {
 
   console.log("");
   console.log("Complete SSO or landing steps manually in the opened browser windows.");
-  console.log("No cookies, tokens, sessions, headers, DOM, or response bodies are read by this script.");
+  console.log("No cookies, tokens, sessions, headers, DOM, localStorage, or response bodies are read by this script.");
 
   const rl = createInterface({ input, output });
   await rl.question("Press Enter here when manual profile activation is complete...");

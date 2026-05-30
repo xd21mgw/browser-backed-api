@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { ACTIONS, ACTION_ALLOWLIST, buildActionBody, buildLiveActionResponse } from "../src/actions.js";
+import {
+  computeAuthState,
+  defaultRefreshState,
+  saveRefreshState,
+  shouldRefreshOrigin,
+  updateOriginWarmState
+} from "../src/authState.js";
 import { BrowserBackedClient } from "../src/browser.js";
 import { loadConfig } from "../src/config.js";
+import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../src/originRegistry.js";
 import { BrowserBackedApiService } from "../src/service.js";
+import { buildRefreshDaemonEvent } from "../scripts/refresh-daemon.js";
 
 const MOCK_ACTION_INPUTS = Object.freeze({
   rcp_snapshot: {
@@ -88,11 +100,22 @@ const LIVE_SMOKE_READY_ACTIONS = Object.freeze([
   "track_analysis_check_data_ready"
 ]);
 
+let authEnvCounter = 0;
+
+function createAuthEnv() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `browser-backed-api-poc-${process.pid}-${authEnvCounter++}-`));
+  return {
+    BROWSER_BACKED_PROFILE_DIR: path.join(root, "profile"),
+    BROWSER_BACKED_STATE_FILE: path.join(root, "refresh-session.state.json")
+  };
+}
+
 function createService() {
   const config = loadConfig({
     SERVICE_MODE: "mock",
     HOST: "127.0.0.1",
-    PORT: "8787"
+    PORT: "8787",
+    ...createAuthEnv()
   });
   return new BrowserBackedApiService(config);
 }
@@ -102,6 +125,7 @@ function createLiveConfig() {
     SERVICE_MODE: "live",
     HOST: "127.0.0.1",
     PORT: "8787",
+    ...createAuthEnv(),
     RCP_ORIGIN: "https://rcp.example.test",
     WEAPON_ORIGIN: "https://weapon.example.test",
     LOGIN_LOGS_ORIGIN: "https://user-center-workbench.example.test",
@@ -116,11 +140,55 @@ function createScopedLiveConfig() {
     ENABLED_PLATFORMS: "archives,rcp,track_analysis",
     HOST: "127.0.0.1",
     PORT: "8787",
+    ...createAuthEnv(),
     RCP_ORIGIN: "https://rcp.example.test",
     ARCHIVES_ORIGIN: "https://archives.example.test",
     TRACK_ANALYSIS_ORIGIN: "https://track-analysis.example.test"
   });
 }
+
+test("origin registry contains the four core default origins", () => {
+  assert.deepEqual(CORE_ORIGIN_KEYS, ["rcp", "weapon", "login_logs", "track_analysis"]);
+
+  for (const key of CORE_ORIGIN_KEYS) {
+    const origin = ORIGIN_REGISTRY[key];
+    assert.ok(origin, `${key} should be registered`);
+    assert.equal(origin.name, key);
+    assert.equal(typeof origin.envVar, "string");
+    assert.equal(origin.defaultOrigin.startsWith("https://"), true);
+    assert.equal(Array.isArray(origin.actions), true);
+    assert.equal(origin.actions.length > 0, true);
+    assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
+    assert.equal(origin.enabled, true);
+    assert.deepEqual(origin.requiredForActions, origin.actions);
+  }
+});
+
+test("adding an origin through registry config does not change the fixed action allowlist", () => {
+  const extendedRegistry = {
+    ...ORIGIN_REGISTRY,
+    video_content: {
+      name: "video_content",
+      label: "Video Content",
+      envVar: "VIDEO_CONTENT_ORIGIN",
+      defaultOrigin: "https://video-content.example.test",
+      warmupPath: "/",
+      actions: ["future_video_action"],
+      refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
+      enabled: true
+    }
+  };
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...createAuthEnv()
+  }, { originRegistry: extendedRegistry });
+  const service = new BrowserBackedApiService(config);
+
+  assert.equal(config.domains.video_content.origin, "https://video-content.example.test");
+  assert.deepEqual(service.actions().actions.map((action) => action.name), ACTION_ALLOWLIST);
+});
 
 test("health exposes Dennis runtime readiness fields", () => {
   const service = createService();
@@ -130,6 +198,12 @@ test("health exposes Dennis runtime readiness fields", () => {
   assert.equal(health.service_mode, "mock");
   assert.equal(health.browser_initialized, false);
   assert.equal(health.context_initialized, false);
+  assert.equal(health.profile_dir_configured, true);
+  assert.equal(health.profile_exists, false);
+  assert.equal(health.state_file_configured, true);
+  assert.equal(health.last_refresh_at, null);
+  assert.equal(health.auth_state, "auth_required");
+  assert.ok(health.origin_status);
   assert.equal(typeof health.uptime_ms, "number");
   assert.equal(health.warmed_origins.length, 5);
   assert.ok(health.warmed_origins.every((origin) => origin.status === "not_warmed"));
@@ -156,16 +230,19 @@ test("actions endpoint exposes the fixed allowlist only", () => {
   ]);
 });
 
-test("live mode without ENABLED_PLATFORMS still requires every fixed origin", () => {
-  assert.throws(
-    () => loadConfig({
-      SERVICE_MODE: "live",
-      RCP_ORIGIN: "https://rcp.example.test",
-      ARCHIVES_ORIGIN: "https://archives.example.test",
-      TRACK_ANALYSIS_ORIGIN: "https://track-analysis.example.test"
-    }),
-    /WEAPON_ORIGIN.*LOGIN_LOGS_ORIGIN/
-  );
+test("live mode uses registry default origins when env overrides are absent", () => {
+  const config = loadConfig({
+    SERVICE_MODE: "live",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...createAuthEnv()
+  });
+
+  assert.equal(config.domains.rcp.origin, ORIGIN_REGISTRY.rcp.defaultOrigin);
+  assert.equal(config.domains.weapon.origin, ORIGIN_REGISTRY.weapon.defaultOrigin);
+  assert.equal(config.domains.login_logs.origin, ORIGIN_REGISTRY.login_logs.defaultOrigin);
+  assert.equal(config.domains.track_analysis.origin, ORIGIN_REGISTRY.track_analysis.defaultOrigin);
+  assert.equal(config.domains.archives.origin, ORIGIN_REGISTRY.archives.defaultOrigin);
 });
 
 test("ENABLED_PLATFORMS scopes live fixed-origin requirements", async () => {
@@ -245,6 +322,176 @@ test("live scoped prewarm paths still require safe relative paths", () => {
     }),
     /ARCHIVES_PREWARM_PATH must not contain path traversal/
   );
+});
+
+test("profile missing computes auth_state as auth_required", () => {
+  const env = createAuthEnv();
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...env
+  });
+  const authState = computeAuthState({
+    profileDir: config.profileDir,
+    stateFile: config.stateFile,
+    origins: Object.values(config.domains)
+  });
+
+  assert.equal(authState.profile_exists, false);
+  assert.equal(authState.auth_state, "auth_required");
+});
+
+test("state file missing computes auth_state without throwing", () => {
+  const env = createAuthEnv();
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...env
+  });
+  fs.mkdirSync(config.profileDir, { recursive: true });
+
+  const authState = computeAuthState({
+    profileDir: config.profileDir,
+    stateFile: config.stateFile,
+    origins: Object.values(config.domains)
+  });
+
+  assert.equal(authState.profile_exists, true);
+  assert.equal(authState.last_refresh_at, null);
+  assert.equal(authState.auth_state, "unknown");
+});
+
+test("refresh state writes only non-credential refresh metadata", () => {
+  const env = createAuthEnv();
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...env
+  });
+  const state = saveRefreshState({
+    last_refresh_at: "2026-05-30T00:00:00.000Z",
+    origin_status: {
+      rcp: {
+        status: "ready",
+        last_refresh_at: "2026-05-30T00:00:00.000Z",
+        last_error_type: "token_expired",
+        warmed: true,
+        page_ready: true,
+        cookie: "should-not-write"
+      }
+    },
+    warmed_origins: ["rcp", "session_source"],
+    service_version: "0.1.0",
+    refresh_count: 1,
+    cookie: "should-not-write",
+    token: "should-not-write",
+    session: "should-not-write",
+    header: "should-not-write",
+    authorization: "should-not-write",
+    password: "should-not-write",
+    localStorage: { dump: "should-not-write" }
+  }, config.stateFile);
+
+  const serialized = fs.readFileSync(config.stateFile, "utf8").toLowerCase();
+  for (const forbidden of ["cookie", "token", "session", "header", "authorization", "password", "localstorage", "should-not-write"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  assert.deepEqual(Object.keys(state), [
+    "last_refresh_at",
+    "origin_status",
+    "last_error_type",
+    "warmed_origins",
+    "service_version",
+    "refresh_count"
+  ]);
+  assert.deepEqual(state.warmed_origins, ["rcp"]);
+});
+
+test("health exposes profile and refresh-state metadata", () => {
+  const env = createAuthEnv();
+  const config = loadConfig({
+    SERVICE_MODE: "mock",
+    HOST: "127.0.0.1",
+    PORT: "8787",
+    ...env
+  });
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  saveRefreshState({
+    last_refresh_at: "2026-05-30T01:00:00.000Z",
+    origin_status: {
+      rcp: {
+        status: "ready",
+        last_refresh_at: "2026-05-30T01:00:00.000Z",
+        last_error_type: null,
+        warmed: true,
+        page_ready: true
+      }
+    },
+    warmed_origins: ["rcp"],
+    refresh_count: 1
+  }, config.stateFile);
+  const service = new BrowserBackedApiService(config);
+
+  const health = service.health();
+
+  assert.equal(health.profile_exists, true);
+  assert.equal(health.last_refresh_at, "2026-05-30T01:00:00.000Z");
+  assert.equal(health.origin_status.rcp.status, "ready");
+  assert.equal(health.origin_status.rcp.warmed, true);
+});
+
+test("refresh ttl decides when an origin should refresh", () => {
+  const nowMs = Date.parse("2026-05-30T04:00:00.000Z");
+  const origin = { key: "rcp", refreshTtlMs: DEFAULT_REFRESH_TTL_MS };
+  const state = updateOriginWarmState(defaultRefreshState(), origin, {
+    status: "ready",
+    warmed: true,
+    page_ready: true
+  }, { now: new Date(nowMs - DEFAULT_REFRESH_TTL_MS + 1) });
+
+  assert.equal(shouldRefreshOrigin(origin, state, nowMs), false);
+  assert.equal(shouldRefreshOrigin(origin, state, nowMs + 1), true);
+});
+
+test("refresh daemon event output does not include credential material", () => {
+  const event = buildRefreshDaemonEvent("refresh_daemon_tick_completed", {
+    ok: false,
+    service_mode: "live",
+    refreshed_origin_count: 0,
+    auth_summary: {
+      profile_dir_configured: true,
+      profile_exists: true,
+      state_file_configured: true,
+      last_refresh_at: "2026-05-30T00:00:00.000Z",
+      auth_state: "unknown",
+      origin_status: {
+        rcp: {
+          status: "ready",
+          last_refresh_at: "2026-05-30T00:00:00.000Z",
+          last_error_type: "session_expired",
+          warmed: true,
+          page_ready: true,
+          header: "should-not-output"
+        }
+      },
+      warmed_origins: ["rcp", "cookie_origin"],
+      last_error_type: "authorization_failed",
+      cookie: "should-not-output",
+      token: "should-not-output",
+      session: "should-not-output",
+      header: "should-not-output"
+    }
+  });
+
+  const serialized = JSON.stringify(event).toLowerCase();
+  for (const forbidden of ["cookie", "token", "session", "header", "authorization", "password", "should-not-output"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  assert.equal(event.last_error_type, "refresh_failed");
+  assert.equal(event.origin_status.rcp.last_error_type, "refresh_failed");
 });
 
 test("prewarm reports per-origin status, latency, and error type", async () => {
@@ -865,7 +1112,7 @@ test("lazy rewarm failure still returns source card, quality, and sensitivity fl
 
 test("forbidden action input terms still return 400", async () => {
   const service = createService();
-  for (const key of ["url", "path", "header", "cookie", "token", "session", "secret", "raw_body"]) {
+  for (const key of ["url", "path", "headers", "header", "cookie", "token", "session", "secret", "authorization", "raw_body"]) {
     await assert.rejects(
       () => service.executeAction("rcp_snapshot", { [key]: "blocked" }),
       (error) => error.statusCode === 400 && error.code === "forbidden_action_input"

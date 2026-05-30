@@ -7,8 +7,10 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 ## Goals Covered
 
 - Keeps a long-lived Playwright persistent browser context in `SERVICE_MODE=live`.
-- Uses `/Users/pengcheng/chrome-agent-auth-profile` as `userDataDir` by default.
-- Prewarms the fixed origins for enabled platforms in live mode.
+- Uses `~/.dennis-browser-backed/profile` as the default Playwright profile directory.
+- Keeps origin definitions in `src/originRegistry.js` instead of scattered hard-coded config.
+- Tracks refresh metadata in `~/.dennis-browser-backed/refresh-session.state.json`.
+- Prewarms the fixed registry origins for enabled platforms in live mode.
 - Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
 - Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
 - Adds `source_card` and `source_quality` to every action response.
@@ -21,7 +23,9 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - `src/server.js` - HTTP service and routes.
 - `src/actions.js` - fixed action registry and mock payloads.
 - `src/browser.js` - Playwright persistent context and same-origin fetch executor.
-- `src/config.js` - environment loading and fixed-origin validation.
+- `src/config.js` - environment loading and origin registry materialization.
+- `src/originRegistry.js` - extendable registry for fixed origins, warmup paths, TTLs, and action ownership.
+- `src/authState.js` - profile/state path helpers and sanitized refresh-state manager.
 - `src/quality.js` - `source_card`, `source_quality`, and shape-only summarization.
 
 ## First Batch Source Summary
@@ -69,7 +73,7 @@ curl -X POST http://localhost:8787/actions/rcp_snapshot \
   -d '{"eventType":"USER_REGISTER_NEW","startTime":"2026-05-29 10:00:00","endTime":"2026-05-29 10:30:00"}'
 ```
 
-The service binds to `127.0.0.1` by default. Override `HOST` only if you intentionally want a different bind address.
+The service binds only to `127.0.0.1`.
 
 ## Run Live Mode
 
@@ -79,10 +83,25 @@ Install dependencies first if they are not already present:
 npm install
 ```
 
-Set fixed origins in `.env` or the shell, then start live mode:
+For a first profile activation, use a visible browser and finish SSO or landing steps manually:
 
 ```sh
-SERVICE_MODE=live \
+npm run open:profile
+npm run start:live
+```
+
+For an existing profile, refresh it once or keep a local refresh loop running:
+
+```sh
+npm run refresh:once
+npm run refresh:daemon
+```
+
+`refresh:daemon` refreshes immediately at startup and then every 4 hours. Override the interval with `BROWSER_BACKED_REFRESH_INTERVAL_MS`.
+
+Live mode uses the registry defaults unless an origin env var overrides them:
+
+```sh
 RCP_ORIGIN=https://rcp.example.com \
 WEAPON_ORIGIN=https://weapon.example.com \
 LOGIN_LOGS_ORIGIN=https://login-logs.example.com \
@@ -93,22 +112,54 @@ npm run start:live
 Live mode starts a long-lived Playwright persistent context with:
 
 ```txt
-userDataDir=/Users/pengcheng/chrome-agent-auth-profile
+profileDir=~/.dennis-browser-backed/profile
 channel=chrome
 headless=true
 ```
 
-If a normal Chrome instance has the same profile locked, close it or point `USER_DATA_DIR` to a copied profile before running live mode.
+If a normal Chrome instance has the same profile locked, close it or point `BROWSER_BACKED_PROFILE_DIR` to a copied profile before running live mode. `USER_DATA_DIR` remains supported as a legacy alias, but `BROWSER_BACKED_PROFILE_DIR` takes precedence.
 
-## Chrome Profile
+## Profile, State, And Credential Material
 
-The default `USER_DATA_DIR` is:
+The default profile directory is:
 
 ```txt
-/Users/pengcheng/chrome-agent-auth-profile
+~/.dennis-browser-backed/profile
 ```
 
-The service allows the browser to use its ambient profile state during same-origin `fetch()` calls, but it does not call cookie/session/header inspection APIs and does not return those values.
+The default refresh-state file is:
+
+```txt
+~/.dennis-browser-backed/refresh-session.state.json
+```
+
+Override these paths with:
+
+- `BROWSER_BACKED_PROFILE_DIR`
+- `BROWSER_BACKED_STATE_FILE`
+
+Profile, state, and credential material are different:
+
+- Token/cookie/session/localStorage values are credential material. The service lets the browser use them but does not read, parse, or output them.
+- The profile is the browser login-state directory used by Playwright.
+- The state file is refresh bookkeeping only: `last_refresh_at`, `origin_status`, `last_error_type`, `warmed_origins`, `service_version`, and `refresh_count`.
+
+Do not commit profile directories, refresh state, `.env`, HAR files, screenshots, or temporary captures. On macOS, a future launchd plist can run `npm run refresh:once` on a schedule; this repo does not include that plist yet.
+
+## Origin Registry
+
+Origin configuration lives in `src/originRegistry.js`. Each origin defines:
+
+- `name`
+- `envVar`
+- `defaultOrigin`
+- `actions`
+- `refreshTtlMs`
+- `warmupPath`
+- `requiredForActions`
+- `enabled`
+
+The core default origins are `rcp`, `weapon`, `login_logs`, and `track_analysis`. The current registry also keeps `archives` for the existing fixed archives actions. Future sources such as video/content, private message, live, dashboard, or Grafana should be added by extending the registry first; this does not change the fixed action allowlist by itself.
 
 ## API
 
@@ -122,13 +173,27 @@ Returns readiness metadata for Dennis runtime integration:
   "service_mode": "mock",
   "browser_initialized": false,
   "context_initialized": false,
+  "profile_dir_configured": true,
+  "profile_exists": false,
+  "state_file_configured": true,
+  "last_refresh_at": null,
+  "auth_state": "auth_required",
+  "origin_status": {
+    "rcp": {
+      "status": "unknown",
+      "last_refresh_at": null,
+      "last_error_type": null,
+      "warmed": false,
+      "page_ready": false
+    }
+  },
   "warmed_origins": [],
   "uptime_ms": 123,
   "action_count": 12
 }
 ```
 
-`warmed_origins` contains one entry per fixed origin with `status`, `latency_ms`, and `error_type`.
+`auth_state` is one of `ready`, `auth_required`, `expired`, or `unknown`. `origin_status` comes from the sanitized refresh-state file. `warmed_origins` contains one entry per fixed origin with `status`, `latency_ms`, and `error_type`.
 
 ### `GET /actions`
 
@@ -285,6 +350,8 @@ Every action response includes:
 
 - No endpoint accepts a URL, origin, path, header, cookie, token, or session value from the caller.
 - Live fetches use `credentials: "include"` so the browser may use its own ambient login state, but the service does not read or return that state.
+- Refresh scripts use the persistent browser profile only through Playwright; they do not inspect cookie DBs, localStorage dumps, tokens, sessions, or request headers.
+- All actions still go through the fixed action allowlist in `src/actions.js`.
 - Response bodies are read only up to `MAX_LIVE_BODY_BYTES` for summarization, and returned live data is shape-only.
 - Sensitive-looking JSON key names are redacted in shape summaries.
 - Inputs containing URL-like values, raw header fields, raw cookie fields, tokens, sessions, or secrets are rejected with `forbidden_action_input`.

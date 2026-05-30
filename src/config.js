@@ -1,70 +1,44 @@
 import fs from "node:fs";
-import path from "node:path";
+import { getProfileDir, getStateFile } from "./authState.js";
+import { ORIGIN_REGISTRY, listEnabledOriginKeys, listOriginDefinitions, listOriginKeys } from "./originRegistry.js";
 
-const DEFAULT_USER_DATA_DIR = "/Users/pengcheng/chrome-agent-auth-profile";
-const PLATFORM_KEYS = Object.freeze(["rcp", "weapon", "login_logs", "archives", "track_analysis"]);
-
-export function loadConfig(env = process.env) {
+export function loadConfig(env = process.env, options = {}) {
   const effectiveEnv = env === process.env ? loadLocalEnv(env) : env;
+  const originRegistry = options.originRegistry || ORIGIN_REGISTRY;
+  const platformKeys = listOriginKeys(originRegistry);
+  const defaultEnabledPlatforms = listEnabledOriginKeys(originRegistry);
   const mode = effectiveEnv.SERVICE_MODE || "mock";
   if (!["mock", "live"].includes(mode)) {
     throw new Error("SERVICE_MODE must be either mock or live");
   }
 
   const enabledPlatforms = mode === "live"
-    ? parseEnabledPlatforms(effectiveEnv.ENABLED_PLATFORMS, PLATFORM_KEYS)
-    : [...PLATFORM_KEYS];
+    ? parseEnabledPlatforms(effectiveEnv.ENABLED_PLATFORMS, platformKeys, defaultEnabledPlatforms)
+    : [...defaultEnabledPlatforms];
   const enabledPlatformSet = new Set(enabledPlatforms);
+  const profileDir = getProfileDir(effectiveEnv);
+  const stateFile = getStateFile(effectiveEnv);
   const config = {
     mode,
     enabledPlatforms,
     enabledPlatformsExplicit: mode === "live" && typeof effectiveEnv.ENABLED_PLATFORMS === "string",
     port: parsePort(effectiveEnv.PORT || "8787"),
-    host: effectiveEnv.HOST || "127.0.0.1",
-    userDataDir: path.resolve(effectiveEnv.USER_DATA_DIR || DEFAULT_USER_DATA_DIR),
+    host: parseHost(effectiveEnv.HOST || "127.0.0.1"),
+    userDataDir: profileDir,
+    profileDir,
+    stateFile,
+    auth: {
+      profileDir,
+      stateFile
+    },
     browser: {
       headless: effectiveEnv.BROWSER_HEADLESS !== "false",
       channel: effectiveEnv.PLAYWRIGHT_CHANNEL || "chrome",
       requestTimeoutMs: parsePositiveInt(effectiveEnv.REQUEST_TIMEOUT_MS || "15000", "REQUEST_TIMEOUT_MS"),
       maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || "65536", "MAX_LIVE_BODY_BYTES")
     },
-    domains: {
-      rcp: domainConfig(
-        "rcp",
-        "RCP",
-        effectiveEnv.RCP_ORIGIN,
-        effectiveEnv.RCP_PREWARM_PATH || "/",
-        enabledPlatformSet.has("rcp")
-      ),
-      weapon: domainConfig(
-        "weapon",
-        "Weapon",
-        effectiveEnv.WEAPON_ORIGIN,
-        effectiveEnv.WEAPON_PREWARM_PATH || "/",
-        enabledPlatformSet.has("weapon")
-      ),
-      login_logs: domainConfig(
-        "login_logs",
-        "Login Logs",
-        effectiveEnv.LOGIN_LOGS_ORIGIN,
-        effectiveEnv.LOGIN_LOGS_PREWARM_PATH || "/",
-        enabledPlatformSet.has("login_logs")
-      ),
-      archives: domainConfig(
-        "archives",
-        "Archives Center",
-        effectiveEnv.ARCHIVES_ORIGIN,
-        effectiveEnv.ARCHIVES_PREWARM_PATH || "/",
-        enabledPlatformSet.has("archives")
-      ),
-      track_analysis: domainConfig(
-        "track_analysis",
-        "Track Analysis",
-        effectiveEnv.TRACK_ANALYSIS_ORIGIN,
-        effectiveEnv.TRACK_ANALYSIS_PREWARM_PATH || "/",
-        enabledPlatformSet.has("track_analysis")
-      )
-    }
+    originRegistry,
+    domains: buildDomainConfigs(originRegistry, effectiveEnv, enabledPlatformSet)
   };
 
   if (mode === "live") {
@@ -121,6 +95,13 @@ function parsePort(raw) {
   return port;
 }
 
+function parseHost(raw) {
+  if (raw !== "127.0.0.1") {
+    throw new Error("HOST must be 127.0.0.1");
+  }
+  return raw;
+}
+
 function parsePositiveInt(raw, name) {
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
@@ -129,19 +110,38 @@ function parsePositiveInt(raw, name) {
   return value;
 }
 
-function domainConfig(key, label, rawOrigin, rawPrewarmPath, enabled = true) {
+function buildDomainConfigs(originRegistry, env, enabledPlatformSet) {
+  const domains = {};
+  for (const definition of listOriginDefinitions(originRegistry)) {
+    const enabled = definition.enabled !== false && enabledPlatformSet.has(definition.name);
+    domains[definition.name] = domainConfig(definition, env, enabled);
+  }
+  return domains;
+}
+
+function domainConfig(definition, env, enabled = true) {
+  const rawOrigin = env[definition.envVar] || definition.defaultOrigin;
+  const warmupEnvVar = definition.warmupEnvVar || definition.envVar.replace(/_ORIGIN$/, "_PREWARM_PATH");
+  const rawPrewarmPath = env[warmupEnvVar] || definition.warmupPath || "/";
   return {
-    key,
-    label,
+    key: definition.name,
+    name: definition.name,
+    label: definition.label || definition.name,
+    envVar: definition.envVar,
+    defaultOrigin: definition.defaultOrigin,
+    actions: [...(definition.actions || [])],
+    requiredForActions: [...(definition.requiredForActions || definition.actions || [])],
+    refreshTtlMs: definition.refreshTtlMs,
     enabled,
-    origin: enabled && rawOrigin ? normalizeOrigin(rawOrigin, `${key.toUpperCase()}_ORIGIN`) : null,
-    prewarmPath: enabled ? normalizeRelativePath(rawPrewarmPath, `${key.toUpperCase()}_PREWARM_PATH`) : "/"
+    origin: enabled && rawOrigin ? normalizeOrigin(rawOrigin, definition.envVar) : null,
+    prewarmPath: enabled ? normalizeRelativePath(rawPrewarmPath, warmupEnvVar) : "/",
+    warmupPath: enabled ? normalizeRelativePath(rawPrewarmPath, warmupEnvVar) : "/"
   };
 }
 
-function parseEnabledPlatforms(rawValue, platformKeys) {
+function parseEnabledPlatforms(rawValue, platformKeys, defaultEnabledPlatforms = platformKeys) {
   if (rawValue === undefined || rawValue === null) {
-    return [...platformKeys];
+    return [...defaultEnabledPlatforms];
   }
 
   if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
