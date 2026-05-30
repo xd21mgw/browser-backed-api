@@ -17,8 +17,8 @@ platform URLs.
   excluded-noise capabilities.
 - `BROWSER_BACKED_AGENT_SKILL.md` - Agent Skill draft for using the service as a
   browser-backed risk platform access layer.
-- `PASSTHROUGH_SERVICE_CONTRACT.md` - future `response_mode=passthrough`
-  service contract; current `compat_summary` behavior remains the stable
+- `PASSTHROUGH_SERVICE_CONTRACT.md` - `response_mode=passthrough` service
+  contract; current default `compat_summary` behavior remains the stable
   baseline.
 - `TEAM_LOCAL_SETUP.md` - teammate setup guide for installing, opening profile,
   refreshing auth state, and starting the local service.
@@ -54,9 +54,11 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - Prewarms the fixed registry origins for enabled platforms in live mode.
 - Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
 - Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
-- Adds `source_card` and `source_quality` to every action response.
+- Adds `source_card` and `source_quality` to every default `compat_summary`
+  action response.
 - Does not call Playwright cookie/session/header inspection APIs.
-- Does not return full raw live responses; live mode returns status plus JSON shape only.
+- Keeps `compat_summary` live outputs shape-only; opt-in `passthrough` returns a
+  controlled upstream response envelope.
 - Exposes Dennis runtime-oriented health, prewarm, action latency, and source quality metadata.
 
 ## Files
@@ -296,6 +298,20 @@ Allowed action names:
 - `track_analysis_check_data_ready`
 
 Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
+
+Every fixed action accepts optional `response_mode`:
+
+- `compat_summary` is the default and preserves the existing `source_card`,
+  `source_quality`, and evidence-summary response shape.
+- `passthrough` returns only the controlled upstream response envelope:
+  `ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and
+  `safety`.
+
+Passthrough does not accept caller-provided URL, path, header, cookie, token,
+session, raw body, or raw query fields. It may forward upstream business
+response fields, including risk entities, but it must not forward browser auth
+material, request headers, cookies, tokens, sessions, profile storage, or
+Playwright storage state.
 
 `rcp_snapshot` uses the fixed RCP eventList source:
 

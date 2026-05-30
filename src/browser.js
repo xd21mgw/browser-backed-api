@@ -235,6 +235,7 @@ export class BrowserBackedClient {
               completed: true,
               ok: graph.ok,
               status: graph.status,
+              contentType: graph.contentType,
               bodyText: graph.text,
               bodyTruncated: graph.truncated,
               observedBytes: graph.observedBytes
@@ -293,6 +294,7 @@ export class BrowserBackedClient {
             completed: true,
             ok: graph.ok,
             status: graph.status,
+            contentType: "application/json",
             bodyText: JSON.stringify({
               graphData: graphParsed.value,
               riskDataResults,
@@ -324,6 +326,7 @@ export class BrowserBackedClient {
               return {
                 ok: response.ok,
                 status: response.status,
+                contentType: response.headers.get("content-type") || null,
                 text: readResult.text,
                 truncated: readResult.truncated,
                 observedBytes: readResult.observedBytes
@@ -462,6 +465,7 @@ export class BrowserBackedClient {
             completed: true,
             ok: response.ok,
             status: response.status,
+            contentType: response.headers.get("content-type") || null,
             bodyText: readResult.text,
             bodyTruncated: readResult.truncated,
             observedBytes: readResult.observedBytes

@@ -6,10 +6,13 @@ import {
   buildLoginLogsFallbackInput,
   buildLiveActionFailureResponse,
   buildLiveActionResponse,
+  buildPassthroughActionResponse,
+  buildPassthroughFailureResponse,
   getAction,
   getActionParameterError,
   listActions,
   loginLogsFallbackReason,
+  actionResponseMode,
   runMockAction,
   validateActionInput
 } from "./actions.js";
@@ -188,9 +191,17 @@ export class BrowserBackedApiService {
     }
 
     validateActionInput(input);
+    const responseMode = actionResponseMode(input || {});
+    const passthrough = responseMode === "passthrough";
 
     const startedAt = Date.now();
     if (this.config.mode === "live" && !isPlatformEnabled(this.config, action.domainKey)) {
+      if (passthrough) {
+        return buildPassthroughFailureResponse(action, input, {
+          latencyMs: Date.now() - startedAt,
+          errorType: "platform_not_enabled"
+        });
+      }
       return buildActionDisabledByPlatformScopeResponse(action, this.config, {
         latencyMs: Date.now() - startedAt,
         outputScope: input?.output_scope
@@ -200,6 +211,12 @@ export class BrowserBackedApiService {
     const parameterError = getActionParameterError(action, input);
     if (parameterError) {
       const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
+      if (passthrough) {
+        return buildPassthroughFailureResponse(action, input, {
+          latencyMs: Date.now() - startedAt,
+          errorType: parameterError.errorType || "parameter_error"
+        });
+      }
       return buildActionParameterErrorResponse(action, this.config, {
         latencyMs: Date.now() - startedAt,
         originWarmed,
@@ -243,6 +260,12 @@ export class BrowserBackedApiService {
 
     if (!actionDiagnostics.origin_match || !actionDiagnostics.page_ready) {
       const errorType = this.warmState.get(action.domainKey)?.error_type || "origin_mismatch";
+      if (passthrough) {
+        return buildPassthroughFailureResponse(action, input, {
+          latencyMs: Date.now() - startedAt,
+          errorType
+        });
+      }
       return buildLiveActionFailureResponse(action, input, this.config, {
         latencyMs: Date.now() - startedAt,
         originWarmed,
@@ -257,6 +280,11 @@ export class BrowserBackedApiService {
 
     try {
       const fetchResult = await this.browserClient.runAction(action, actionRequest);
+      if (passthrough) {
+        return buildPassthroughActionResponse(action, input, fetchResult, {
+          latencyMs: Date.now() - startedAt
+        });
+      }
       const fallbackReason = loginLogsFallbackReason(action, input, fetchResult);
       if (fallbackReason) {
         const firstAttemptResponse = buildLiveActionResponse(action, input, this.config, fetchResult, {
@@ -292,6 +320,12 @@ export class BrowserBackedApiService {
       });
     } catch (error) {
       const errorType = classifyError(error);
+      if (passthrough) {
+        return buildPassthroughFailureResponse(action, input, {
+          latencyMs: Date.now() - startedAt,
+          errorType
+        });
+      }
       return buildLiveActionFailureResponse(action, input, this.config, {
         latencyMs: Date.now() - startedAt,
         originWarmed,

@@ -65,6 +65,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "time_window",
   "sub_interface",
   "mode",
+  "response_mode",
   "eventId",
   "queryTime",
   "featureGroup",
@@ -125,6 +126,8 @@ const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
 const DEFAULT_OUTPUT_SCOPE = "internal_risk_review";
 const OUTPUT_SCOPES = Object.freeze(["internal_risk_review", "external_share"]);
+const DEFAULT_RESPONSE_MODE = "compat_summary";
+const RESPONSE_MODES = Object.freeze(["compat_summary", "passthrough"]);
 const FIELD_CLASSIFICATION = Object.freeze({
   credential_secret: Object.freeze([
     "cookie",
@@ -230,6 +233,35 @@ const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "csrf",
   "jwt"
 ]);
+const PASSTHROUGH_CREDENTIAL_KEYS = Object.freeze(new Set([
+  "authorization",
+  "cookie",
+  "cookies",
+  "header",
+  "headers",
+  "requestheader",
+  "requestheaders",
+  "responseheader",
+  "responseheaders",
+  "setcookie",
+  "token",
+  "accesstoken",
+  "refreshtoken",
+  "idtoken",
+  "session",
+  "sessionid",
+  "password",
+  "passwd",
+  "secret",
+  "credential",
+  "credentials",
+  "csrf",
+  "csrftoken",
+  "jwt",
+  "localstorage",
+  "storagestate",
+  "browserstorage"
+]));
 
 export const ACTIONS = Object.freeze({
   rcp_snapshot: freezeAction({
@@ -489,12 +521,21 @@ export function listActions(config) {
       method: action.method,
       registry_status: action.registryStatus || "service_registered",
       platform_enabled: domain.enabled !== false,
+      default_response_mode: DEFAULT_RESPONSE_MODE,
+      response_modes: [...RESPONSE_MODES],
       default_runtime_routing: false,
       live_verified: false,
-      input_contract: action.inputContract,
+      input_contract: {
+        ...action.inputContract,
+        response_mode: "optional enum compat_summary|passthrough; default compat_summary"
+      },
       response_policy: {
         includes_source_card: true,
         includes_source_quality: true,
+        compat_summary_includes_source_card: true,
+        compat_summary_includes_source_quality: true,
+        passthrough_includes_source_card: false,
+        passthrough_includes_source_quality: false,
         raw_response_full_body: false,
         reads_cookie_token_session_header_plaintext: false
       }
@@ -546,6 +587,7 @@ export function runMockAction(action, input, config, meta = {}) {
     });
   }
   const data = action.mockData(safeInput);
+  const responseMode = actionResponseMode(safeInput);
   const sourceRequest = typeof action.buildRequest === "function"
     ? action.buildRequest(safeInput)
     : { path: action.apiPath, method: action.method };
@@ -559,6 +601,23 @@ export function runMockAction(action, input, config, meta = {}) {
     bodyTruncated: false,
     observedBytes: JSON.stringify(data).length
   };
+
+  if (responseMode === "passthrough") {
+    return buildPassthroughActionResponse(
+      action,
+      safeInput,
+      {
+        ...fetchMeta,
+        completed: true,
+        contentType: "application/json",
+        bodyText: JSON.stringify(data)
+      },
+      {
+        ...enrichedMeta,
+        fetchedAt: new Date().toISOString()
+      }
+    );
+  }
 
   return {
     action: action.name,
@@ -672,6 +731,80 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
       mock: false,
       meta: responseMeta
     })
+  };
+}
+
+export function buildPassthroughActionResponse(action, input, fetchResult, meta = {}) {
+  validateActionInput(input);
+  const fetchedAt = meta.fetchedAt || new Date().toISOString();
+  const contentType = contentTypeFromFetchResult(fetchResult);
+  const upstream = {
+    status: typeof fetchResult?.status === "number" ? fetchResult.status : null,
+    content_type: contentType,
+    body: null
+  };
+  let ok = Boolean(fetchResult?.ok);
+  let errorType = null;
+
+  if (fetchResult?.bodyTruncated) {
+    ok = false;
+    errorType = "response_too_large";
+    upstream.body_omitted = true;
+    upstream.response_too_large = true;
+    upstream.error_type = errorType;
+    upstream.observed_bytes = fetchResult.observedBytes ?? null;
+  } else {
+    const bodyResult = passthroughBody(fetchResult?.bodyText);
+    if (bodyResult.failClosed) {
+      ok = false;
+      errorType = "credential_material_detected";
+      upstream.body = null;
+      upstream.body_omitted = true;
+      upstream.error_type = errorType;
+    } else {
+      upstream.body = bodyResult.body;
+      if (bodyResult.credentialMaterialRemoved) {
+        upstream.credential_fields_removed = true;
+      }
+    }
+  }
+
+  return {
+    ok,
+    action: action.name,
+    request_id: meta.requestId || localRequestId(),
+    response_mode: "passthrough",
+    upstream,
+    ...(errorType ? { error_type: errorType } : {}),
+    meta: {
+      origin: action.domainKey,
+      latency_ms: meta.latencyMs ?? null,
+      fetched_at: fetchedAt
+    },
+    safety: passthroughSafety()
+  };
+}
+
+export function buildPassthroughFailureResponse(action, input, meta = {}) {
+  validateActionInput(input);
+  const errorType = meta.errorType || "fetch_failed";
+  return {
+    ok: false,
+    action: action.name,
+    request_id: meta.requestId || localRequestId(),
+    response_mode: "passthrough",
+    error_type: errorType,
+    upstream: {
+      status: null,
+      content_type: null,
+      body: null
+    },
+    meta: {
+      origin: action.domainKey,
+      latency_ms: meta.latencyMs ?? null,
+      fetched_at: meta.fetchedAt || new Date().toISOString()
+    },
+    safety: passthroughSafety()
   };
 }
 
@@ -880,6 +1013,13 @@ export function validateActionInput(input) {
 }
 
 export function getActionParameterError(action, input) {
+  if (input && Object.hasOwn(input, "response_mode") && !RESPONSE_MODES.includes(input.response_mode)) {
+    return {
+      message: "response_mode must be compat_summary or passthrough",
+      required: ["response_mode=compat_summary|passthrough"],
+      errorType: "invalid_parameter"
+    };
+  }
   if (input && Object.hasOwn(input, "output_scope") && !OUTPUT_SCOPES.includes(input.output_scope)) {
     return {
       message: "output_scope must be internal_risk_review or external_share",
@@ -1323,6 +1463,10 @@ function outputScope(input) {
   return OUTPUT_SCOPES.includes(input?.output_scope) ? input.output_scope : DEFAULT_OUTPUT_SCOPE;
 }
 
+export function actionResponseMode(input) {
+  return RESPONSE_MODES.includes(input?.response_mode) ? input.response_mode : DEFAULT_RESPONSE_MODE;
+}
+
 function fieldClassificationSummary() {
   return {
     credential_secret: [...FIELD_CLASSIFICATION.credential_secret],
@@ -1354,6 +1498,9 @@ function sanitizeInput(input) {
   }
   if (!OUTPUT_SCOPES.includes(safe.output_scope)) {
     delete safe.output_scope;
+  }
+  if (!RESPONSE_MODES.includes(safe.response_mode)) {
+    delete safe.response_mode;
   }
 
   return safe;
@@ -1431,6 +1578,102 @@ function sanitizeValue(value, depth = 0) {
 
 function looksSensitive(key) {
   return /(authorization|cookie|token|secret|session|password|credential|csrf|jwt)/i.test(key);
+}
+
+function passthroughSafety() {
+  return {
+    credential_material_output: false,
+    request_headers_output: false,
+    browser_profile_material_output: false
+  };
+}
+
+function contentTypeFromFetchResult(fetchResult) {
+  const contentType = fetchResult?.contentType || fetchResult?.content_type || null;
+  if (typeof contentType === "string" && contentType.trim()) {
+    return contentType.trim().slice(0, 256);
+  }
+  const parsed = parseJson(fetchResult?.bodyText);
+  return parsed.ok ? "application/json" : "text/plain";
+}
+
+function passthroughBody(bodyText) {
+  if (bodyText === undefined || bodyText === null || bodyText === "") {
+    return { body: null, credentialMaterialRemoved: false, failClosed: false };
+  }
+
+  const parsed = parseJson(bodyText);
+  if (parsed.ok) {
+    const sanitized = sanitizePassthroughJson(parsed.value);
+    return {
+      body: sanitized.value,
+      credentialMaterialRemoved: sanitized.credentialMaterialRemoved,
+      failClosed: false
+    };
+  }
+
+  const text = String(bodyText);
+  if (containsCredentialMaterialText(text)) {
+    return { body: null, credentialMaterialRemoved: false, failClosed: true };
+  }
+
+  return {
+    body: text,
+    credentialMaterialRemoved: false,
+    failClosed: false
+  };
+}
+
+function sanitizePassthroughJson(value, depth = 0) {
+  if (depth > 20) {
+    return { value: null, credentialMaterialRemoved: false };
+  }
+  if (Array.isArray(value)) {
+    let credentialMaterialRemoved = false;
+    const items = value.map((item) => {
+      const sanitized = sanitizePassthroughJson(item, depth + 1);
+      credentialMaterialRemoved = credentialMaterialRemoved || sanitized.credentialMaterialRemoved;
+      return sanitized.value;
+    });
+    return { value: items, credentialMaterialRemoved };
+  }
+  if (value && typeof value === "object") {
+    let credentialMaterialRemoved = false;
+    const output = {};
+    for (const [key, childValue] of Object.entries(value)) {
+      if (isCredentialMaterialKey(key)) {
+        credentialMaterialRemoved = true;
+        continue;
+      }
+      const sanitized = sanitizePassthroughJson(childValue, depth + 1);
+      credentialMaterialRemoved = credentialMaterialRemoved || sanitized.credentialMaterialRemoved;
+      output[key] = sanitized.value;
+    }
+    return { value: output, credentialMaterialRemoved };
+  }
+  if (typeof value === "string" && containsCredentialMaterialText(value)) {
+    return { value: "[redacted_value]", credentialMaterialRemoved: true };
+  }
+  return { value, credentialMaterialRemoved: false };
+}
+
+function isCredentialMaterialKey(key) {
+  const normalized = String(key || "").toLowerCase().replace(/[_\-\s]/g, "");
+  return PASSTHROUGH_CREDENTIAL_KEYS.has(normalized);
+}
+
+function containsCredentialMaterialText(text) {
+  const sample = String(text || "").slice(0, 4096);
+  return /authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{8,}/i.test(sample) ||
+    /\bset-cookie\s*:/i.test(sample) ||
+    /\bcookie\s*[:=]\s*[a-z0-9_.-]+=[^;\s]{8,}/i.test(sample) ||
+    /\b(sessionid|sid|token|jwt|csrf)\s*[:=]\s*[a-z0-9._~+/=-]{12,}/i.test(sample) ||
+    /\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/.test(sample);
+}
+
+function localRequestId() {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `local_${Date.now().toString(36)}_${random}`;
 }
 
 function parseJson(text) {

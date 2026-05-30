@@ -1,8 +1,8 @@
 # Passthrough Service Contract
 
-This document defines the future `response_mode=passthrough` contract for the
+This document defines the `response_mode=passthrough` contract for the
 browser-backed service. It is a service-layer contract only. It does not change
-the current stable `compat_summary` behavior.
+the current stable default `compat_summary` behavior.
 
 ## Positioning
 
@@ -23,7 +23,7 @@ automatic disposal.
 baseline used by existing callers, including the controlled Dennis full-runtime
 pilot.
 
-`passthrough` mode is a future additive response mode. It must not replace the
+`passthrough` mode is an additive opt-in response mode. It must not replace the
 default behavior until downstream parsers and migration checks are ready.
 
 During migration, a single fixed action may support both:
@@ -72,6 +72,7 @@ Recommended response shape:
   "ok": true,
   "action": "login_logs_search",
   "request_id": "local_xxx",
+  "response_mode": "passthrough",
   "upstream": {
     "status": 200,
     "content_type": "application/json",
@@ -100,7 +101,8 @@ Rules:
   cookies, tokens, sessions, authorization strings, or passwords.
 - The service must not return Chrome profile contents.
 - If the upstream response is too large, the service may return
-  `body_omitted=true`, `error_type=response_too_large`, and size/limit metadata.
+  `body_omitted=true`, `response_too_large=true`,
+  `error_type=response_too_large`, and size/limit metadata.
 - A too-large response is not a business summary. The service must not interpret
   the omitted body.
 
@@ -111,11 +113,13 @@ Example too-large shape:
   "ok": false,
   "action": "rcp_event_feature_list",
   "request_id": "local_xxx",
+  "response_mode": "passthrough",
   "upstream": {
     "status": 200,
     "content_type": "application/json",
     "body": null,
     "body_omitted": true,
+    "response_too_large": true,
     "error_type": "response_too_large"
   },
   "meta": {
@@ -140,7 +144,7 @@ Allowed:
 - Fixed action names from the action allowlist.
 - Typed params accepted by each action contract.
 - Fixed enum/mode fields such as `sub_interface` where already supported.
-- Future `response_mode=passthrough` once implemented.
+- `response_mode=passthrough`.
 
 Forbidden:
 
@@ -198,7 +202,7 @@ Human reviewers or upper-layer Agents remain responsible for final judgment.
 
 ## Applicable Action Scope
 
-Initial stable passthrough candidates:
+Initial stable passthrough actions:
 
 - `track_analysis_summary`
 - `rcp_snapshot`
@@ -217,8 +221,9 @@ Future candidate actions:
 - Content, social, dashboard, and Grafana-style fixed actions after inventory
   and source-contract promotion.
 
-Passthrough support for a candidate action still requires tests, redaction
-review, and live smoke before use.
+All fixed actions keep the same allowlist and typed-param contract when using
+passthrough. New fixed actions still require tests, redaction review, and live
+smoke before promotion.
 
 ## Noise Exclusion
 
@@ -279,15 +284,20 @@ That does not permit the service to inspect or expose that state.
 
 ## Implementation Plan
 
+Completed in the service:
+
 1. Add `response_mode=passthrough` to the typed input contract.
 2. Add passthrough mock tests for the four stable actions:
    `track_analysis_summary`, `rcp_snapshot`, `weapon_inventory`, and
    `login_logs_search`.
-3. Add a Dennis passthrough client that calls the local service envelope.
-4. Add a Dennis parser registry for passthrough `upstream.body` parsing.
-5. Run `compat_summary` vs `passthrough` side-by-side comparison for the stable
+
+Remaining downstream work:
+
+1. Add a Dennis passthrough client that calls the local service envelope.
+2. Add a Dennis parser registry for passthrough `upstream.body` parsing.
+3. Run `compat_summary` vs `passthrough` side-by-side comparison for the stable
    actions.
-6. Gradually switch defaults only after parser coverage, evidence-card parity,
+4. Gradually switch defaults only after parser coverage, evidence-card parity,
    redaction checks, and controlled pilot sign-off.
 
 ## Non-Goals

@@ -148,6 +148,32 @@ function createScopedLiveConfig() {
   });
 }
 
+function assertPassthroughEnvelope(response, actionName) {
+  assert.equal(response.action, actionName);
+  assert.equal(response.response_mode, "passthrough");
+  assert.equal(typeof response.request_id, "string");
+  assert.equal(response.request_id.startsWith("local_"), true);
+  assert.ok(response.upstream);
+  assert.ok(response.meta);
+  assert.equal(response.meta.origin, ACTIONS[actionName].domainKey);
+  assert.equal(typeof response.meta.latency_ms, "number");
+  assert.equal(typeof response.meta.fetched_at, "string");
+  assert.deepEqual(response.safety, {
+    credential_material_output: false,
+    request_headers_output: false,
+    browser_profile_material_output: false
+  });
+  assert.equal(Object.hasOwn(response, "source_card"), false);
+  assert.equal(Object.hasOwn(response, "source_quality"), false);
+  assert.equal(Object.hasOwn(response, "data"), false);
+}
+
+function assertNoCredentialMaterial(output) {
+  const serialized = JSON.stringify(output);
+  assert.equal(/secret-token-value|Bearer secret-auth-value|sid=secret-session-value/i.test(serialized), false);
+  assert.equal(/"token"\s*:|"authorization"\s*:|"cookie"\s*:|"session"\s*:|"password"\s*:/i.test(serialized), false);
+}
+
 test("origin registry contains the four core default origins", () => {
   assert.deepEqual(CORE_ORIGIN_KEYS, ["rcp", "weapon", "login_logs", "track_analysis"]);
 
@@ -215,7 +241,8 @@ test("health exposes Dennis runtime readiness fields", () => {
 
 test("actions endpoint exposes the fixed allowlist only", () => {
   const service = createService();
-  const actions = service.actions().actions.map((action) => action.name);
+  const actionList = service.actions().actions;
+  const actions = actionList.map((action) => action.name);
 
   assert.deepEqual(actions, ACTION_ALLOWLIST);
   assert.deepEqual(actions, [
@@ -232,6 +259,13 @@ test("actions endpoint exposes the fixed allowlist only", () => {
     "rcp_policy_tree_lookup",
     "track_analysis_check_data_ready"
   ]);
+  for (const action of actionList) {
+    assert.equal(action.default_response_mode, "compat_summary");
+    assert.deepEqual(action.response_modes, ["compat_summary", "passthrough"]);
+    assert.equal(action.input_contract.response_mode, "optional enum compat_summary|passthrough; default compat_summary");
+    assert.equal(action.response_policy.includes_source_card, true);
+    assert.equal(action.response_policy.passthrough_includes_source_card, false);
+  }
 });
 
 test("live mode uses registry default origins when env overrides are absent", () => {
@@ -650,6 +684,43 @@ test("each action returns source card, source quality, latency, warm state, and 
     assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
     assert.equal(response.source_card.body_policy.cookie_token_session_header_plaintext_read, false);
     assert.equal(response.source_quality.checks.some((check) => check.name === "fixed_action_registry" && check.passed), true);
+  }
+});
+
+test("explicit compat_summary keeps the existing summary response shape", async () => {
+  const service = createService();
+  await service.prewarm();
+
+  const response = await service.executeAction("rcp_snapshot", {
+    ...MOCK_ACTION_INPUTS.rcp_snapshot,
+    response_mode: "compat_summary"
+  });
+
+  assert.equal(response.action, "rcp_snapshot");
+  assert.equal(response.mode, "mock");
+  assert.equal(response.response_mode, undefined);
+  assert.ok(response.data);
+  assert.ok(response.source_card);
+  assert.ok(response.source_quality);
+  assert.equal(response.sensitive_output, false);
+});
+
+test("stable actions support passthrough response mode in mock without source summaries", async () => {
+  const service = createService();
+  await service.prewarm();
+
+  for (const actionName of ["track_analysis_summary", "rcp_snapshot", "weapon_inventory", "login_logs_search"]) {
+    const response = await service.executeAction(actionName, {
+      ...MOCK_ACTION_INPUTS[actionName],
+      response_mode: "passthrough"
+    });
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, true);
+    assert.equal(response.upstream.status, 200);
+    assert.equal(response.upstream.content_type, "application/json");
+    assert.equal(response.upstream.body && typeof response.upstream.body, "object");
+    assertNoCredentialMaterial(response);
   }
 });
 
@@ -1230,11 +1301,153 @@ test("lazy rewarm failure still returns source card, quality, and sensitivity fl
   assert.ok(response.source_quality);
 });
 
+test("passthrough live envelope returns upstream status content type and body only", async () => {
+  const config = createLiveConfig();
+  const upstreamBody = {
+    code: 0,
+    data: {
+      logSearchModels: [
+        {
+          user_id: "2871834924",
+          deviceId: "ANDROID_demo_device",
+          ip: "10.0.0.1",
+          method: "password"
+        }
+      ]
+    }
+  };
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      login_logs: prewarmResult(config, "login_logs")
+    },
+    fetchResults: {
+      login_logs_search: {
+        completed: true,
+        ok: true,
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        bodyText: JSON.stringify(upstreamBody),
+        bodyTruncated: false,
+        observedBytes: 160
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("login_logs_search", {
+    ...MOCK_ACTION_INPUTS.login_logs_search,
+    response_mode: "passthrough"
+  });
+
+  assertPassthroughEnvelope(response, "login_logs_search");
+  assert.equal(response.ok, true);
+  assert.equal(response.upstream.status, 200);
+  assert.equal(response.upstream.content_type, "application/json; charset=utf-8");
+  assert.deepEqual(response.upstream.body, upstreamBody);
+  assert.equal(fakeClient.runCalls.length, 1);
+});
+
+test("passthrough response too large omits body without summary fallback", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      login_logs: prewarmResult(config, "login_logs")
+    },
+    fetchResults: {
+      login_logs_search: {
+        completed: true,
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        bodyText: "{\"code\":0,\"data\":{\"records\":[",
+        bodyTruncated: true,
+        observedBytes: 1024
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("login_logs_search", {
+    user_id: "2871834924",
+    response_mode: "passthrough"
+  });
+
+  assertPassthroughEnvelope(response, "login_logs_search");
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "response_too_large");
+  assert.equal(response.upstream.body, null);
+  assert.equal(response.upstream.body_omitted, true);
+  assert.equal(response.upstream.response_too_large, true);
+  assert.equal(response.upstream.error_type, "response_too_large");
+  assert.equal(fakeClient.runCalls.length, 1);
+});
+
+test("passthrough removes credential fields from upstream JSON body", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      rcp: prewarmResult(config, "rcp")
+    },
+    fetchResults: {
+      rcp_snapshot: {
+        completed: true,
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        bodyText: JSON.stringify({
+          code: 0,
+          data: {
+            user_id: "2871834924",
+            eventId: "mock_event_id",
+            token: "secret-token-value-123456",
+            nested: {
+              authorization: "Bearer secret-auth-value-123456",
+              cookie: "sid=secret-session-value-123456"
+            }
+          }
+        }),
+        bodyTruncated: false,
+        observedBytes: 256
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("rcp_snapshot", {
+    ...MOCK_ACTION_INPUTS.rcp_snapshot,
+    response_mode: "passthrough"
+  });
+
+  assertPassthroughEnvelope(response, "rcp_snapshot");
+  assert.equal(response.ok, true);
+  assert.equal(response.safety.credential_material_output, false);
+  assert.equal(response.upstream.body.data.user_id, "2871834924");
+  assert.equal(response.upstream.body.data.eventId, "mock_event_id");
+  assert.equal(Object.hasOwn(response.upstream.body.data, "token"), false);
+  assert.equal(Object.hasOwn(response.upstream.body.data.nested, "authorization"), false);
+  assert.equal(Object.hasOwn(response.upstream.body.data.nested, "cookie"), false);
+  assertNoCredentialMaterial(response);
+});
+
 test("forbidden action input terms still return 400", async () => {
   const service = createService();
   for (const key of ["url", "path", "headers", "header", "cookie", "token", "session", "secret", "authorization", "raw_body"]) {
     await assert.rejects(
       () => service.executeAction("rcp_snapshot", { [key]: "blocked" }),
+      (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
+    );
+  }
+});
+
+test("passthrough forbidden action input terms still return 400", async () => {
+  const service = createService();
+  for (const key of ["url", "path", "headers", "header", "cookie", "token", "session", "secret", "authorization", "raw_body", "raw_query"]) {
+    await assert.rejects(
+      () => service.executeAction("login_logs_search", {
+        ...MOCK_ACTION_INPUTS.login_logs_search,
+        response_mode: "passthrough",
+        [key]: "blocked"
+      }),
       (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
     );
   }
