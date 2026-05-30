@@ -26,10 +26,10 @@ inventory, not a runtime-routing promotion list.
 | --- | --- | --- | --- | --- | --- |
 | `login_logs_search` | Login Logs | `GET /rest/unified/log/search` | `user_id`; optional bounded epoch-ms window, `recallSource`, `limit` | `live_smoke_verified` | none |
 | `track_analysis_check_data_ready` | Track Analysis | `POST /dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, epoch-ms `startTime/endTime`; optional safe enum/list filters | `live_smoke_verified` | none for smoke; broader semantic validation can use more known devices later |
-| `archives_user_analysis` | Archives Center | `POST /v3/user/log/coreLogs/fetch` | decimal `user_id`, epoch-ms `beginTime/endTime`, page controls | `blocked_auth_required` | refresh Archives login/permission state |
-| `archives_user_profile` | Archives Center | `GET /archives/user/home/info` | decimal `user_id` | `blocked_auth_required` | refresh Archives login/permission state |
-| `archives_photo_search` | Archives Center | `POST /v4/archives/report/photo/search` | decimal `user_id`, epoch-ms `begin/end`, page controls, fixed enum filters | `blocked_auth_required` | refresh Archives login/permission state |
-| `archives_related_users` | Archives Center | `POST /archives/user/search/device` | decimal `user_id`, fixed relation type enum | `blocked_auth_required` | refresh Archives login/permission state |
+| `archives_user_analysis` | Archives Center | `POST /v3/user/log/coreLogs/fetch` | decimal `user_id`, epoch-ms `beginTime/endTime`, page controls | `live_smoke_verified` | use bounded page size for smoke; pageSize=30 can exceed the 65536-byte live cap |
+| `archives_user_profile` | Archives Center | `GET /archives/user/home/info` | decimal `user_id` | `live_smoke_verified` | none |
+| `archives_photo_search` | Archives Center | `POST /v4/archives/report/photo/search` | decimal `user_id`, epoch-ms `begin/end`, page controls, fixed enum filters | `no_data` | no-data is source state only, not no-risk |
+| `archives_related_users` | Archives Center | `POST /archives/user/search/device` | decimal `user_id`, fixed relation type enum | `live_smoke_verified` | none |
 | `rcp_event_detail` | RCP | `GET /v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, epoch-ms `queryTime` | `live_smoke_verified` | none |
 | `rcp_event_feature_list` | RCP | `GET /v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, epoch-ms `queryTime`, empty `featureGroup` | `partial_observation_available` | exact full feature count still needs a narrower query or dedicated bounded extraction contract |
 | `rcp_policy_tree_lookup` | RCP | `GET /v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, integer `policyTreeVersion`, optional safe `targetPolicyCode` | `blocked_missing_real_sample` | real policy tree code and version |
@@ -58,9 +58,14 @@ falls back to a 24-hour window. If the fallback has records, final
 
 ### Archives Center
 
-Archives currently reaches an account/auth state in the live browser profile.
-Body-level `api_code=302` is classified as `auth_failed`, not as a platform
-network failure.
+Archives live smoke now succeeds when the service is started with
+`BROWSER_HEADLESS=false` and the auth flow is completed in the service-owned
+visible browser context. The earlier body-level `api_code=302` state is
+classified as `auth_flow_not_completed_in_bound_context`, not as explicit
+permission denial. `archives_photo_search` currently returns a standard
+`no_data` source state for the tested user/window. `archives_user_analysis`
+should use a bounded page size for smoke because larger pages can exceed the
+configured 65536-byte live body cap.
 
 ### RCP
 

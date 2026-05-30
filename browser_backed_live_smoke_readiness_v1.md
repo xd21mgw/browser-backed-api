@@ -51,10 +51,10 @@ summaries. Credential material remains forbidden in every output scope.
 | --- | --- | --- | --- |
 | `login_logs_search` | `completed`; `records_count=19`; fallback from 7d response-too-large to 24h `data.logSearchModels` parser | `live_smoke_verified` | No retest needed. Keep as source evidence only; do not treat no-data variants as no-risk. |
 | `track_analysis_check_data_ready` | `completed/api_code=0` with placeholder device sample | `live_smoke_verified` | Retested with test device `ANDROID_c081c29a506f9db1`; source completed with `api_code=0`. |
-| `archives_user_analysis` | `auth_failed`; HTTP 200 body-level `api_code=302` | `blocked_auth_required` | Needs Archives Center manual login/permission state in the browser profile. |
-| `archives_user_profile` | `auth_failed`; HTTP 200 body-level `api_code=302` | `blocked_auth_required` | Needs Archives Center manual login/permission state in the browser profile. |
-| `archives_photo_search` | `auth_failed` after prior diagnostic retry | `blocked_auth_required` | Latest retest had one transient `network_error`, then normalized to `auth_failed/api_code=302` on retry. Needs Archives Center manual login/permission state. |
-| `archives_related_users` | `auth_failed`; HTTP 200 body-level `api_code=302` | `blocked_auth_required` | Needs Archives Center manual login/permission state in the browser profile. |
+| `archives_user_analysis` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with `pageSize=1`; larger `pageSize=30` returned HTTP 200 but exceeded the 65536-byte live body cap and parsed as `parse_error`. |
+| `archives_user_profile` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with `api_code=1`. |
+| `archives_photo_search` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `no_data` | Visible Archives service context completed transport/API shape with empty `dataList`; no-data is not no-risk. |
+| `archives_related_users` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with one related-users result path observed. |
 | `rcp_event_detail` | `blocked`; placeholder sample produced platform error | `live_smoke_verified` | Used a shape-only `rcp_snapshot` probe to obtain a real event sample; downstream detail completed with `api_code=200`. |
 | `rcp_event_feature_list` | `blocked_response_too_large`; real event sample reached HTTP 200 but truncated at `MAX_LIVE_BODY_BYTES=65536` | `partial_observation_available` | Capped partial extraction now returns top-level keys, feature count estimate, feature group summary, key event entity, and `source_quality.large_response_limited=true`; exact full feature count still requires a narrower platform query or dedicated bounded extraction contract. |
 | `rcp_policy_tree_lookup` | `blocked`; placeholder policy tree sample produced platform error | `blocked_missing_real_sample` | Needs real `policyTreeCode` and `policyTreeVersion`; do not derive or guess from hit policy code. |
@@ -85,7 +85,7 @@ Input sample:
 - `appName=KUAISHOU`
 - 24-hour window generated at smoke time
 
-Observed safe summary:
+Superseded safe summary from the earlier auth-flow-incomplete context:
 
 - HTTP status: `200`
 - action status: `completed`
@@ -114,8 +114,37 @@ Observed safe summary:
 
 The first `archives_photo_search` retest in this pass returned a transient
 `network_error`; the immediate retry returned the same body-level auth redirect
-shape as the other Archives actions. Final status is therefore
-`blocked_auth_required`.
+shape as the other Archives actions. This is superseded by the latest
+visible-context retest below and is now classified as
+`auth_flow_not_completed_in_bound_context`, not as explicit permission denial.
+
+Latest Archives visible-context retest:
+
+- service scope: `ENABLED_PLATFORMS=archives`
+- service mode: `SERVICE_MODE=live`
+- browser mode: `BROWSER_HEADLESS=false`
+- user data dir: long-lived default profile
+- prewarm path: `/frontend/archives/index.html`
+- prewarm final origin: `https://admin.p.adm-corp.kuaishou.com`
+- current origin: `https://admin.p.adm-corp.kuaishou.com`
+- page_ready: `true`
+- raw full body returned: `false`
+- credential secret values returned: `false`
+- phone/id-card-like values displayed: `false`
+
+Latest Archives action results:
+
+| action_name | HTTP status | action status | classification | api_code | body_truncated | observed_bytes | no_data |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `archives_user_profile` | `200` | `completed` | `completed` | `1` | `false` | `14197` | `false` |
+| `archives_user_analysis` | `200` | `completed` | `completed` | `1` | `false` | `4006` | `false` |
+| `archives_photo_search` | `200` | `no_data` | `no_data` | `1` | `false` | `197` | `true` |
+| `archives_related_users` | `200` | `completed` | `completed` | `1` | `false` | `1974` | `false` |
+
+`archives_user_analysis` note: the live-smoke verified run used `pageSize=1`.
+A broader `pageSize=30` run in the same authenticated context returned HTTP 200
+but was capped at `65536` bytes and classified as `parse_error`; this is a
+large-response handling limit, not an authentication failure.
 
 ### RCP Retest
 
@@ -177,8 +206,10 @@ Latest `rcp_event_feature_list` retest after the large-response summarizer fix:
 
 ## Minimal Human Inputs Needed
 
-- Archives: complete or refresh Archives Center login/permission state in the
-  browser profile, then rerun the four Archives fixed actions.
+- Archives: no current human login action needed for the verified visible
+  service context. If future headless or fresh service runs return
+  `api_code=302`, rerun with `BROWSER_HEADLESS=false` and complete the auth flow
+  in that service-owned visible browser context.
 - RCP policy tree: provide a real `policyTreeCode` and matching
   `policyTreeVersion`.
 - RCP feature list: partial observation is available. Exact full feature counts
