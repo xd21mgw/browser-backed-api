@@ -430,6 +430,7 @@ export const ACTIONS = Object.freeze({
     validateParams: validateRcpEventFeatureListInput,
     buildRequest: buildRcpEventFeatureListRequest,
     summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_event_feature_list"),
+    summarizeParseFailureResponse: summarizeRcpEventFeatureListParseFailureResponse,
     mockData: mockRcpEventFeatureListData
   }),
   rcp_policy_tree_lookup: freezeAction({
@@ -608,11 +609,19 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
     : !parsed.ok && typeof action.summarizeParseFailureResponse === "function"
       ? action.summarizeParseFailureResponse(fetchResult.bodyText, safeInput, summaryMeta)
     : {};
-  const transportErrorType = httpErrorType || parseErrorType;
+  const parseFailureHandled = Boolean(actionSummary.partialObservationAvailable) && parseErrorType === "parse_error" && !httpErrorType;
+  const transportErrorType = httpErrorType || (parseFailureHandled ? null : parseErrorType);
   const errorType = transportErrorType || actionSummary.errorType || null;
   const sourceStatus = transportErrorType
     ? sourceStatusFromErrorType(transportErrorType)
     : actionSummary.sourceStatus || (errorType ? sourceStatusFromErrorType(errorType) : "ok");
+  const responseMeta = {
+    ...enrichedMeta,
+    sourceStatus,
+    errorType,
+    largeResponseLimited: Boolean(actionSummary.largeResponseLimited || fetchResult.bodyTruncated),
+    partialObservationAvailable: Boolean(actionSummary.partialObservationAvailable)
+  };
   const data = {
     http_status: fetchResult.status,
     ok: fetchResult.ok,
@@ -654,13 +663,13 @@ export function buildLiveActionResponse(action, input, config, fetchResult, meta
       config,
       fetchMeta: fetchResult,
       mock: false,
-      meta: { ...enrichedMeta, sourceStatus, errorType }
+      meta: responseMeta
     }),
     source_quality: buildSourceQuality({
       action,
       fetchMeta: fetchResult,
       mock: false,
-      meta: { ...enrichedMeta, sourceStatus, errorType }
+      meta: responseMeta
     })
   };
 }
@@ -1445,6 +1454,199 @@ function parseErrorDetail(fetchResult, parseErrorType) {
     return "html_auth_or_login_response";
   }
   return "invalid_or_unparseable_json";
+}
+
+function summarizeRcpEventFeatureListParseFailureResponse(bodyText, input, meta = {}) {
+  const fetchResult = meta.fetchResult || {};
+  if (!fetchResult.bodyTruncated || meta.parseErrorType !== "parse_error") {
+    const sourceStatus = sourceStatusFromErrorType(meta.parseErrorType || "parse_error");
+    return {
+      sourceStatus,
+      errorType: meta.parseErrorType || "parse_error",
+      summary: {
+        rcp_event_feature_list: {
+          source_status: sourceStatus,
+          upstream_http_status: fetchResult.status ?? null,
+          body_truncated: Boolean(fetchResult.bodyTruncated),
+          observed_bytes: fetchResult.observedBytes ?? null,
+          response_format: meta.responseFormat || "non_json_or_unparseable",
+          parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json",
+          raw_full_body_suppressed: true,
+          no_data: false,
+          no_data_not_risk_exclusion: true
+        }
+      }
+    };
+  }
+
+  const topLevelKeys = partialJsonTopLevelKeys(bodyText);
+  const featureGroupSummary = partialFeatureGroupSummary(bodyText);
+  const featureCountEstimate = partialFeatureCountEstimate(bodyText, featureGroupSummary);
+
+  return {
+    sourceStatus: "partial_observation_available",
+    errorType: "response_too_large",
+    largeResponseLimited: true,
+    partialObservationAvailable: true,
+    summary: {
+      rcp_event_feature_list: {
+        source_status: "partial_observation_available",
+        upstream_http_status: fetchResult.status ?? null,
+        body_truncated: true,
+        observed_bytes: fetchResult.observedBytes ?? null,
+        response_too_large: true,
+        response_format: meta.responseFormat || "non_json_or_unparseable",
+        parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "response_body_truncated_at_max_live_body_bytes",
+        top_level_keys: topLevelKeys,
+        feature_count_estimate: featureCountEstimate.count,
+        feature_count_estimate_method: featureCountEstimate.method,
+        feature_group_summary: featureGroupSummary,
+        key_entities: {
+          event_id: displayRiskEntity("eventId", input.eventId, input),
+          event_type: displayRiskEntity("eventType", input.eventType, input),
+          query_time: input.queryTime !== undefined && input.queryTime !== null ? String(input.queryTime).slice(0, 64) : null
+        },
+        partial_json_summary_only: true,
+        response_shape_summary_only: true,
+        raw_full_body_suppressed: true,
+        raw_records_full_dump_suppressed: true,
+        no_data: false,
+        no_data_not_risk_exclusion: true,
+        next_action: "Use this partial observation for evidence context; add a narrower platform query or action-specific bounded feature extraction if exact feature counts are required."
+      }
+    }
+  };
+}
+
+function partialJsonTopLevelKeys(text) {
+  const source = String(text || "").slice(0, 65536);
+  const keys = [];
+  let depth = 0;
+  let index = 0;
+  while (index < source.length && keys.length < 50) {
+    const char = source[index];
+    if (char === "\"") {
+      const token = readJsonStringToken(source, index);
+      if (token && depth === 1 && nextNonWhitespace(source, token.end + 1) === ":") {
+        keys.push(safeFieldName(token.value));
+      }
+      index = token ? token.end + 1 : index + 1;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth = Math.max(depth - 1, 0);
+    }
+    index += 1;
+  }
+  return [...new Set(keys)];
+}
+
+function readJsonStringToken(source, start) {
+  let value = "";
+  for (let index = start + 1; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "\\") {
+      const next = source[index + 1];
+      if (next === undefined) {
+        return null;
+      }
+      value += next;
+      index += 1;
+      continue;
+    }
+    if (char === "\"") {
+      return { value: value.slice(0, 160), end: index };
+    }
+    value += char;
+    if (value.length > 512) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function nextNonWhitespace(source, start) {
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (!/\s/.test(char)) {
+      return char;
+    }
+  }
+  return null;
+}
+
+function partialFeatureGroupSummary(text) {
+  const groupKeys = ["featureGroup", "feature_group", "featureGroupName", "feature_group_name", "groupName", "group"];
+  const counts = new Map();
+  const fieldsObserved = [];
+  for (const key of groupKeys) {
+    const values = partialJsonStringValuesForKey(text, key);
+    if (values.length > 0) {
+      fieldsObserved.push(key);
+    }
+    for (const value of values) {
+      const safeValue = sanitizeSummaryText(value);
+      if (!safeValue) {
+        continue;
+      }
+      counts.set(safeValue, (counts.get(safeValue) || 0) + 1);
+    }
+  }
+  const groups = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 12)
+    .map(([group, observed_count]) => ({ group, observed_count }));
+  return {
+    groups_observed_count: counts.size,
+    group_fields_observed: [...new Set(fieldsObserved)],
+    groups
+  };
+}
+
+function partialJsonStringValuesForKey(text, key) {
+  const source = String(text || "").slice(0, 65536);
+  const escapedKey = escapeRegExp(key);
+  const pattern = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:\\\\.|[^"\\\\]){0,160})"`, "g");
+  const values = [];
+  let match;
+  while ((match = pattern.exec(source)) && values.length < 200) {
+    values.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+  }
+  return values;
+}
+
+function partialFeatureCountEstimate(text, featureGroupSummary) {
+  const keyCounts = [
+    ["featureName", countJsonKeyOccurrences(text, "featureName")],
+    ["feature_name", countJsonKeyOccurrences(text, "feature_name")],
+    ["featureCode", countJsonKeyOccurrences(text, "featureCode")],
+    ["feature_code", countJsonKeyOccurrences(text, "feature_code")],
+    ["featureId", countJsonKeyOccurrences(text, "featureId")],
+    ["feature_id", countJsonKeyOccurrences(text, "feature_id")],
+    ["key", countJsonKeyOccurrences(text, "key")]
+  ].filter(([, count]) => count > 0);
+  if (keyCounts.length > 0) {
+    const [method, count] = keyCounts.sort((left, right) => right[1] - left[1])[0];
+    return { count, method: `${method}_occurrence_count_capped` };
+  }
+  const groupedCount = featureGroupSummary.groups.reduce((sum, item) => sum + item.observed_count, 0);
+  if (groupedCount > 0) {
+    return { count: groupedCount, method: "feature_group_occurrence_count_capped" };
+  }
+  return { count: 0, method: "not_observed_in_capped_prefix" };
+}
+
+function countJsonKeyOccurrences(text, key) {
+  const source = String(text || "").slice(0, 65536);
+  const pattern = new RegExp(`"${escapeRegExp(key)}"\\s*:`, "g");
+  const matches = source.match(pattern);
+  return matches ? matches.length : 0;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function validateWeaponInventoryInput(input) {

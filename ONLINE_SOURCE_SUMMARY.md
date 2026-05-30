@@ -22,7 +22,7 @@ Latest second-stage readiness highlights:
 - `track_analysis_check_data_ready`: `live_smoke_verified`; completed with a real test device sample.
 - `archives_user_analysis`, `archives_user_profile`, `archives_photo_search`, and `archives_related_users`: `blocked_auth_required`; current browser profile reaches body-level `api_code=302`.
 - `rcp_event_detail`: `live_smoke_verified`; completed with a real event sample obtained from shape-only `rcp_snapshot` output.
-- `rcp_event_feature_list`: `blocked_response_too_large`; real event sample reaches HTTP 200 but exceeds the live body cap before JSON parse.
+- `rcp_event_feature_list`: `partial_observation_available`; real event sample reaches HTTP 200, exceeds the live body cap, and now returns a capped feature-count/group observation without raw body output.
 - `rcp_policy_tree_lookup`: `blocked_missing_real_sample`; needs real `policyTreeCode` and `policyTreeVersion`.
 
 ## Fixed Interfaces

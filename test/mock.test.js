@@ -343,6 +343,94 @@ test("fixed-shape body-level redirect code is classified as auth_failed", () => 
   assert.equal(response.data.response_summary.archives_user_analysis.raw_full_body_suppressed, true);
 });
 
+test("rcp_event_feature_list truncated large response returns partial observation", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_event_feature_list,
+    {
+      eventType: "USER_REGISTER_NEW",
+      eventId: "raw-event-id",
+      queryTime: 1780000000000
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText:
+        '{"status":200,"message":"OK","data":{"featureList":[' +
+        '{"featureGroup":"device","featureName":"device_age","featureId":"feature_1","featureValue":"raw-feature-value-1"},' +
+        '{"featureGroup":"account","featureName":"account_age","featureId":"feature_2","token":"should-not-output"}',
+      bodyTruncated: true,
+      observedBytes: 65536
+    },
+    {
+      latencyMs: 30,
+      originWarmed: true,
+      requestPath: "/v2/rest/event/rcpEventFeatureList?eventType=USER_REGISTER_NEW&eventId=%5Btyped_event_id%5D&queryTime=1780000000000&featureGroup="
+    }
+  );
+
+  const summary = response.data.response_summary.rcp_event_feature_list;
+  assert.equal(response.status, "partial_observation_available");
+  assert.equal(response.source_status, "partial_observation_available");
+  assert.equal(response.error_type, "response_too_large");
+  assert.equal(response.data.body_truncated, true);
+  assert.equal(response.data.observed_bytes, 65536);
+  assert.equal(summary.source_status, "partial_observation_available");
+  assert.equal(summary.upstream_http_status, 200);
+  assert.equal(summary.body_truncated, true);
+  assert.equal(summary.observed_bytes, 65536);
+  assert.equal(summary.response_too_large, true);
+  assert.deepEqual(summary.top_level_keys, ["status", "message", "data"]);
+  assert.equal(summary.feature_count_estimate, 2);
+  assert.equal(summary.feature_group_summary.groups_observed_count, 2);
+  assert.deepEqual(summary.feature_group_summary.group_fields_observed, ["featureGroup"]);
+  assert.equal(summary.key_entities.event_id, "raw-event-id");
+  assert.equal(summary.raw_full_body_suppressed, true);
+  assert.equal(summary.raw_records_full_dump_suppressed, true);
+  assert.equal(response.source_quality.large_response_limited, true);
+  assert.equal(response.source_quality.partial_observation_available, true);
+
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("raw-feature-value-1"), false);
+  assert.equal(serialized.includes("should-not-output"), false);
+  assert.equal(serialized.includes("device_age"), false);
+  assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
+});
+
+test("rcp_event_feature_list external_share masks partial observation entities", () => {
+  const config = createLiveConfig();
+  const response = buildLiveActionResponse(
+    ACTIONS.rcp_event_feature_list,
+    {
+      eventType: "USER_REGISTER_NEW",
+      eventId: "raw-event-id",
+      queryTime: 1780000000000,
+      output_scope: "external_share"
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText: '{"status":200,"data":{"features":[{"groupName":"device","featureName":"raw-feature-name"}',
+      bodyTruncated: true,
+      observedBytes: 65536
+    },
+    { latencyMs: 30, originWarmed: true }
+  );
+
+  const summary = response.data.response_summary.rcp_event_feature_list;
+  assert.equal(response.status, "partial_observation_available");
+  assert.equal(summary.key_entities.event_id, "[masked_identifier:length=12]");
+  assert.equal(summary.feature_count_estimate, 1);
+  assert.equal(summary.feature_group_summary.group_fields_observed.includes("groupName"), true);
+  assert.equal(response.source_quality.large_response_limited, true);
+  assert.equal(JSON.stringify(response).includes("raw-event-id"), false);
+  assert.equal(JSON.stringify(response).includes("raw-feature-name"), false);
+});
+
 test("arbitrary URL input is forbidden", async () => {
   const service = createService();
 

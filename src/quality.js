@@ -79,6 +79,8 @@ export function buildSourceQuality({ action, fetchMeta, mock, meta = {} }) {
     score,
     checks,
     warnings: qualityWarnings({ mock, meta }),
+    large_response_limited: Boolean(meta.largeResponseLimited),
+    partial_observation_available: Boolean(meta.partialObservationAvailable),
     output_scope: meta.outputScope || "internal_risk_review",
     field_classification_policy: {
       credential_secret: "never_output",
@@ -104,6 +106,9 @@ function qualityLevel({ mock, fetchMeta, meta }) {
 function qualityWarnings({ mock, meta }) {
   if (mock) {
     return ["Synthetic response only; no real platform was accessed."];
+  }
+  if (meta.partialObservationAvailable) {
+    return ["Large live response was capped; partial structured observation is available without returning the raw body."];
   }
   if (meta.sourceStatus && meta.sourceStatus !== "ok") {
     return [`Live source status is ${meta.sourceStatus}; response body was not returned.`];

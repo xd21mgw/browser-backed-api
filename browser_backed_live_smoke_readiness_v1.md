@@ -36,8 +36,12 @@ summaries. Credential material remains forbidden in every output scope.
   browser profile lacks the required product login or permission state.
 - `blocked_missing_real_sample`: implementation is registered but a real
   required identifier/version sample is still missing.
+- `partial_observation_available`: live upstream call returned HTTP 200 and the
+  body exceeded the configured live body cap, but action-specific capped
+  extraction produced a safe structured observation.
 - `blocked_response_too_large`: live upstream call returned HTTP 200, but the
-  body exceeded the configured live body cap before shape summarization.
+  body exceeded the configured live body cap before any safe observation could
+  be extracted.
 - `implemented_mock_only`: implemented and covered by mock tests but not live
   probed.
 
@@ -52,7 +56,7 @@ summaries. Credential material remains forbidden in every output scope.
 | `archives_photo_search` | `auth_failed` after prior diagnostic retry | `blocked_auth_required` | Latest retest had one transient `network_error`, then normalized to `auth_failed/api_code=302` on retry. Needs Archives Center manual login/permission state. |
 | `archives_related_users` | `auth_failed`; HTTP 200 body-level `api_code=302` | `blocked_auth_required` | Needs Archives Center manual login/permission state in the browser profile. |
 | `rcp_event_detail` | `blocked`; placeholder sample produced platform error | `live_smoke_verified` | Used a shape-only `rcp_snapshot` probe to obtain a real event sample; downstream detail completed with `api_code=200`. |
-| `rcp_event_feature_list` | `blocked`; placeholder sample produced platform error | `blocked_response_too_large` | Real event sample reached HTTP 200, but body was truncated at `MAX_LIVE_BODY_BYTES=65536`; needs action-specific bounded summarization or a smaller platform query if supported. |
+| `rcp_event_feature_list` | `blocked_response_too_large`; real event sample reached HTTP 200 but truncated at `MAX_LIVE_BODY_BYTES=65536` | `partial_observation_available` | Capped partial extraction now returns top-level keys, feature count estimate, feature group summary, key event entity, and `source_quality.large_response_limited=true`; exact full feature count still requires a narrower platform query or dedicated bounded extraction contract. |
 | `rcp_policy_tree_lookup` | `blocked`; placeholder policy tree sample produced platform error | `blocked_missing_real_sample` | Needs real `policyTreeCode` and `policyTreeVersion`; do not derive or guess from hit policy code. |
 
 No second-stage action is only `implemented_mock_only` after this pass.
@@ -134,10 +138,10 @@ Downstream retest results:
 | action_name | HTTP status | action status | source status | error_type | observed blocker |
 | --- | --- | --- | --- | --- | --- |
 | `rcp_event_detail` | `200` | `completed` | `completed` | `null` | none |
-| `rcp_event_feature_list` | `200` | `parse_error` | `parse_error` | `parse_error` | HTTP 200 body truncated at `65536` bytes before JSON parse |
+| `rcp_event_feature_list` | `200` | `parse_error` | `parse_error` | `parse_error` | superseded by latest partial-observation retest below |
 | `rcp_policy_tree_lookup` | not retested | `blocked_missing_real_sample` | `blocked_missing_real_sample` | n/a | missing real `policyTreeCode` and `policyTreeVersion` |
 
-For `rcp_event_feature_list`, the safe diagnostics were:
+The superseded `rcp_event_feature_list` diagnostics were:
 
 - upstream HTTP status: `200`
 - upstream ok: `true`
@@ -147,15 +151,39 @@ For `rcp_event_feature_list`, the safe diagnostics were:
 - raw full body returned: `false`
 - raw records full dump returned: `false`
 
+Latest `rcp_event_feature_list` retest after the large-response summarizer fix:
+
+- service scope: `ENABLED_PLATFORMS=rcp`
+- live smoke timeout: `REQUEST_TIMEOUT_MS=30000`
+- body cap: unchanged, `MAX_LIVE_BODY_BYTES=65536`
+- HTTP status: `200`
+- action status: `partial_observation_available`
+- source status: `partial_observation_available`
+- error_type: `response_too_large`
+- latency_ms observed: approximately `28567`
+- body_truncated: `true`
+- observed_bytes: `65536`
+- top-level keys: `status`, `message`, `data`
+- feature_count_estimate: `137`
+- feature_count_estimate_method: `featureName_occurrence_count_capped`
+- feature_group_summary: `DERIVE=89`, `ORIG=23`, `SYS=10`,
+  `COUNTER=6`, `DATASERV=5`, `OTHER=4`
+- key entity fields present: `event_id`, `event_type`, `query_time`
+- source_quality.large_response_limited: `true`
+- source_quality.partial_observation_available: `true`
+- raw full body returned: `false`
+- raw records full dump returned: `false`
+- credential secret values returned: `false`
+
 ## Minimal Human Inputs Needed
 
 - Archives: complete or refresh Archives Center login/permission state in the
   browser profile, then rerun the four Archives fixed actions.
 - RCP policy tree: provide a real `policyTreeCode` and matching
   `policyTreeVersion`.
-- RCP feature list: decide whether to add action-specific bounded feature
-  summarization or obtain a smaller platform query contract. This is no longer a
-  missing event sample issue.
+- RCP feature list: partial observation is available. Exact full feature counts
+  still require a narrower platform query or a dedicated bounded extraction
+  contract. This is no longer a missing event sample issue.
 
 ## Live Service Stop
 

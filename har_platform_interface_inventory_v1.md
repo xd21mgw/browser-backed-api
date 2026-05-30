@@ -31,7 +31,7 @@ inventory, not a runtime-routing promotion list.
 | `archives_photo_search` | Archives Center | `POST /v4/archives/report/photo/search` | decimal `user_id`, epoch-ms `begin/end`, page controls, fixed enum filters | `blocked_auth_required` | refresh Archives login/permission state |
 | `archives_related_users` | Archives Center | `POST /archives/user/search/device` | decimal `user_id`, fixed relation type enum | `blocked_auth_required` | refresh Archives login/permission state |
 | `rcp_event_detail` | RCP | `GET /v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, epoch-ms `queryTime` | `live_smoke_verified` | none |
-| `rcp_event_feature_list` | RCP | `GET /v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, epoch-ms `queryTime`, empty `featureGroup` | `blocked_response_too_large` | bounded feature summarization or smaller query contract |
+| `rcp_event_feature_list` | RCP | `GET /v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, epoch-ms `queryTime`, empty `featureGroup` | `partial_observation_available` | exact full feature count still needs a narrower query or dedicated bounded extraction contract |
 | `rcp_policy_tree_lookup` | RCP | `GET /v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, integer `policyTreeVersion`, optional safe `targetPolicyCode` | `blocked_missing_real_sample` | real policy tree code and version |
 
 ## Supporting Probe
@@ -65,9 +65,12 @@ network failure.
 ### RCP
 
 `rcp_event_detail` is live-smoke verified with a real event identity from
-`rcp_snapshot`. `rcp_event_feature_list` now has a real event sample but is
-blocked by response size, not by sample quality. `rcp_policy_tree_lookup` still
-requires a real policy tree versioned sample.
+`rcp_snapshot`. `rcp_event_feature_list` now has a real event sample and returns
+`partial_observation_available` when the HTTP 200 body is capped at
+`MAX_LIVE_BODY_BYTES=65536`; the summary includes top-level keys, feature count
+estimate, feature group summary, and key event entity fields without returning
+the raw body. `rcp_policy_tree_lookup` still requires a real policy tree
+versioned sample.
 
 ### Track Analysis
 
