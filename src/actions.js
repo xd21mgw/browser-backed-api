@@ -343,6 +343,7 @@ export const ACTIONS = Object.freeze({
     validateParams: validateArchivesUserAnalysisInput,
     buildRequest: buildArchivesUserAnalysisRequest,
     summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_user_analysis"),
+    summarizeParseFailureResponse: summarizeArchivesUserAnalysisParseFailureResponse,
     mockData: mockArchivesUserAnalysisData
   }),
   archives_user_profile: freezeAction({
@@ -1518,6 +1519,226 @@ function summarizeRcpEventFeatureListParseFailureResponse(bodyText, input, meta 
   };
 }
 
+function summarizeArchivesUserAnalysisParseFailureResponse(bodyText, input, meta = {}) {
+  const fetchResult = meta.fetchResult || {};
+  if (!fetchResult.bodyTruncated || meta.parseErrorType !== "parse_error") {
+    const sourceStatus = sourceStatusFromErrorType(meta.parseErrorType || "parse_error");
+    return {
+      sourceStatus,
+      errorType: meta.parseErrorType || "parse_error",
+      summary: {
+        archives_user_analysis: {
+          source_status: sourceStatus,
+          upstream_http_status: fetchResult.status ?? null,
+          body_truncated: Boolean(fetchResult.bodyTruncated),
+          observed_bytes: fetchResult.observedBytes ?? null,
+          response_format: meta.responseFormat || "non_json_or_unparseable",
+          parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json",
+          raw_full_body_suppressed: true,
+          no_data: false,
+          no_data_not_risk_exclusion: true
+        }
+      }
+    };
+  }
+
+  const pageInfoPartial = partialArchivesPageInfo(bodyText);
+  const operationTypeSummary = partialArchivesOperationTypeSummary(bodyText);
+  const timeRangeSummary = partialArchivesTimeRangeSummary(bodyText);
+  const countEstimate = partialArchivesLogCountEstimate(bodyText, operationTypeSummary, timeRangeSummary, pageInfoPartial);
+
+  return {
+    sourceStatus: "partial_observation_available",
+    errorType: "response_too_large",
+    largeResponseLimited: true,
+    partialObservationAvailable: true,
+    summary: {
+      archives_user_analysis: {
+        source_status: "partial_observation_available",
+        upstream_http_status: fetchResult.status ?? null,
+        body_truncated: true,
+        observed_bytes: fetchResult.observedBytes ?? null,
+        response_too_large: true,
+        response_format: meta.responseFormat || "non_json_or_unparseable",
+        parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "response_body_truncated_at_max_live_body_bytes",
+        top_level_keys: partialJsonTopLevelKeys(bodyText),
+        log_count_estimate: countEstimate.count,
+        event_count_estimate: countEstimate.count,
+        count_estimate_method: countEstimate.method,
+        operation_type_summary: operationTypeSummary,
+        action_type_summary: operationTypeSummary,
+        time_range_summary: timeRangeSummary,
+        earliest_event_time: timeRangeSummary.earliest_time_observed,
+        latest_event_time: timeRangeSummary.latest_time_observed,
+        operation_filters_matched: partialArchivesOperationFiltersMatched(bodyText),
+        risk_event_scan: partialArchivesRiskEventScan(bodyText),
+        page_info_partial: pageInfoPartial,
+        key_entities: {
+          user_id: displayRiskEntity("user_id", input.user_id, input)
+        },
+        partial_json_summary_only: true,
+        response_shape_summary_only: true,
+        raw_full_body_suppressed: true,
+        raw_records_full_dump_suppressed: true,
+        no_data: false,
+        no_data_not_risk_exclusion: true,
+        next_action: "Use this partial observation for evidence context; reduce pageSize, narrow the time window, or paginate with smaller pages when exact records are required."
+      }
+    }
+  };
+}
+
+function partialArchivesOperationTypeSummary(text) {
+  const operationKeys = [
+    "operationType",
+    "operation_type",
+    "actionType",
+    "action_type",
+    "logType",
+    "log_type",
+    "eventType",
+    "event_type",
+    "method"
+  ];
+  const counts = new Map();
+  const fieldsObserved = [];
+  for (const key of operationKeys) {
+    const values = partialJsonPrimitiveValuesForKey(text, key);
+    if (values.length > 0) {
+      fieldsObserved.push(key);
+    }
+    for (const value of values) {
+      const safeValue = sanitizePartialCategoryValue(value);
+      if (!safeValue) {
+        continue;
+      }
+      counts.set(safeValue, (counts.get(safeValue) || 0) + 1);
+    }
+  }
+  const operationTypes = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 20)
+    .map(([operation_type, observed_count]) => ({ operation_type, observed_count }));
+  return {
+    operation_types_observed_count: counts.size,
+    operation_type_fields_observed: [...new Set(fieldsObserved)],
+    operation_types: operationTypes
+  };
+}
+
+function partialArchivesTimeRangeSummary(text) {
+  const timeKeys = [
+    "eventTime",
+    "event_time",
+    "operateTime",
+    "operate_time",
+    "operationTime",
+    "operation_time",
+    "logTime",
+    "log_time",
+    "createTime",
+    "create_time",
+    "timestamp"
+  ];
+  const fieldsObserved = [];
+  const numericValues = [];
+  const stringValues = [];
+  for (const key of timeKeys) {
+    const values = partialJsonPrimitiveValuesForKey(text, key);
+    if (values.length > 0) {
+      fieldsObserved.push(key);
+    }
+    for (const value of values) {
+      const textValue = String(value).trim();
+      if (/^\d{10,16}$/.test(textValue)) {
+        numericValues.push(Number(textValue));
+      } else if (textValue) {
+        stringValues.push(sanitizePartialCategoryValue(textValue));
+      }
+    }
+  }
+  const uniqueStrings = [...new Set(stringValues.filter(Boolean))].sort();
+  const earliestNumeric = numericValues.length > 0 ? String(Math.min(...numericValues)) : null;
+  const latestNumeric = numericValues.length > 0 ? String(Math.max(...numericValues)) : null;
+  return {
+    time_fields_observed: [...new Set(fieldsObserved)],
+    time_values_observed_count: numericValues.length + uniqueStrings.length,
+    earliest_time_observed: earliestNumeric || uniqueStrings[0] || null,
+    latest_time_observed: latestNumeric || uniqueStrings[uniqueStrings.length - 1] || null,
+    time_value_format: numericValues.length > 0 ? "epoch_like" : uniqueStrings.length > 0 ? "string" : "not_observed"
+  };
+}
+
+function partialArchivesLogCountEstimate(text, operationTypeSummary, timeRangeSummary, pageInfoPartial) {
+  const totalCount = Number(pageInfoPartial?.fields?.totalCount);
+  if (Number.isSafeInteger(totalCount) && totalCount >= 0) {
+    return { count: totalCount, method: "totalCount_from_capped_prefix" };
+  }
+  const keyCounts = [
+    ["operationType", countJsonKeyOccurrences(text, "operationType")],
+    ["actionType", countJsonKeyOccurrences(text, "actionType")],
+    ["logType", countJsonKeyOccurrences(text, "logType")],
+    ["eventTime", countJsonKeyOccurrences(text, "eventTime")],
+    ["operateTime", countJsonKeyOccurrences(text, "operateTime")],
+    ["operationTime", countJsonKeyOccurrences(text, "operationTime")],
+    ["logTime", countJsonKeyOccurrences(text, "logTime")]
+  ].filter(([, count]) => count > 0);
+  if (keyCounts.length > 0) {
+    const [method, count] = keyCounts.sort((left, right) => right[1] - left[1])[0];
+    return { count, method: `${method}_occurrence_count_capped` };
+  }
+  const operationCount = operationTypeSummary.operation_types.reduce((sum, item) => sum + item.observed_count, 0);
+  if (operationCount > 0) {
+    return { count: operationCount, method: "operation_type_occurrence_count_capped" };
+  }
+  if (timeRangeSummary.time_values_observed_count > 0) {
+    return { count: timeRangeSummary.time_values_observed_count, method: "time_value_occurrence_count_capped" };
+  }
+  return { count: 0, method: "not_observed_in_capped_prefix" };
+}
+
+function partialArchivesOperationFiltersMatched(text) {
+  const source = String(text || "").slice(0, 65536);
+  return ARCHIVES_USER_ANALYSIS_FILTER_FIELDS
+    .filter((field) => new RegExp(`"${escapeRegExp(field)}"|\\b${escapeRegExp(field)}\\b`, "i").test(source))
+    .slice(0, 50);
+}
+
+function partialArchivesRiskEventScan(text) {
+  const source = String(text || "").slice(0, 65536);
+  const matched = partialArchivesOperationFiltersMatched(source);
+  return {
+    login_start_present: matched.includes("loginStart") || /loginStart/i.test(source),
+    register_bind_present: matched.includes("registerBind") || /registerBind/i.test(source),
+    reset_pass_present: matched.includes("resetPass") || /resetPass/i.test(source),
+    protect_account_present: matched.includes("protectAccount") || /protectAccount/i.test(source),
+    live_stream_present: matched.includes("liveStream") || /liveStream/i.test(source),
+    frozen_present: matched.includes("frozen") || /frozen/i.test(source),
+    matched_filter_count: matched.length
+  };
+}
+
+function partialArchivesPageInfo(text) {
+  const fields = {};
+  for (const key of ["pageIndex", "page", "pageSize", "count", "totalCount", "total", "totalPage", "pages"]) {
+    const values = partialJsonPrimitiveValuesForKey(text, key);
+    if (values.length > 0) {
+      fields[safeFieldName(key)] = String(values[0]).slice(0, 64);
+    }
+  }
+  return {
+    fields_observed: Object.keys(fields),
+    fields
+  };
+}
+
+function sanitizePartialCategoryValue(value) {
+  return sanitizeSummaryText(value)
+    ?.replace(/\b1[3-9]\d{9}\b/g, "[phone_number_present]")
+    .replace(/\b\d{17}[\dXx]\b/g, "[id_card_present]")
+    .slice(0, 160) || null;
+}
+
 function partialJsonTopLevelKeys(text) {
   const source = String(text || "").slice(0, 65536);
   const keys = [];
@@ -1613,6 +1834,24 @@ function partialJsonStringValuesForKey(text, key) {
   let match;
   while ((match = pattern.exec(source)) && values.length < 200) {
     values.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+  }
+  return values;
+}
+
+function partialJsonPrimitiveValuesForKey(text, key) {
+  const source = String(text || "").slice(0, 65536);
+  const escapedKey = escapeRegExp(key);
+  const pattern = new RegExp(`"${escapedKey}"\\s*:\\s*(?:"((?:\\\\.|[^"\\\\]){0,160})"|(-?\\d+(?:\\.\\d+)?)|(true|false|null))`, "g");
+  const values = [];
+  let match;
+  while ((match = pattern.exec(source)) && values.length < 300) {
+    if (match[1] !== undefined) {
+      values.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+    } else if (match[2] !== undefined) {
+      values.push(match[2]);
+    } else if (match[3] !== undefined) {
+      values.push(match[3]);
+    }
   }
   return values;
 }
@@ -4116,18 +4355,30 @@ function summarizeFixedShapeActionResponse(sectionName) {
   return (value, input = {}) => {
     const apiCode = readApiCode(value);
     if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
-      const errorType = apiCode === 302 ? "auth_failed" : "platform_error";
+      const archivesAuthFlow = apiCode === 302 && sectionName.startsWith("archives_");
+      const errorType = archivesAuthFlow
+        ? "auth_flow_not_completed_in_bound_context"
+        : apiCode === 302
+          ? "auth_failed"
+          : "platform_error";
+      const sourceStatus = archivesAuthFlow ? "auth_flow_not_completed_in_bound_context" : sourceStatusFromErrorType(errorType);
       return {
-        sourceStatus: sourceStatusFromErrorType(errorType),
+        sourceStatus,
         errorType,
         summary: {
           [sectionName]: {
-            source_status: sourceStatusFromErrorType(errorType),
+            source_status: sourceStatus,
             api_code: apiCode,
             top_level_keys: observedKeys(value),
             raw_full_body_suppressed: true,
             no_data: false,
-            no_data_not_risk_exclusion: true
+            no_data_not_risk_exclusion: true,
+            ...(archivesAuthFlow
+              ? {
+                  auth_flow_not_completed_in_bound_context: true,
+                  next_action: "Complete the one-time Archives account confirmation in the current visible service browser context, then reuse the same USER_DATA_DIR/browser context for subsequent Archives actions."
+                }
+              : {})
           }
         }
       };

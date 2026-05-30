@@ -51,7 +51,7 @@ summaries. Credential material remains forbidden in every output scope.
 | --- | --- | --- | --- |
 | `login_logs_search` | `completed`; `records_count=19`; fallback from 7d response-too-large to 24h `data.logSearchModels` parser | `live_smoke_verified` | No retest needed. Keep as source evidence only; do not treat no-data variants as no-risk. |
 | `track_analysis_check_data_ready` | `completed/api_code=0` with placeholder device sample | `live_smoke_verified` | Retested with test device `ANDROID_c081c29a506f9db1`; source completed with `api_code=0`. |
-| `archives_user_analysis` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with `pageSize=1`; larger `pageSize=30` returned HTTP 200 but exceeded the 65536-byte live body cap and parsed as `parse_error`. |
+| `archives_user_analysis` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified`; large-page `partial_observation_available` | Visible Archives service context completed with `pageSize=1`; larger `pageSize=30` now returns a capped safe partial observation instead of `parse_error`. |
 | `archives_user_profile` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with `api_code=1`. |
 | `archives_photo_search` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `no_data` | Visible Archives service context completed transport/API shape with empty `dataList`; no-data is not no-risk. |
 | `archives_related_users` | `auth_flow_not_completed_in_bound_context`; earlier HTTP 200 body-level `api_code=302` | `live_smoke_verified` | Visible Archives service context completed with one related-users result path observed. |
@@ -143,8 +143,27 @@ Latest Archives action results:
 
 `archives_user_analysis` note: the live-smoke verified run used `pageSize=1`.
 A broader `pageSize=30` run in the same authenticated context returned HTTP 200
-but was capped at `65536` bytes and classified as `parse_error`; this is a
-large-response handling limit, not an authentication failure.
+and was capped at `65536` bytes. The current parser classifies that state as
+`partial_observation_available` with source-quality large-response flags instead
+of `parse_error`; this is a large-response handling limit, not an authentication
+failure.
+
+Latest `archives_user_analysis` large-page retest:
+
+- input shape: same authenticated visible service context, `pageSize=30`
+- HTTP status: `200`
+- action status: `partial_observation_available`
+- source status: `partial_observation_available`
+- error_type: `response_too_large`
+- body_truncated: `true`
+- observed_bytes: `65536`
+- top-level keys observed: `result`, `currentTime`, `data`
+- log/event count estimate: `24` from `totalCount` in capped prefix
+- source_quality.large_response_limited: `true`
+- source_quality.partial_observation_available: `true`
+- raw full body returned: `false`
+- raw records full dump returned: `false`
+- credential secret values returned: `false`
 
 ### RCP Retest
 

@@ -26,7 +26,7 @@ inventory, not a runtime-routing promotion list.
 | --- | --- | --- | --- | --- | --- |
 | `login_logs_search` | Login Logs | `GET /rest/unified/log/search` | `user_id`; optional bounded epoch-ms window, `recallSource`, `limit` | `live_smoke_verified` | none |
 | `track_analysis_check_data_ready` | Track Analysis | `POST /dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, epoch-ms `startTime/endTime`; optional safe enum/list filters | `live_smoke_verified` | none for smoke; broader semantic validation can use more known devices later |
-| `archives_user_analysis` | Archives Center | `POST /v3/user/log/coreLogs/fetch` | decimal `user_id`, epoch-ms `beginTime/endTime`, page controls | `live_smoke_verified` | use bounded page size for smoke; pageSize=30 can exceed the 65536-byte live cap |
+| `archives_user_analysis` | Archives Center | `POST /v3/user/log/coreLogs/fetch` | decimal `user_id`, epoch-ms `beginTime/endTime`, page controls | `live_smoke_verified`; large-page `partial_observation_available` | bounded page size still gives exact completed smoke; pageSize=30 returns capped partial observation when it exceeds the 65536-byte live cap |
 | `archives_user_profile` | Archives Center | `GET /archives/user/home/info` | decimal `user_id` | `live_smoke_verified` | none |
 | `archives_photo_search` | Archives Center | `POST /v4/archives/report/photo/search` | decimal `user_id`, epoch-ms `begin/end`, page controls, fixed enum filters | `no_data` | no-data is source state only, not no-risk |
 | `archives_related_users` | Archives Center | `POST /archives/user/search/device` | decimal `user_id`, fixed relation type enum | `live_smoke_verified` | none |
@@ -64,8 +64,10 @@ visible browser context. The earlier body-level `api_code=302` state is
 classified as `auth_flow_not_completed_in_bound_context`, not as explicit
 permission denial. `archives_photo_search` currently returns a standard
 `no_data` source state for the tested user/window. `archives_user_analysis`
-should use a bounded page size for smoke because larger pages can exceed the
-configured 65536-byte live body cap.
+still completes with bounded page size; when larger pages exceed the configured
+65536-byte live body cap, the action now returns `partial_observation_available`
+with top-level keys, count estimate, page-info partial fields, key user entity,
+and large-response source-quality flags without returning raw records.
 
 ### RCP
 

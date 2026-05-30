@@ -20,7 +20,7 @@ Latest second-stage readiness highlights:
 
 - `login_logs_search`: `live_smoke_verified`; latest live smoke completed with records present after 7-day response-too-large fallback to a 24-hour `data.logSearchModels` response.
 - `track_analysis_check_data_ready`: `live_smoke_verified`; completed with a real test device sample.
-- Archives Center: visible service context with `BROWSER_HEADLESS=false` is now authenticated and `page_ready=true`; `archives_user_profile`, `archives_user_analysis`, and `archives_related_users` are live-smoke verified, while `archives_photo_search` returned source `no_data` for the tested user/window.
+- Archives Center: visible service context with `BROWSER_HEADLESS=false` is now authenticated and `page_ready=true`; `archives_user_profile`, bounded `archives_user_analysis`, and `archives_related_users` are live-smoke verified, `archives_user_analysis` large page returns `partial_observation_available`, and `archives_photo_search` returned source `no_data` for the tested user/window.
 - `rcp_event_detail`: `live_smoke_verified`; completed with a real event sample obtained from shape-only `rcp_snapshot` output.
 - `rcp_event_feature_list`: `partial_observation_available`; real event sample reaches HTTP 200, exceeds the live body cap, and now returns a capped feature-count/group observation without raw body output.
 - `rcp_policy_tree_lookup`: `blocked_missing_real_sample`; needs real `policyTreeCode` and `policyTreeVersion`.

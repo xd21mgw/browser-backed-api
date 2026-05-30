@@ -312,7 +312,7 @@ test("live-smoke-ready contracts are registered and build fixed service-side req
   }
 });
 
-test("fixed-shape body-level redirect code is classified as auth_failed", () => {
+test("Archives body-level redirect code is classified as auth flow incomplete", () => {
   const config = createLiveConfig();
   const response = buildLiveActionResponse(
     ACTIONS.archives_user_analysis,
@@ -337,10 +337,75 @@ test("fixed-shape body-level redirect code is classified as auth_failed", () => 
     }
   );
 
-  assert.equal(response.source_status, "auth_failed");
-  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.source_status, "auth_flow_not_completed_in_bound_context");
+  assert.equal(response.error_type, "auth_flow_not_completed_in_bound_context");
   assert.equal(response.data.response_summary.archives_user_analysis.api_code, 302);
+  assert.equal(response.data.response_summary.archives_user_analysis.auth_flow_not_completed_in_bound_context, true);
   assert.equal(response.data.response_summary.archives_user_analysis.raw_full_body_suppressed, true);
+  assert.match(response.data.response_summary.archives_user_analysis.next_action, /visible service browser context/);
+});
+
+test("archives_user_analysis truncated large response returns partial observation", () => {
+  const config = createLiveConfig();
+  const rawPhone = ["138", "1234", "5678"].join("");
+  const response = buildLiveActionResponse(
+    ACTIONS.archives_user_analysis,
+    {
+      user_id: "772671837",
+      beginTime: 1780000000000,
+      endTime: 1780086400000,
+      pageIndex: 1,
+      pageSize: 30
+    },
+    config,
+    {
+      completed: true,
+      ok: true,
+      status: 200,
+      bodyText:
+        '{"result":1,"currentTime":1780086400000,"data":{"dataList":[' +
+        `{"userId":"772671837","operationType":"loginStart","eventTime":1780000001000,"phone":"${rawPhone}","password":"should-not-output"},` +
+        '{"userId":"772671837","operationType":"resetPass","eventTime":1780000002000,"deviceId":"ANDROID_raw_archives_device"}',
+      bodyTruncated: true,
+      observedBytes: 65536
+    },
+    {
+      latencyMs: 40,
+      originWarmed: true,
+      requestPath: "/v3/user/log/coreLogs/fetch",
+      requestMethod: "POST"
+    }
+  );
+
+  const summary = response.data.response_summary.archives_user_analysis;
+  assert.equal(response.status, "partial_observation_available");
+  assert.equal(response.source_status, "partial_observation_available");
+  assert.equal(response.error_type, "response_too_large");
+  assert.equal(response.data.body_truncated, true);
+  assert.equal(response.data.observed_bytes, 65536);
+  assert.equal(summary.source_status, "partial_observation_available");
+  assert.equal(summary.upstream_http_status, 200);
+  assert.equal(summary.response_too_large, true);
+  assert.deepEqual(summary.top_level_keys, ["result", "currentTime", "data"]);
+  assert.equal(summary.log_count_estimate, 2);
+  assert.equal(summary.event_count_estimate, 2);
+  assert.equal(summary.operation_type_summary.operation_types_observed_count, 2);
+  assert.deepEqual(summary.operation_type_summary.operation_type_fields_observed, ["operationType"]);
+  assert.equal(summary.time_range_summary.earliest_time_observed, "1780000001000");
+  assert.equal(summary.time_range_summary.latest_time_observed, "1780000002000");
+  assert.equal(summary.key_entities.user_id, "772671837");
+  assert.equal(summary.risk_event_scan.login_start_present, true);
+  assert.equal(summary.risk_event_scan.reset_pass_present, true);
+  assert.equal(summary.raw_full_body_suppressed, true);
+  assert.equal(summary.raw_records_full_dump_suppressed, true);
+  assert.equal(response.source_quality.large_response_limited, true);
+  assert.equal(response.source_quality.partial_observation_available, true);
+
+  const serialized = JSON.stringify(response);
+  assert.equal(serialized.includes("should-not-output"), false);
+  assert.equal(serialized.includes(rawPhone), false);
+  assert.equal(serialized.includes("ANDROID_raw_archives_device"), false);
+  assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
 });
 
 test("rcp_event_feature_list truncated large response returns partial observation", () => {
