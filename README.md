@@ -8,7 +8,7 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 
 - Keeps a long-lived Playwright persistent browser context in `SERVICE_MODE=live`.
 - Uses `/Users/pengcheng/chrome-agent-auth-profile` as `userDataDir` by default.
-- Prewarms the fixed RCP, Weapon, Login Logs, and Track Analysis origins in live mode.
+- Prewarms the fixed origins for enabled platforms in live mode.
 - Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
 - Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
 - Adds `source_card` and `source_quality` to every action response.
@@ -27,6 +27,7 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 ## First Batch Source Summary
 
 See `ONLINE_SOURCE_SUMMARY.md` for the first batch browser-backed online source closure.
+See `browser_backed_live_smoke_readiness_v1.md` and `har_platform_interface_inventory_v1.md` for second-stage fixed action readiness and inventory.
 
 - Track Analysis: `live_complete`
 - RCP eventList: `live_complete`
@@ -123,7 +124,7 @@ Returns readiness metadata for Dennis runtime integration:
   "context_initialized": false,
   "warmed_origins": [],
   "uptime_ms": 123,
-  "action_count": 4
+  "action_count": 12
 }
 ```
 
@@ -137,6 +138,14 @@ Lists fixed actions and their input contracts. The allowlist is exactly:
 - `weapon_inventory`
 - `login_logs_search`
 - `track_analysis_summary`
+- `archives_user_analysis`
+- `archives_user_profile`
+- `archives_photo_search`
+- `archives_related_users`
+- `rcp_event_detail`
+- `rcp_event_feature_list`
+- `rcp_policy_tree_lookup`
+- `track_analysis_check_data_ready`
 
 ### `POST /prewarm`
 
@@ -156,6 +165,14 @@ Allowed action names:
 - `weapon_inventory`
 - `login_logs_search`
 - `track_analysis_summary`
+- `archives_user_analysis`
+- `archives_user_profile`
+- `archives_photo_search`
+- `archives_related_users`
+- `rcp_event_detail`
+- `rcp_event_feature_list`
+- `rcp_policy_tree_lookup`
+- `track_analysis_check_data_ready`
 
 Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
 

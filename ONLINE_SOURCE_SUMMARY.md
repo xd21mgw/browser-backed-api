@@ -7,9 +7,23 @@ First batch browser-backed online sources are live-smoke complete:
 - Track Analysis: `live_complete`
 - RCP eventList: `live_complete`
 - Weapon graph/risk: `live_complete`
-- Login Logs: `live_complete_no_data_case`
+- Login Logs: `live_complete`
 
 All sources run through the local browser-backed API service with fixed action names and fixed same-origin relative paths. Dennis or other callers do not open browsers, read browser storage, or receive raw upstream responses.
+
+Second-stage fixed action readiness is tracked in:
+
+- `browser_backed_live_smoke_readiness_v1.md`
+- `har_platform_interface_inventory_v1.md`
+
+Latest second-stage readiness highlights:
+
+- `login_logs_search`: `live_smoke_verified`; latest live smoke completed with records present after 7-day response-too-large fallback to a 24-hour `data.logSearchModels` response.
+- `track_analysis_check_data_ready`: `live_smoke_verified`; completed with a real test device sample.
+- `archives_user_analysis`, `archives_user_profile`, `archives_photo_search`, and `archives_related_users`: `blocked_auth_required`; current browser profile reaches body-level `api_code=302`.
+- `rcp_event_detail`: `live_smoke_verified`; completed with a real event sample obtained from shape-only `rcp_snapshot` output.
+- `rcp_event_feature_list`: `blocked_response_too_large`; real event sample reaches HTTP 200 but exceeds the live body cap before JSON parse.
+- `rcp_policy_tree_lookup`: `blocked_missing_real_sample`; needs real `policyTreeCode` and `policyTreeVersion`.
 
 ## Fixed Interfaces
 
@@ -87,14 +101,15 @@ Supported fixed Login Logs interface:
 
 ### Login Logs
 
-- source_status: `no_data`
-- latency_ms observed: approximately `536`
+- source_status: `completed`
+- latency_ms observed: varies by 7-day initial attempt plus 24-hour fallback
 - source_card: present
 - source_quality: present
 - sensitive_output: `false`
 - raw_full_body_returned: `false`
-- validated output: online API reachable and standard no-data source outcome for the tested 7-day window
-- records_count observed: `0`
+- validated output: online API reachable; default 7-day response can be too large and falls back to a 24-hour window
+- records path observed: `data.logSearchModels`
+- records_count observed in latest live smoke: `19`
 
 ## Failure And Empty Result Semantics
 
@@ -115,12 +130,13 @@ The first batch sources maintain these boundaries:
 - Do not read the Chrome cookie DB.
 - Do not output raw upstream full response bodies.
 - Do not output raw login log records.
-- Do not output raw device IDs.
-- Do not output raw IP values.
 - Do not output raw Weapon `labelInfo`.
 - Do not output raw Weapon `originalLog`.
 - Do not accept caller-provided URL, path, origin, header, cookie, token, session, secret, raw query, or raw body material.
 - Use fixed action names and fixed same-origin relative paths only.
+- In `internal_risk_review`, risk entity identifiers such as user_id, device_id, IP, eventId, sourceId, strategy code, photo_id, and live_id may appear in compact summaries.
+- In `external_share`, risk entity identifiers are masked.
+- `sensitive_output=false` means no credential secret, no raw upstream full body, and no raw record/full dump. It does not mean internal risk entity identifiers were removed.
 
 ## Dennis Evidence Card Guidance
 
