@@ -30,6 +30,12 @@ export function loadConfig(env = process.env) {
         effectiveEnv.LOGIN_LOGS_ORIGIN,
         effectiveEnv.LOGIN_LOGS_PREWARM_PATH || "/"
       ),
+      archives: domainConfig(
+        "archives",
+        "Archives Center",
+        effectiveEnv.ARCHIVES_ORIGIN,
+        effectiveEnv.ARCHIVES_PREWARM_PATH || "/"
+      ),
       track_analysis: domainConfig(
         "track_analysis",
         "Track Analysis",

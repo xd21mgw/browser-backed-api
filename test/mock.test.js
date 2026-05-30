@@ -5,6 +5,89 @@ import { BrowserBackedClient } from "../src/browser.js";
 import { loadConfig } from "../src/config.js";
 import { BrowserBackedApiService } from "../src/service.js";
 
+const MOCK_ACTION_INPUTS = Object.freeze({
+  rcp_snapshot: {
+    eventType: "USER_REGISTER_NEW",
+    source_id: "mock_source_id",
+    startTime: "2026-05-29 10:00:00",
+    endTime: "2026-05-29 10:30:00",
+    pageSize: 10
+  },
+  weapon_inventory: {
+    user_id: "2871834924"
+  },
+  login_logs_search: {
+    user_id: "2871834924",
+    from_timestamp: 1780000000000,
+    to_timestamp: 1780086400000,
+    limit: 10
+  },
+  track_analysis_summary: {
+    user_id: "2871834924",
+    appName: "KUAISHOU"
+  },
+  archives_user_analysis: {
+    user_id: "2871834924",
+    beginTime: 1780000000000,
+    endTime: 1780086400000,
+    pageIndex: 1,
+    pageSize: 20
+  },
+  archives_user_profile: {
+    user_id: "2871834924"
+  },
+  archives_photo_search: {
+    user_id: "2871834924",
+    begin: 1780000000000,
+    end: 1780086400000,
+    page: 1,
+    count: 20
+  },
+  archives_related_users: {
+    user_id: "2871834924",
+    relation_type: "same_device_registered"
+  },
+  rcp_event_detail: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    queryTime: 1780000000000
+  },
+  rcp_event_feature_list: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    queryTime: 1780000000000,
+    featureGroup: ""
+  },
+  rcp_policy_tree_lookup: {
+    policyTreeCode: "USER_REGISTER_NEW",
+    policyTreeVersion: 887,
+    targetPolicyCode: "mock_policy_code"
+  },
+  track_analysis_check_data_ready: {
+    device_id: "ANDROID_mock_device_id",
+    appName: "KUAISHOU",
+    product: "KUAISHOU",
+    startTime: 1780000000000,
+    endTime: 1780086400000,
+    category: ["active"],
+    event: [],
+    appPlatform: [],
+    metric: "pv",
+    type: "deviceId"
+  }
+});
+
+const LIVE_SMOKE_READY_ACTIONS = Object.freeze([
+  "archives_user_analysis",
+  "archives_user_profile",
+  "archives_photo_search",
+  "archives_related_users",
+  "rcp_event_detail",
+  "rcp_event_feature_list",
+  "rcp_policy_tree_lookup",
+  "track_analysis_check_data_ready"
+]);
+
 function createService() {
   const config = loadConfig({
     SERVICE_MODE: "mock",
@@ -22,6 +105,7 @@ function createLiveConfig() {
     RCP_ORIGIN: "https://rcp.example.test",
     WEAPON_ORIGIN: "https://weapon.example.test",
     LOGIN_LOGS_ORIGIN: "https://user-center-workbench.example.test",
+    ARCHIVES_ORIGIN: "https://archives.example.test",
     TRACK_ANALYSIS_ORIGIN: "https://track-analysis.example.test"
   });
 }
@@ -35,7 +119,7 @@ test("health exposes Dennis runtime readiness fields", () => {
   assert.equal(health.browser_initialized, false);
   assert.equal(health.context_initialized, false);
   assert.equal(typeof health.uptime_ms, "number");
-  assert.equal(health.warmed_origins.length, 4);
+  assert.equal(health.warmed_origins.length, 5);
   assert.ok(health.warmed_origins.every((origin) => origin.status === "not_warmed"));
 });
 
@@ -48,7 +132,15 @@ test("actions endpoint exposes the fixed allowlist only", () => {
     "rcp_snapshot",
     "weapon_inventory",
     "login_logs_search",
-    "track_analysis_summary"
+    "track_analysis_summary",
+    "archives_user_analysis",
+    "archives_user_profile",
+    "archives_photo_search",
+    "archives_related_users",
+    "rcp_event_detail",
+    "rcp_event_feature_list",
+    "rcp_policy_tree_lookup",
+    "track_analysis_check_data_ready"
   ]);
 });
 
@@ -57,7 +149,7 @@ test("prewarm reports per-origin status, latency, and error type", async () => {
   const prewarm = await service.prewarm();
 
   assert.equal(prewarm.service_mode, "mock");
-  assert.equal(prewarm.results.length, 4);
+  assert.equal(prewarm.results.length, 5);
 
   for (const result of prewarm.results) {
     assert.equal(result.status, "simulated");
@@ -76,14 +168,7 @@ test("each action returns source card, source quality, latency, warm state, and 
   await service.prewarm();
 
   for (const actionName of ACTION_ALLOWLIST) {
-    const response = await service.executeAction(actionName, {
-      accountId: "demo",
-      workspaceId: "workspace",
-      user_id: "track-user",
-      appName: "KUAISHOU",
-      query: "sample",
-      limit: 10
-    });
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
 
     assert.equal(response.action, actionName);
     assert.equal(response.mode, "mock");
@@ -95,6 +180,32 @@ test("each action returns source card, source quality, latency, warm state, and 
     assert.equal(response.source_card.body_policy.raw_response_full_body_returned, false);
     assert.equal(response.source_card.body_policy.cookie_token_session_header_plaintext_read, false);
     assert.equal(response.source_quality.checks.some((check) => check.name === "fixed_action_registry" && check.passed), true);
+  }
+});
+
+test("live-smoke-ready contracts are registered and build fixed service-side requests", async () => {
+  const service = createService();
+
+  for (const actionName of LIVE_SMOKE_READY_ACTIONS) {
+    const action = ACTIONS[actionName];
+    assert.ok(action, `${actionName} should be registered`);
+    assert.equal(ACTION_ALLOWLIST.includes(actionName), true);
+    assert.equal(action.registryStatus, "service_registered");
+
+    const request = buildActionBody(action, MOCK_ACTION_INPUTS[actionName]);
+    assert.equal(request.path.startsWith("/"), true);
+    assert.equal(request.path.startsWith("//"), false);
+    assert.equal(request.path.includes("http://"), false);
+    assert.equal(request.path.includes("https://"), false);
+    assert.ok(["GET", "POST"].includes(request.method));
+
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
+    assert.equal(response.action, actionName);
+    assert.equal(response.mode, "mock");
+    assert.equal(response.sensitive_output, false);
+    assert.ok(response.source_card);
+    assert.ok(response.source_quality);
+    assert.notEqual(response.error_type, "unknown_action");
   }
 });
 

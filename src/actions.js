@@ -6,7 +6,15 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "rcp_snapshot",
   "weapon_inventory",
   "login_logs_search",
-  "track_analysis_summary"
+  "track_analysis_summary",
+  "archives_user_analysis",
+  "archives_user_profile",
+  "archives_photo_search",
+  "archives_related_users",
+  "rcp_event_detail",
+  "rcp_event_feature_list",
+  "rcp_policy_tree_lookup",
+  "track_analysis_check_data_ready"
 ]);
 
 const ALLOWED_INPUT_KEYS = Object.freeze([
@@ -34,12 +42,35 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "page",
   "pageIndex",
   "pageSize",
+  "begin",
+  "end",
+  "beginTime",
+  "count",
+  "matchType",
+  "sort",
+  "relation_type",
+  "inputType",
+  "type",
+  "haveParamAuth",
+  "operation_filters",
   "selected_columns",
   "user_id",
   "device_id",
   "appName",
+  "include",
+  "category",
+  "event",
+  "appPlatform",
+  "metric",
   "time_window",
   "sub_interface",
+  "mode",
+  "eventId",
+  "queryTime",
+  "featureGroup",
+  "policyTreeCode",
+  "policyTreeVersion",
+  "targetPolicyCode",
   "output_scope"
 ]);
 
@@ -137,10 +168,40 @@ const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
 const TRACK_ANALYSIS_PROFILE_PATH = "/dp/platform/app/analytics/v2/sequence/profile";
 const TRACK_ANALYSIS_DEVICE_IDS_PATH = "/dp/platform/app/analytics/v2/sequence/getDeviceIds";
+const TRACK_ANALYSIS_CHECK_DATA_READY_PATH = "/dp/platform/app/analytics/v2/sequence/checkDataReady";
 const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
 const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration", "profile", "getDeviceIds"]);
 const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
 const TRACK_ANALYSIS_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const TRACK_ANALYSIS_DEFAULT_PRODUCT = "KUAISHOU";
+
+const ARCHIVES_USER_ANALYSIS_PATH = "/v3/user/log/coreLogs/fetch";
+const ARCHIVES_PHOTO_SEARCH_PATH = "/v4/archives/report/photo/search";
+const ARCHIVES_USER_PROFILE_PATH = "/archives/user/home/info";
+const ARCHIVES_RELATED_USERS_PATH = "/archives/user/search/device";
+const ARCHIVES_MAX_PAGE_SIZE = 100;
+const ARCHIVES_USER_ANALYSIS_FILTER_FIELDS = Object.freeze([
+  "loginStart",
+  "registerBind",
+  "resetPass",
+  "protectAccount",
+  "liveStream",
+  "scanCode",
+  "logout",
+  "frozen"
+]);
+const ARCHIVES_RELATED_USER_TYPES = Object.freeze({
+  same_device_registered: 0,
+  same_device_login: 1
+});
+
+const RCP_EVENT_DETAIL_PATH = "/v2/rest/event/rcpEventDetail";
+const RCP_EVENT_FEATURE_LIST_PATH = "/v2/rest/event/rcpEventFeatureList";
+const RCP_POLICY_TREE_LOOKUP_PATH = "/v2/rest/pro/policyTree/queryProPolicyTree";
+const RCP_POLICY_TREE_LIST_PATH = "/v2/rest/pro/policyTree/policyTreeList";
+const RCP_POLICY_TREE_BINDING_BY_NODE_PATH = "/v2/rest/pro/policyTree/queryBindingByNodeCode";
+const RCP_POLICY_TREE_ALL_POLICY_CODE_PATH = "/v2/rest/pro/policyTree/getAllPolicyCodeByPage";
+const SAFE_CODE_PATTERN = /^[A-Za-z0-9_:-]{1,128}$/;
 
 const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "url",
@@ -264,6 +325,153 @@ export const ACTIONS = Object.freeze({
       device_summary: mockTrackAnalysisDeviceSummary(input),
       generated_at: fixedMockTime()
     })
+  }),
+  archives_user_analysis: freezeAction({
+    name: "archives_user_analysis",
+    domainKey: "archives",
+    description: "Return a compact Archives Center user action timeline shape summary for typed user/time params.",
+    method: "POST",
+    apiPath: ARCHIVES_USER_ANALYSIS_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      user_id: "required decimal string",
+      beginTime: "required epoch ms",
+      endTime: "required epoch ms",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 30"
+    },
+    validateParams: validateArchivesUserAnalysisInput,
+    buildRequest: buildArchivesUserAnalysisRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_user_analysis"),
+    mockData: mockArchivesUserAnalysisData
+  }),
+  archives_user_profile: freezeAction({
+    name: "archives_user_profile",
+    domainKey: "archives",
+    description: "Return a compact Archives Center user profile shape summary for a typed user.",
+    method: "GET",
+    apiPath: ARCHIVES_USER_PROFILE_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      user_id: "required decimal string"
+    },
+    validateParams: validateArchivesUserProfileInput,
+    buildRequest: buildArchivesUserProfileRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_user_profile"),
+    mockData: mockArchivesUserProfileData
+  }),
+  archives_photo_search: freezeAction({
+    name: "archives_photo_search",
+    domainKey: "archives",
+    description: "Return a compact Archives Center photo report/search shape summary for typed user/time params.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_SEARCH_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      user_id: "required decimal string; maps to reportedIds",
+      begin: "required epoch ms",
+      end: "required epoch ms",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20",
+      matchType: "optional enum string 0|1|2; default 0",
+      sort: "optional enum string 0|1; default 0"
+    },
+    validateParams: validateArchivesPhotoSearchInput,
+    buildRequest: buildArchivesPhotoSearchRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_photo_search"),
+    mockData: mockArchivesPhotoSearchData
+  }),
+  archives_related_users: freezeAction({
+    name: "archives_related_users",
+    domainKey: "archives",
+    description: "Return a compact Archives Center related-users shape summary for typed same-device relation params.",
+    method: "POST",
+    apiPath: ARCHIVES_RELATED_USERS_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      user_id: "required decimal string; maps to keyword",
+      relation_type: "optional enum same_device_registered|same_device_login; default same_device_registered"
+    },
+    validateParams: validateArchivesRelatedUsersInput,
+    buildRequest: buildArchivesRelatedUsersRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_related_users"),
+    mockData: mockArchivesRelatedUsersData
+  }),
+  rcp_event_detail: freezeAction({
+    name: "rcp_event_detail",
+    domainKey: "rcp",
+    description: "Return a compact RCP event detail shape summary for a typed event id and exact query time.",
+    method: "GET",
+    apiPath: RCP_EVENT_DETAIL_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      queryTime: "required exact event time epoch ms"
+    },
+    validateParams: validateRcpEventIdentityInput,
+    buildRequest: buildRcpEventDetailRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_event_detail"),
+    mockData: mockRcpEventDetailData
+  }),
+  rcp_event_feature_list: freezeAction({
+    name: "rcp_event_feature_list",
+    domainKey: "rcp",
+    description: "Return a compact RCP feature snapshot shape summary for a typed event id and exact query time.",
+    method: "GET",
+    apiPath: RCP_EVENT_FEATURE_LIST_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      queryTime: "required exact event time epoch ms",
+      featureGroup: "optional empty string only"
+    },
+    validateParams: validateRcpEventFeatureListInput,
+    buildRequest: buildRcpEventFeatureListRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_event_feature_list"),
+    mockData: mockRcpEventFeatureListData
+  }),
+  rcp_policy_tree_lookup: freezeAction({
+    name: "rcp_policy_tree_lookup",
+    domainKey: "rcp",
+    description: "Return a compact RCP policy-tree asset lookup shape summary; strategy governance only.",
+    method: "GET",
+    apiPath: RCP_POLICY_TREE_LOOKUP_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      policyTreeCode: "required safe policy tree code",
+      policyTreeVersion: "required positive integer; maps to treeSnapshot",
+      targetPolicyCode: "optional safe policy code; used for source-quality context only"
+    },
+    validateParams: validateRcpPolicyTreeLookupInput,
+    buildRequest: buildRcpPolicyTreeLookupRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_policy_tree_lookup"),
+    mockData: mockRcpPolicyTreeLookupData
+  }),
+  track_analysis_check_data_ready: freezeAction({
+    name: "track_analysis_check_data_ready",
+    domainKey: "track_analysis",
+    description: "Return a compact Track Analysis readiness shape summary for typed device/time params.",
+    method: "POST",
+    apiPath: TRACK_ANALYSIS_CHECK_DATA_READY_PATH,
+    registryStatus: "service_registered",
+    inputContract: {
+      device_id: "required string; maps to deviceId",
+      appName: "required enum KUAISHOU|NEBULA",
+      product: "optional enum KUAISHOU|NEBULA; default KUAISHOU",
+      startTime: "required epoch ms",
+      endTime: "required epoch ms",
+      category: "optional safe string[]",
+      event: "optional safe string[]",
+      appPlatform: "optional safe string[]",
+      metric: "optional safe label; default pv",
+      type: "optional fixed enum deviceId"
+    },
+    validateParams: validateTrackAnalysisCheckDataReadyInput,
+    buildRequest: buildTrackAnalysisCheckDataReadyRequest,
+    summarizeLiveResponse: summarizeFixedShapeActionResponse("track_analysis_check_data_ready"),
+    mockData: mockTrackAnalysisCheckDataReadyData
   })
 });
 
@@ -277,6 +485,9 @@ export function listActions(config) {
       description: action.description,
       domain: domain.label,
       method: action.method,
+      registry_status: action.registryStatus || "service_registered",
+      default_runtime_routing: false,
+      live_verified: false,
       input_contract: action.inputContract,
       response_policy: {
         includes_source_card: true,
@@ -617,6 +828,430 @@ export function getActionParameterError(action, input) {
     return null;
   }
   return action.validateParams(input || {});
+}
+
+function validateArchivesUserAnalysisInput(input) {
+  const userError = validateDecimalUserId("archives_user_analysis", input);
+  if (userError) {
+    return userError;
+  }
+  const windowError = validatePositiveTimeRange("archives_user_analysis", input, "beginTime", "endTime");
+  if (windowError) {
+    return windowError;
+  }
+  const pageError = validatePageControls("archives_user_analysis", input, ARCHIVES_MAX_PAGE_SIZE, 30);
+  if (pageError) {
+    return pageError;
+  }
+  return null;
+}
+
+function buildArchivesUserAnalysisRequest(input) {
+  const pageIndex = positiveIntegerParam(input, "pageIndex", 1);
+  const pageSize = positiveIntegerParam(input, "pageSize", 30);
+  const body = {
+    userId: input.user_id.trim(),
+    beginTime: input.beginTime,
+    endTime: input.endTime,
+    pageIndex,
+    pageSize,
+    haveParamAuth: 1
+  };
+  for (const field of ARCHIVES_USER_ANALYSIS_FILTER_FIELDS) {
+    body[field] = 1;
+  }
+  return {
+    path: ARCHIVES_USER_ANALYSIS_PATH,
+    displayPath: ARCHIVES_USER_ANALYSIS_PATH,
+    method: "POST",
+    body
+  };
+}
+
+function validateArchivesUserProfileInput(input) {
+  return validateDecimalUserId("archives_user_profile", input);
+}
+
+function buildArchivesUserProfileRequest(input) {
+  const params = new URLSearchParams({ userId: input.user_id.trim() });
+  const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+  return {
+    path: `${ARCHIVES_USER_PROFILE_PATH}?${params.toString()}`,
+    displayPath: `${ARCHIVES_USER_PROFILE_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateArchivesPhotoSearchInput(input) {
+  const userError = validateDecimalUserId("archives_photo_search", input);
+  if (userError) {
+    return userError;
+  }
+  const windowError = validatePositiveTimeRange("archives_photo_search", input, "begin", "end");
+  if (windowError) {
+    return windowError;
+  }
+  const pageError = validatePageControls("archives_photo_search", input, 100, 20, "page", "count");
+  if (pageError) {
+    return pageError;
+  }
+  if (Object.hasOwn(input, "matchType") && !["0", "1", "2"].includes(String(input.matchType))) {
+    return {
+      message: "archives_photo_search matchType must be 0, 1, or 2",
+      required: ["matchType=0|1|2"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "sort") && !["0", "1"].includes(String(input.sort))) {
+    return {
+      message: "archives_photo_search sort must be 0 or 1",
+      required: ["sort=0|1"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildArchivesPhotoSearchRequest(input) {
+  return {
+    path: ARCHIVES_PHOTO_SEARCH_PATH,
+    displayPath: ARCHIVES_PHOTO_SEARCH_PATH,
+    method: "POST",
+    body: {
+      reportedIds: input.user_id.trim(),
+      matchType: Object.hasOwn(input, "matchType") ? String(input.matchType) : "0",
+      sort: Object.hasOwn(input, "sort") ? String(input.sort) : "0",
+      begin: input.begin,
+      end: input.end,
+      page: positiveIntegerParam(input, "page", 1),
+      count: positiveIntegerParam(input, "count", 20)
+    }
+  };
+}
+
+function validateArchivesRelatedUsersInput(input) {
+  const userError = validateDecimalUserId("archives_related_users", input);
+  if (userError) {
+    return userError;
+  }
+  const relationType = archivesRelationType(input);
+  if (!Object.hasOwn(ARCHIVES_RELATED_USER_TYPES, relationType)) {
+    return {
+      message: "archives_related_users relation_type must be same_device_registered or same_device_login",
+      required: ["relation_type=same_device_registered|same_device_login"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildArchivesRelatedUsersRequest(input) {
+  const relationType = archivesRelationType(input);
+  return {
+    path: ARCHIVES_RELATED_USERS_PATH,
+    displayPath: ARCHIVES_RELATED_USERS_PATH,
+    method: "POST",
+    body: {
+      keyword: input.user_id.trim(),
+      inputType: 0,
+      type: ARCHIVES_RELATED_USER_TYPES[relationType]
+    }
+  };
+}
+
+function validateRcpEventIdentityInput(input) {
+  if (!safeCode(input.eventType)) {
+    return {
+      message: "rcp_event_detail requires a safe eventType",
+      required: ["eventType"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!safeCode(input.eventId)) {
+    return {
+      message: "rcp_event_detail requires a safe eventId",
+      required: ["eventId"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.queryTime)) {
+    return {
+      message: "rcp_event_detail requires queryTime as a positive epoch millisecond integer",
+      required: ["queryTime positive integer"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildRcpEventDetailRequest(input) {
+  const params = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: input.eventId.trim(),
+    queryTime: String(input.queryTime)
+  });
+  const displayParams = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: "[typed_event_id]",
+    queryTime: String(input.queryTime)
+  });
+  return {
+    path: `${RCP_EVENT_DETAIL_PATH}?${params.toString()}`,
+    displayPath: `${RCP_EVENT_DETAIL_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpEventFeatureListInput(input) {
+  const eventError = validateRcpEventIdentityInput(input);
+  if (eventError) {
+    return {
+      ...eventError,
+      message: eventError.message.replace("rcp_event_detail", "rcp_event_feature_list")
+    };
+  }
+  if (Object.hasOwn(input, "featureGroup") && input.featureGroup !== "") {
+    return {
+      message: "rcp_event_feature_list featureGroup must remain an empty string",
+      required: ["featureGroup empty string"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpEventFeatureListRequest(input) {
+  const params = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: input.eventId.trim(),
+    queryTime: String(input.queryTime),
+    featureGroup: ""
+  });
+  const displayParams = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: "[typed_event_id]",
+    queryTime: String(input.queryTime),
+    featureGroup: ""
+  });
+  return {
+    path: `${RCP_EVENT_FEATURE_LIST_PATH}?${params.toString()}`,
+    displayPath: `${RCP_EVENT_FEATURE_LIST_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyTreeLookupInput(input) {
+  if (!safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_policy_tree_lookup requires a safe policyTreeCode",
+      required: ["policyTreeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.policyTreeVersion)) {
+    return {
+      message: "rcp_policy_tree_lookup requires policyTreeVersion as a positive integer",
+      required: ["policyTreeVersion positive integer"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "targetPolicyCode") && input.targetPolicyCode !== null && input.targetPolicyCode !== undefined && !safeCode(input.targetPolicyCode)) {
+    return {
+      message: "rcp_policy_tree_lookup targetPolicyCode must be a safe policy code when provided",
+      required: ["targetPolicyCode safe code"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpPolicyTreeLookupRequest(input) {
+  const params = new URLSearchParams({
+    policyTreeCode: input.policyTreeCode.trim(),
+    treeSnapshot: String(input.policyTreeVersion),
+    _t: String(Date.now())
+  });
+  return {
+    path: `${RCP_POLICY_TREE_LOOKUP_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_TREE_LOOKUP_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {},
+    companionPaths: [
+      RCP_POLICY_TREE_LIST_PATH,
+      RCP_POLICY_TREE_BINDING_BY_NODE_PATH,
+      RCP_POLICY_TREE_ALL_POLICY_CODE_PATH
+    ],
+    targetPolicyCode: isNonEmptyString(input.targetPolicyCode) ? input.targetPolicyCode.trim() : null
+  };
+}
+
+function validateTrackAnalysisCheckDataReadyInput(input) {
+  if (!isNonEmptyString(input.device_id)) {
+    return {
+      message: "track_analysis_check_data_ready requires device_id",
+      required: ["device_id"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
+    return {
+      message: "track_analysis_check_data_ready appName must be KUAISHOU or NEBULA",
+      required: ["appName=KUAISHOU|NEBULA"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "product") && !TRACK_ANALYSIS_APP_NAMES.includes(input.product)) {
+    return {
+      message: "track_analysis_check_data_ready product must be KUAISHOU or NEBULA",
+      required: ["product=KUAISHOU|NEBULA"],
+      errorType: "invalid_parameter"
+    };
+  }
+  const windowError = validatePositiveTimeRange("track_analysis_check_data_ready", input, "startTime", "endTime");
+  if (windowError) {
+    return windowError;
+  }
+  if (Object.hasOwn(input, "include") && ![0, 1].includes(input.include)) {
+    return {
+      message: "track_analysis_check_data_ready include must be 0 or 1",
+      required: ["include=0|1"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "pageSize") && (!validPositiveInteger(input.pageSize) || input.pageSize > 1000)) {
+    return {
+      message: "track_analysis_check_data_ready pageSize must be a positive integer <= 1000",
+      required: ["pageSize positive integer <= 1000"],
+      errorType: "invalid_parameter"
+    };
+  }
+  for (const key of ["category", "event", "appPlatform"]) {
+    if (Object.hasOwn(input, key) && !validSafeLabelList(input[key])) {
+      return {
+        message: `track_analysis_check_data_ready ${key} must be a safe string array`,
+        required: [`${key} safe string[]`],
+        errorType: "invalid_parameter"
+      };
+    }
+  }
+  if (Object.hasOwn(input, "metric") && !safeLabel(input.metric)) {
+    return {
+      message: "track_analysis_check_data_ready metric must be a safe label",
+      required: ["metric safe label"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "type") && input.type !== "deviceId") {
+    return {
+      message: "track_analysis_check_data_ready type must remain deviceId",
+      required: ["type=deviceId"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildTrackAnalysisCheckDataReadyRequest(input) {
+  return {
+    path: TRACK_ANALYSIS_CHECK_DATA_READY_PATH,
+    displayPath: TRACK_ANALYSIS_CHECK_DATA_READY_PATH,
+    method: "POST",
+    body: {
+      appName: input.appName,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      include: Object.hasOwn(input, "include") ? input.include : 1,
+      pageSize: positiveIntegerParam(input, "pageSize", 100),
+      deviceId: input.device_id.trim(),
+      batchQueryId: `browser_backed_${Date.now()}`,
+      appPlatform: safeLabelList(input.appPlatform, []),
+      category: safeLabelList(input.category, ["active"]),
+      event: safeLabelList(input.event, []),
+      metric: isNonEmptyString(input.metric) ? input.metric.trim() : "pv",
+      product: isNonEmptyString(input.product) ? input.product.trim() : TRACK_ANALYSIS_DEFAULT_PRODUCT,
+      type: "deviceId",
+      funcType: TRACK_ANALYSIS_FUNC_TYPE,
+      _t: String(Date.now())
+    }
+  };
+}
+
+function validateDecimalUserId(actionName, input) {
+  if (!isNonEmptyString(input.user_id) || !/^\d+$/.test(input.user_id.trim())) {
+    return {
+      message: `${actionName} requires user_id as a decimal string`,
+      required: ["user_id decimal string"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function validatePositiveTimeRange(actionName, input, startKey, endKey) {
+  if (!validPositiveInteger(input[startKey]) || !validPositiveInteger(input[endKey])) {
+    return {
+      message: `${actionName} requires ${startKey} and ${endKey} as positive epoch millisecond integers`,
+      required: [`${startKey}/${endKey} positive integer`],
+      errorType: "parameter_error"
+    };
+  }
+  if (input[startKey] >= input[endKey]) {
+    return {
+      message: `${actionName} requires ${endKey} > ${startKey}`,
+      required: [`${endKey} > ${startKey}`],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function validatePageControls(actionName, input, maxSize, defaultSize, pageKey = "pageIndex", sizeKey = "pageSize") {
+  if (Object.hasOwn(input, pageKey) && !validPositiveInteger(input[pageKey])) {
+    return {
+      message: `${actionName} ${pageKey} must be a positive integer`,
+      required: [`${pageKey} positive integer`],
+      errorType: "invalid_parameter"
+    };
+  }
+  const pageSize = Object.hasOwn(input, sizeKey) ? input[sizeKey] : defaultSize;
+  if (!validPositiveInteger(pageSize) || pageSize > maxSize) {
+    return {
+      message: `${actionName} ${sizeKey} must be a positive integer <= ${maxSize}`,
+      required: [`${sizeKey} positive integer <= ${maxSize}`],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function positiveIntegerParam(input, key, defaultValue) {
+  return Object.hasOwn(input, key) ? Math.trunc(input[key]) : defaultValue;
+}
+
+function archivesRelationType(input) {
+  return isNonEmptyString(input.relation_type) ? input.relation_type.trim() : "same_device_registered";
+}
+
+function safeCode(value) {
+  return isNonEmptyString(value) && SAFE_CODE_PATTERN.test(value.trim());
+}
+
+function safeLabel(value) {
+  return isNonEmptyString(value) && /^[A-Za-z0-9_.:-]{1,128}$/.test(value.trim());
+}
+
+function validSafeLabelList(value) {
+  return Array.isArray(value) && value.length <= 50 && value.every(safeLabel);
+}
+
+function safeLabelList(value, defaultValue) {
+  if (!Array.isArray(value)) {
+    return defaultValue;
+  }
+  return value.filter(safeLabel).map((item) => item.trim()).slice(0, 50);
 }
 
 function outputScope(input) {
@@ -3220,6 +3855,360 @@ function mockTrackAnalysisDeviceSummary(input) {
       "data.deviceIds[].lastActiveTime"
     ]
   };
+}
+
+function summarizeFixedShapeActionResponse(sectionName) {
+  return (value, input = {}) => {
+    const apiCode = readApiCode(value);
+    if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
+      return {
+        sourceStatus: "blocked",
+        errorType: "platform_error",
+        summary: {
+          [sectionName]: {
+            source_status: "blocked",
+            api_code: apiCode,
+            top_level_keys: observedKeys(value),
+            raw_full_body_suppressed: true,
+            no_data: false,
+            no_data_not_risk_exclusion: true
+          }
+        }
+      };
+    }
+
+    const payload = Object.hasOwn(value || {}, "data") ? value.data : value;
+    const arraySummaries = collectArraySummaries(value);
+    const noData = isEmptyPayload(payload) || (
+      arraySummaries.length > 0 && arraySummaries.every((item) => item.count === 0)
+    );
+    return {
+      sourceStatus: noData ? "no_data" : "completed",
+      errorType: null,
+      summary: {
+        [sectionName]: {
+          source_status: noData ? "no_data" : "completed",
+          api_code: apiCode,
+          top_level_keys: observedKeys(value),
+          data_keys: observedKeys(payload),
+          array_paths_observed: arraySummaries,
+          entity_samples: collectRiskEntitySamples(value, input),
+          trace_id_present: hasFieldDeep(value, /^traceId$/i),
+          query_id_present: hasFieldDeep(value, /^queryId$/i),
+          response_shape_summary_only: true,
+          raw_full_body_suppressed: true,
+          no_data: noData,
+          no_data_not_risk_exclusion: true
+        }
+      }
+    };
+  };
+}
+
+function collectArraySummaries(value, path = "response", depth = 0, output = []) {
+  if (depth > 5 || value === null || value === undefined || output.length >= 20) {
+    return output;
+  }
+  if (Array.isArray(value)) {
+    output.push({ path, count: value.length });
+    for (const item of value.slice(0, 3)) {
+      collectArraySummaries(item, `${path}[]`, depth + 1, output);
+    }
+    return output;
+  }
+  if (typeof value !== "object") {
+    return output;
+  }
+  for (const [key, child] of Object.entries(value).slice(0, 50)) {
+    collectArraySummaries(child, `${path}.${safeFieldName(key)}`, depth + 1, output);
+  }
+  return output;
+}
+
+function collectRiskEntitySamples(value, input, depth = 0, output = {}) {
+  if (depth > 5 || value === null || value === undefined || Object.keys(output).length >= 20) {
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 20)) {
+      collectRiskEntitySamples(item, input, depth + 1, output);
+    }
+    return output;
+  }
+  if (!isPlainObject(value)) {
+    return output;
+  }
+
+  for (const [key, child] of Object.entries(value).slice(0, 80)) {
+    const normalizedKey = riskEntityFieldName(key);
+    if (normalizedKey && output[normalizedKey] === undefined && ["string", "number", "boolean"].includes(typeof child)) {
+      output[normalizedKey] = displayRiskEntity(normalizedKey, child, input);
+    }
+    if (child && typeof child === "object") {
+      collectRiskEntitySamples(child, input, depth + 1, output);
+    }
+  }
+  return output;
+}
+
+function riskEntityFieldName(key) {
+  const text = String(key);
+  if (/^(userId|user_id|uid|userIds)$/i.test(text)) {
+    return "user_id";
+  }
+  if (/^(deviceId|device_id|did|deviceDid|dids)$/i.test(text)) {
+    return "deviceId";
+  }
+  if (/^(ip|ipAddr|ip_address|clientIp|remoteIp|loginIp|userIpDesc)$/i.test(text)) {
+    return "ip";
+  }
+  if (/^(eventId|eventType|sourceId|hitFusePolicyCode|policyCode|policyTreeCode|policyTreeVersion|policyTreeNodeCode)$/i.test(text)) {
+    return text;
+  }
+  if (/^(photoId|photo_id|liveId|live_id)$/i.test(text)) {
+    return text;
+  }
+  return null;
+}
+
+function hasFieldDeep(value, pattern, depth = 0) {
+  if (depth > 5 || value === null || value === undefined) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).some((item) => hasFieldDeep(item, pattern, depth + 1));
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  for (const [key, child] of Object.entries(value).slice(0, 80)) {
+    if (pattern.test(String(key))) {
+      return true;
+    }
+    if (hasFieldDeep(child, pattern, depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mockFixedActionData(sectionName, input, request, responseValue, extra = {}) {
+  const summary = summarizeFixedShapeActionResponse(sectionName)(responseValue, input).summary[sectionName];
+  return {
+    shape_summary_only: true,
+    fixed_path: String(request.path || "").split("?")[0],
+    request: {
+      method: request.method,
+      display_path: request.displayPath || request.path,
+      body_fields: Object.keys(request.body || {}),
+      companion_paths: request.companionPaths || []
+    },
+    [sectionName]: {
+      ...summary,
+      ...extra
+    },
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockArchivesUserAnalysisData(input) {
+  const request = buildArchivesUserAnalysisRequest(input);
+  return mockFixedActionData(
+    "archives_user_analysis",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        dataList: [
+          {
+            userId: input.user_id,
+            deviceId: "ANDROID_mock_archives_device",
+            ip: "10.20.30.10",
+            eventTime: input.beginTime + 1000,
+            operationType: "loginStart",
+            result: "SUCCESS"
+          }
+        ],
+        totalCount: 1
+      }
+    },
+    {
+      operation_filters: [...ARCHIVES_USER_ANALYSIS_FILTER_FIELDS],
+      requestParam_extraParam_suppressed: true
+    }
+  );
+}
+
+function mockArchivesUserProfileData(input) {
+  const request = buildArchivesUserProfileRequest(input);
+  return mockFixedActionData(
+    "archives_user_profile",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        userId: input.user_id,
+        accountStatus: "shape_only_present",
+        labelSummary: { count: 1 },
+        riskInfo: { riskInfoPresent: true }
+      }
+    },
+    {
+      raw_profile_body_suppressed: true
+    }
+  );
+}
+
+function mockArchivesPhotoSearchData(input) {
+  const request = buildArchivesPhotoSearchRequest(input);
+  return mockFixedActionData(
+    "archives_photo_search",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        dataList: [
+          {
+            userId: input.user_id,
+            photoId: "photo_mock_1",
+            publishTime: input.begin + 1000,
+            status: "shape_only_present"
+          }
+        ],
+        totalCount: 1
+      }
+    },
+    {
+      raw_report_text_suppressed: true
+    }
+  );
+}
+
+function mockArchivesRelatedUsersData(input) {
+  const request = buildArchivesRelatedUsersRequest(input);
+  return mockFixedActionData(
+    "archives_related_users",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        dataList: [
+          {
+            userId: "123456789",
+            deviceId: "ANDROID_mock_related_device",
+            relationType: archivesRelationType(input)
+          }
+        ],
+        totalCount: 1
+      }
+    },
+    {
+      raw_related_user_profile_suppressed: true
+    }
+  );
+}
+
+function mockRcpEventDetailData(input) {
+  const request = buildRcpEventDetailRequest(input);
+  return mockFixedActionData(
+    "rcp_event_detail",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        eventType: input.eventType,
+        eventId: input.eventId,
+        sourceId: "mock_source_id",
+        deviceId: "ANDROID_mock_rcp_device",
+        hitFusePolicyCode: "mock_policy_code",
+        _occurTime: input.queryTime,
+        realTimeFeedback: "shape_only_present"
+      }
+    },
+    {
+      raw_detail_body_suppressed: true,
+      strategy_event_not_final_judgement: true
+    }
+  );
+}
+
+function mockRcpEventFeatureListData(input) {
+  const request = buildRcpEventFeatureListRequest(input);
+  return mockFixedActionData(
+    "rcp_event_feature_list",
+    input,
+    request,
+    {
+      code: 0,
+      data: [
+        {
+          eventType: input.eventType,
+          eventId: input.eventId,
+          featureGroup: "",
+          featureKey: "shape_only_feature",
+          checkResult: true
+        }
+      ]
+    },
+    {
+      raw_feature_values_suppressed: true,
+      strategy_feature_snapshot_not_final_judgement: true
+    }
+  );
+}
+
+function mockRcpPolicyTreeLookupData(input) {
+  const request = buildRcpPolicyTreeLookupRequest(input);
+  return mockFixedActionData(
+    "rcp_policy_tree_lookup",
+    input,
+    request,
+    {
+      code: 0,
+      data: {
+        policyTreeCode: input.policyTreeCode,
+        policyTreeVersion: input.policyTreeVersion,
+        policyTreeNodeCode: "53187346034508",
+        targetPolicyCode: input.targetPolicyCode || null,
+        children: []
+      }
+    },
+    {
+      policyTreeList_is_coarse_filter: true,
+      raw_policy_tree_body_suppressed: true,
+      raw_node_binding_list_suppressed: true,
+      raw_all_policy_code_list_suppressed: true,
+      strategy_governance_only: true
+    }
+  );
+}
+
+function mockTrackAnalysisCheckDataReadyData(input) {
+  const request = buildTrackAnalysisCheckDataReadyRequest(input);
+  return mockFixedActionData(
+    "track_analysis_check_data_ready",
+    input,
+    request,
+    {
+      code: 0,
+      message: "shape_only_present",
+      data: {
+        dateStatus: {
+          ready: true
+        },
+        traceId: "mock_trace_id_value_suppressed"
+      }
+    },
+    {
+      readiness_not_evidence: true,
+      trace_id_value_suppressed: true
+    }
+  );
 }
 
 function fixedMockTime() {
