@@ -93,17 +93,18 @@ request explicitly names the relevant platform action/domain.
 These names are known non-noise candidates, but they are not service actions in
 this repo today. They cannot be called until a fixed path, typed params, origin
 binding, mock tests, and live smoke have been added through the normal action
-promotion process.
+promotion process. See `BLOCKED_ACTIONS.md` for the exact missing contract
+material for each candidate.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `archives_private_message_search` | Archives Center / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires strict fixed path, typed params, and output safety review before allowlist. |
-| `archives_past_four_items` | Archives Center / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires fixed path, typed params, mock, and live smoke. |
-| `rcp_policy_version_lookup` | RCP / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires service registration and fixed RCP path. |
-| `rcp_policy_detail_lookup` | RCP / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires service registration and fixed RCP path. |
-| `rcp_policy_release_record_lookup` | RCP / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires service registration and fixed RCP path. |
-| `rcp_node_policy_attribution` | RCP / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires bounded attribution contract before allowlist. |
-| `rcp_node_bind_policy_attribution` | RCP / pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; requires bounded attribution contract before allowlist. |
+| `archives_private_message_search` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
+| `archives_past_four_items` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
+| `rcp_policy_version_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; no action-level mapping from existing RCP companion paths to this contract. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
+| `rcp_node_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing bounded service action contract. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; no typed contract for the existing node-binding companion path. |
 
 ## Excluded Noise
 
@@ -137,16 +138,16 @@ using the same service-layer fields.
 | `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `live_smoke_verified`; partial broader page | `open_explicit` | Fixed request body from typed fields only. |
 | `archives_photo_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/photo/search` | `user_id`, `begin`, `end`, optional page/filter params | `compat_summary` / `passthrough` | yes | yes | yes | `no_data` smoke | `contract_ready` | Fixed path and typed params only. |
 | `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
-| `archives_private_message_search` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
-| `archives_past_four_items` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
+| `archives_private_message_search` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `archives_past_four_items` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
 | `rcp_event_detail` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, `queryTime` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Typed event identity only. |
 | `rcp_event_feature_list` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, `queryTime`, optional empty `featureGroup` | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `partial_observation_available` | `open_explicit` | Large upstream body may be omitted/capped. |
-| `rcp_policy_version_lookup` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
-| `rcp_policy_detail_lookup` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
-| `rcp_policy_release_record_lookup` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
+| `rcp_policy_version_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
 | `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version only. |
-| `rcp_node_policy_attribution` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
-| `rcp_node_bind_policy_attribution` | pending | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable. |
+| `rcp_node_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
 | `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, `startTime`, `endTime`, optional filters | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `contract_ready` | Fixed readiness path and typed params only. |
 
 ## Promotion Requirements

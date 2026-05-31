@@ -20,6 +20,10 @@ platform URLs.
 - `PASSTHROUGH_SERVICE_CONTRACT.md` - `response_mode=passthrough` service
   contract; current default `compat_summary` behavior remains the stable
   baseline.
+- `ACTION_REGISTRY.md` - service-layer fixed action registry for controlled
+  passthrough actions, typed params, fixed paths, and open status.
+- `BLOCKED_ACTIONS.md` - non-noise action candidates that are not callable yet
+  because fixed path, typed params, or source contract material is missing.
 - `TEAM_LOCAL_SETUP.md` - teammate setup guide for installing, opening profile,
   refreshing auth state, and starting the local service.
 - `TROUBLESHOOTING.md` - common local setup, profile, auth, origin readiness,

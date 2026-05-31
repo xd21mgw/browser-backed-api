@@ -101,6 +101,28 @@ const LIVE_SMOKE_READY_ACTIONS = Object.freeze([
   "track_analysis_check_data_ready"
 ]);
 
+const INVENTORY_PENDING_ACTIONS = Object.freeze([
+  "archives_private_message_search",
+  "archives_past_four_items",
+  "rcp_policy_version_lookup",
+  "rcp_policy_detail_lookup",
+  "rcp_policy_release_record_lookup",
+  "rcp_node_policy_attribution",
+  "rcp_node_bind_policy_attribution"
+]);
+
+const EXCLUDED_NOISE_ACTIONS = Object.freeze([
+  "telemetry",
+  "radar_misc_log_collect",
+  "log_sdk",
+  "js_css_static_assets",
+  "h5_fingerprint",
+  "mobile_device_info",
+  "menu_config_probe",
+  "arbitrary_url_fetch",
+  "cookie_token_session_header"
+]);
+
 let authEnvCounter = 0;
 
 function createAuthEnv() {
@@ -265,6 +287,20 @@ test("actions endpoint exposes the fixed allowlist only", () => {
     assert.equal(action.input_contract.response_mode, "optional enum compat_summary|passthrough; default compat_summary");
     assert.equal(action.response_policy.includes_source_card, true);
     assert.equal(action.response_policy.passthrough_includes_source_card, false);
+  }
+});
+
+test("inventory-pending candidates remain blocked until fixed contracts exist", () => {
+  for (const actionName of INVENTORY_PENDING_ACTIONS) {
+    assert.equal(Object.hasOwn(ACTIONS, actionName), false);
+    assert.equal(ACTION_ALLOWLIST.includes(actionName), false);
+  }
+});
+
+test("excluded noise categories are not registered as actions", () => {
+  for (const actionName of EXCLUDED_NOISE_ACTIONS) {
+    assert.equal(Object.hasOwn(ACTIONS, actionName), false);
+    assert.equal(ACTION_ALLOWLIST.includes(actionName), false);
   }
 });
 
