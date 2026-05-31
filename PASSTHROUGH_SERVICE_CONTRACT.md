@@ -23,12 +23,22 @@ automatic disposal.
 baseline used by existing callers, including the controlled Dennis full-runtime
 pilot.
 
-`passthrough` mode is an additive opt-in response mode. It must not replace the
-default behavior until downstream parsers and migration checks are ready.
+`passthrough` mode is an additive opt-in response mode for actions that already
+have a `compat_summary` baseline. It must not replace existing default behavior
+until downstream parsers and migration checks are ready.
 
-During migration, a single fixed action may support both:
+New actions that have no `compat_summary` baseline may be registered as
+passthrough-only. Those actions must not generate `source_card`,
+`source_quality`, evidence summaries, no-data interpretation, or risk
+judgment inside this service.
+
+During migration, an existing fixed action may support both:
 
 - `response_mode=compat_summary`
+- `response_mode=passthrough`
+
+A newly promoted passthrough-only action supports:
+
 - `response_mode=passthrough`
 
 ## Service Responsibilities
@@ -166,17 +176,20 @@ The service listens only on `127.0.0.1`.
 Compatibility rules:
 
 - Existing `compat_summary` behavior stays stable.
-- `response_mode=passthrough` is additive.
-- Adding passthrough support must not change default action output.
+- `response_mode=passthrough` is additive for existing dual-mode actions.
+- Adding passthrough support must not change existing default action output.
 - Dennis or another upper layer must opt in explicitly before receiving
-  passthrough output.
+  passthrough output for dual-mode actions.
 - The default may change only after downstream passthrough parser support,
   side-by-side comparison, and migration sign-off.
+- Passthrough-only actions may default to `passthrough` because no
+  `compat_summary` output existed for them.
 
 Migration period:
 
-- The same action may support both `compat_summary` and `passthrough`.
-- Tests must cover both modes.
+- Existing actions may support both `compat_summary` and `passthrough`.
+- Passthrough-only actions must reject `compat_summary`.
+- Tests must cover supported modes.
 - Live smoke must verify that passthrough does not output credential material.
 - The allowlist remains unchanged unless a separate source-contract promotion
   process adds a new fixed action.
@@ -209,7 +222,7 @@ Initial stable passthrough actions:
 - `weapon_inventory`
 - `login_logs_search`
 
-Future candidate actions:
+Additional explicit dual-mode actions:
 
 - `archives_user_profile`
 - `archives_user_analysis`
@@ -218,6 +231,19 @@ Future candidate actions:
 - `rcp_event_detail`
 - `rcp_event_feature_list`
 - `rcp_policy_tree_lookup`
+
+Recovered passthrough-only actions:
+
+- `archives_private_message_search`
+- `archives_past_four_items`
+- `rcp_policy_version_lookup`
+- `rcp_policy_detail_lookup`
+- `rcp_policy_release_record_lookup`
+- `rcp_node_policy_attribution`
+- `rcp_node_bind_policy_attribution`
+
+Future candidate actions:
+
 - Content, social, dashboard, and Grafana-style fixed actions after inventory
   and source-contract promotion.
 
@@ -290,6 +316,9 @@ Completed in the service:
 2. Add passthrough mock tests for the four stable actions:
    `track_analysis_summary`, `rcp_snapshot`, `weapon_inventory`, and
    `login_logs_search`.
+3. Add seven recovered passthrough-only actions with fixed origin/path, typed
+   params, passthrough envelope tests, forbidden input tests, response size
+   guard tests, and credential-material output tests.
 
 Remaining downstream work:
 

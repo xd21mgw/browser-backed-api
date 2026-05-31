@@ -19,7 +19,12 @@ export const ORIGIN_REGISTRY = Object.freeze({
       "rcp_snapshot",
       "rcp_event_detail",
       "rcp_event_feature_list",
-      "rcp_policy_tree_lookup"
+      "rcp_policy_version_lookup",
+      "rcp_policy_detail_lookup",
+      "rcp_policy_release_record_lookup",
+      "rcp_policy_tree_lookup",
+      "rcp_node_policy_attribution",
+      "rcp_node_bind_policy_attribution"
     ],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
     enabled: true,
@@ -66,7 +71,9 @@ export const ORIGIN_REGISTRY = Object.freeze({
       "archives_user_analysis",
       "archives_user_profile",
       "archives_photo_search",
-      "archives_related_users"
+      "archives_related_users",
+      "archives_private_message_search",
+      "archives_past_four_items"
     ],
     refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
     enabled: true,

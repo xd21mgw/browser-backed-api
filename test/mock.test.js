@@ -60,6 +60,23 @@ const MOCK_ACTION_INPUTS = Object.freeze({
     user_id: "2871834924",
     relation_type: "same_device_registered"
   },
+  archives_private_message_search: {
+    user_id: "2871834924",
+    direction: "sent",
+    page: 1,
+    count: 20,
+    status: "",
+    sort: "0"
+  },
+  archives_past_four_items: {
+    user_id: "2871834924",
+    info_type: "profile_description",
+    infoType: 3,
+    page: 1,
+    count: 20,
+    markResult: "",
+    punishResult: ""
+  },
   rcp_event_detail: {
     eventType: "USER_REGISTER_NEW",
     eventId: "mock_event_id",
@@ -71,10 +88,44 @@ const MOCK_ACTION_INPUTS = Object.freeze({
     queryTime: 1780000000000,
     featureGroup: ""
   },
+  rcp_policy_version_lookup: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    policyCode: "mock_policy_code",
+    policyVersion: 5,
+    queryTime: 1780000000000
+  },
+  rcp_policy_detail_lookup: {
+    policyCode: "mock_policy_code",
+    policyVersion: 5
+  },
+  rcp_policy_release_record_lookup: {
+    policyCode: "mock_policy_code",
+    statusCode: "",
+    page: 1,
+    size: 20
+  },
   rcp_policy_tree_lookup: {
     policyTreeCode: "USER_REGISTER_NEW",
     policyTreeVersion: 887,
     targetPolicyCode: "mock_policy_code"
+  },
+  rcp_node_policy_attribution: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    policyCode: "mock_policy_code",
+    policyVersion: 5,
+    queryTime: 1780000000000,
+    region: "china",
+    type: ""
+  },
+  rcp_node_bind_policy_attribution: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    queryTime: 1780000000000,
+    policyTreeCode: "USER_REGISTER_NEW",
+    policyTreeVersion: 887,
+    policyTreeNodeCode: "53187346034508"
   },
   track_analysis_check_data_ready: {
     device_id: "ANDROID_mock_device_id",
@@ -101,7 +152,7 @@ const LIVE_SMOKE_READY_ACTIONS = Object.freeze([
   "track_analysis_check_data_ready"
 ]);
 
-const INVENTORY_PENDING_ACTIONS = Object.freeze([
+const RECOVERED_PASSTHROUGH_ACTIONS = Object.freeze([
   "archives_private_message_search",
   "archives_past_four_items",
   "rcp_policy_version_lookup",
@@ -110,6 +161,37 @@ const INVENTORY_PENDING_ACTIONS = Object.freeze([
   "rcp_node_policy_attribution",
   "rcp_node_bind_policy_attribution"
 ]);
+
+const RECOVERED_PASSTHROUGH_CONTRACTS = Object.freeze({
+  archives_private_message_search: {
+    method: "POST",
+    fixedPath: "/archives/user/message/search"
+  },
+  archives_past_four_items: {
+    method: "POST",
+    fixedPath: "/v4/audit/user/fourinfo/log/search"
+  },
+  rcp_policy_version_lookup: {
+    method: "GET",
+    fixedPath: "/v2/rest/pc/policy/getPolicyVersionListByEvent"
+  },
+  rcp_policy_detail_lookup: {
+    method: "GET",
+    fixedPath: "/v2/rest/pro/policy/getPolicyDetailByVersion"
+  },
+  rcp_policy_release_record_lookup: {
+    method: "POST",
+    fixedPath: "/v2/rest/common/pipeline/list"
+  },
+  rcp_node_policy_attribution: {
+    method: "POST",
+    fixedPath: "/v2/rest/pc/policy/nodePolicyAttribution"
+  },
+  rcp_node_bind_policy_attribution: {
+    method: "GET",
+    fixedPath: "/v2/rest/pc/policy/nodeBindPolicyAttribution"
+  }
+});
 
 const EXCLUDED_NOISE_ACTIONS = Object.freeze([
   "telemetry",
@@ -276,24 +358,45 @@ test("actions endpoint exposes the fixed allowlist only", () => {
     "archives_user_profile",
     "archives_photo_search",
     "archives_related_users",
+    "archives_private_message_search",
+    "archives_past_four_items",
     "rcp_event_detail",
     "rcp_event_feature_list",
+    "rcp_policy_version_lookup",
+    "rcp_policy_detail_lookup",
+    "rcp_policy_release_record_lookup",
     "rcp_policy_tree_lookup",
+    "rcp_node_policy_attribution",
+    "rcp_node_bind_policy_attribution",
     "track_analysis_check_data_ready"
   ]);
   for (const action of actionList) {
-    assert.equal(action.default_response_mode, "compat_summary");
-    assert.deepEqual(action.response_modes, ["compat_summary", "passthrough"]);
-    assert.equal(action.input_contract.response_mode, "optional enum compat_summary|passthrough; default compat_summary");
-    assert.equal(action.response_policy.includes_source_card, true);
+    if (RECOVERED_PASSTHROUGH_ACTIONS.includes(action.name)) {
+      assert.equal(action.default_response_mode, "passthrough");
+      assert.deepEqual(action.response_modes, ["passthrough"]);
+      assert.equal(action.input_contract.response_mode, "optional enum passthrough; default passthrough");
+      assert.equal(action.response_policy.includes_source_card, false);
+      assert.equal(action.response_policy.includes_source_quality, false);
+      assert.equal(action.response_policy.compat_summary_includes_source_card, false);
+    } else {
+      assert.equal(action.default_response_mode, "compat_summary");
+      assert.deepEqual(action.response_modes, ["compat_summary", "passthrough"]);
+      assert.equal(action.input_contract.response_mode, "optional enum compat_summary|passthrough; default compat_summary");
+      assert.equal(action.response_policy.includes_source_card, true);
+      assert.equal(action.response_policy.includes_source_quality, true);
+      assert.equal(action.response_policy.compat_summary_includes_source_card, true);
+    }
     assert.equal(action.response_policy.passthrough_includes_source_card, false);
   }
 });
 
-test("inventory-pending candidates remain blocked until fixed contracts exist", () => {
-  for (const actionName of INVENTORY_PENDING_ACTIONS) {
-    assert.equal(Object.hasOwn(ACTIONS, actionName), false);
-    assert.equal(ACTION_ALLOWLIST.includes(actionName), false);
+test("recovered passthrough candidates are registered as fixed passthrough-only actions", () => {
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    assert.equal(Object.hasOwn(ACTIONS, actionName), true);
+    assert.equal(ACTION_ALLOWLIST.includes(actionName), true);
+    assert.equal(ACTIONS[actionName].defaultResponseMode, "passthrough");
+    assert.deepEqual(ACTIONS[actionName].responseModes, ["passthrough"]);
+    assert.equal(ACTIONS[actionName].passthroughOnly, true);
   }
 });
 
@@ -703,11 +806,14 @@ test("prewarm reports per-origin status, latency, and error type", async () => {
   }
 });
 
-test("each action returns source card, source quality, latency, warm state, and sensitivity flag", async () => {
+test("compat_summary actions return source card, source quality, latency, warm state, and sensitivity flag", async () => {
   const service = createService();
   await service.prewarm();
 
   for (const actionName of ACTION_ALLOWLIST) {
+    if (RECOVERED_PASSTHROUGH_ACTIONS.includes(actionName)) {
+      continue;
+    }
     const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
 
     assert.equal(response.action, actionName);
@@ -757,6 +863,94 @@ test("stable actions support passthrough response mode in mock without source su
     assert.equal(response.upstream.content_type, "application/json");
     assert.equal(response.upstream.body && typeof response.upstream.body, "object");
     assertNoCredentialMaterial(response);
+  }
+});
+
+test("recovered passthrough actions return passthrough envelope by default in mock", async () => {
+  const service = createService();
+  await service.prewarm();
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, true);
+    assert.equal(response.upstream.status, 200);
+    assert.equal(response.upstream.content_type, "application/json");
+    assert.equal(response.upstream.body && typeof response.upstream.body, "object");
+    assert.equal(Object.hasOwn(response, "source_card"), false);
+    assert.equal(Object.hasOwn(response, "source_quality"), false);
+    assertNoCredentialMaterial(response);
+  }
+});
+
+test("recovered passthrough actions build fixed service-side requests", () => {
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const action = ACTIONS[actionName];
+    const contract = RECOVERED_PASSTHROUGH_CONTRACTS[actionName];
+    const request = buildActionBody(action, MOCK_ACTION_INPUTS[actionName]);
+
+    assert.equal(request.method, contract.method);
+    assert.equal(request.path.startsWith(contract.fixedPath), true);
+    assert.equal(request.path.startsWith("//"), false);
+    assert.equal(request.path.includes("http://"), false);
+    assert.equal(request.path.includes("https://"), false);
+    assert.equal(request.displayPath.startsWith(contract.fixedPath), true);
+
+    if (actionName === "archives_private_message_search") {
+      assert.equal(request.body.fromUserId, MOCK_ACTION_INPUTS[actionName].user_id);
+      assert.equal(Object.hasOwn(request.body, "toUserId"), false);
+      assert.equal(request.body.sort, "0");
+    }
+    if (actionName === "archives_past_four_items") {
+      assert.equal(request.body.keyword, MOCK_ACTION_INPUTS[actionName].user_id);
+      assert.equal(request.body.infoType, 3);
+    }
+    if (actionName === "rcp_policy_version_lookup") {
+      assert.equal(request.path.includes("policyCode=mock_policy_code"), true);
+      assert.equal(request.path.includes("policyVersion=5"), true);
+    }
+    if (actionName === "rcp_policy_release_record_lookup") {
+      assert.equal(request.body.extrbB, MOCK_ACTION_INPUTS[actionName].policyCode);
+      assert.deepEqual(request.body.pageInfoRequest, { page: 1, size: 20 });
+    }
+    if (actionName === "rcp_node_policy_attribution") {
+      assert.equal(request.body.region, "china");
+      assert.equal(request.body.type, "");
+    }
+    if (actionName === "rcp_node_bind_policy_attribution") {
+      assert.equal(request.path.includes("policyTreeNodeCode=53187346034508"), true);
+    }
+  }
+});
+
+test("recovered passthrough actions reject invalid typed params as parameter_error", async () => {
+  const service = createService();
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, {});
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, false);
+    assert.equal(response.error_type, "parameter_error");
+    assert.equal(response.upstream.body, null);
+  }
+});
+
+test("recovered passthrough actions reject compat_summary without source summaries", async () => {
+  const service = createService();
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, {
+      ...MOCK_ACTION_INPUTS[actionName],
+      response_mode: "compat_summary"
+    });
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, false);
+    assert.equal(response.error_type, "invalid_parameter");
+    assert.equal(Object.hasOwn(response, "source_card"), false);
+    assert.equal(Object.hasOwn(response, "source_quality"), false);
   }
 });
 
@@ -1465,6 +1659,130 @@ test("passthrough removes credential fields from upstream JSON body", async () =
   assertNoCredentialMaterial(response);
 });
 
+test("recovered passthrough actions preserve upstream error envelope", async () => {
+  const config = createLiveConfig();
+  const fetchResults = {};
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    fetchResults[actionName] = {
+      completed: true,
+      ok: false,
+      status: 503,
+      contentType: "application/json",
+      bodyText: JSON.stringify({
+        code: 503,
+        message: "mock upstream unavailable",
+        actionName
+      }),
+      bodyTruncated: false,
+      observedBytes: 120
+    };
+  }
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      archives: prewarmResult(config, "archives"),
+      rcp: prewarmResult(config, "rcp")
+    },
+    fetchResults
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, false);
+    assert.equal(response.upstream.status, 503);
+    assert.equal(response.upstream.content_type, "application/json");
+    assert.equal(response.upstream.body.actionName, actionName);
+    assert.equal(Object.hasOwn(response, "source_card"), false);
+    assertNoCredentialMaterial(response);
+  }
+});
+
+test("recovered passthrough actions apply response too large guard", async () => {
+  const config = createLiveConfig();
+  const fetchResults = {};
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    fetchResults[actionName] = {
+      completed: true,
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      bodyText: "{\"code\":0,\"data\":[",
+      bodyTruncated: true,
+      observedBytes: 2048
+    };
+  }
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      archives: prewarmResult(config, "archives"),
+      rcp: prewarmResult(config, "rcp")
+    },
+    fetchResults
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, false);
+    assert.equal(response.error_type, "response_too_large");
+    assert.equal(response.upstream.body, null);
+    assert.equal(response.upstream.body_omitted, true);
+    assert.equal(response.upstream.response_too_large, true);
+    assert.equal(Object.hasOwn(response, "source_card"), false);
+  }
+});
+
+test("recovered passthrough actions remove credential material from upstream body", async () => {
+  const config = createLiveConfig();
+  const fetchResults = {};
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    fetchResults[actionName] = {
+      completed: true,
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      bodyText: JSON.stringify({
+        code: 0,
+        data: {
+          user_id: "2871834924",
+          eventId: "mock_event_id",
+          token: "secret-token-value-123456",
+          nested: {
+            authorization: "Bearer secret-auth-value-123456",
+            cookie: "sid=secret-session-value-123456"
+          }
+        }
+      }),
+      bodyTruncated: false,
+      observedBytes: 256
+    };
+  }
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      archives: prewarmResult(config, "archives"),
+      rcp: prewarmResult(config, "rcp")
+    },
+    fetchResults
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    const response = await service.executeAction(actionName, MOCK_ACTION_INPUTS[actionName]);
+
+    assertPassthroughEnvelope(response, actionName);
+    assert.equal(response.ok, true);
+    assert.equal(response.safety.credential_material_output, false);
+    assert.equal(response.upstream.body.data.user_id, "2871834924");
+    assert.equal(Object.hasOwn(response.upstream.body.data, "token"), false);
+    assert.equal(Object.hasOwn(response.upstream.body.data.nested, "authorization"), false);
+    assert.equal(Object.hasOwn(response.upstream.body.data.nested, "cookie"), false);
+    assertNoCredentialMaterial(response);
+  }
+});
+
 test("forbidden action input terms still return 400", async () => {
   const service = createService();
   for (const key of ["url", "path", "headers", "header", "cookie", "token", "session", "secret", "authorization", "raw_body"]) {
@@ -1486,6 +1804,21 @@ test("passthrough forbidden action input terms still return 400", async () => {
       }),
       (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
     );
+  }
+});
+
+test("recovered passthrough actions reject forbidden input terms", async () => {
+  const service = createService();
+  for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
+    for (const key of ["url", "path", "headers", "header", "cookie", "token", "session", "secret", "authorization", "raw_body", "raw_query"]) {
+      await assert.rejects(
+        () => service.executeAction(actionName, {
+          ...MOCK_ACTION_INPUTS[actionName],
+          [key]: "blocked"
+        }),
+        (error) => error.statusCode === 400 && error.code === "forbidden_action_input"
+      );
+    }
   }
 });
 

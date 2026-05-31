@@ -11,9 +11,16 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "archives_user_profile",
   "archives_photo_search",
   "archives_related_users",
+  "archives_private_message_search",
+  "archives_past_four_items",
   "rcp_event_detail",
   "rcp_event_feature_list",
+  "rcp_policy_version_lookup",
+  "rcp_policy_detail_lookup",
+  "rcp_policy_release_record_lookup",
   "rcp_policy_tree_lookup",
+  "rcp_node_policy_attribution",
+  "rcp_node_bind_policy_attribution",
   "track_analysis_check_data_ready"
 ]);
 
@@ -48,6 +55,12 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "count",
   "matchType",
   "sort",
+  "status",
+  "direction",
+  "info_type",
+  "infoType",
+  "markResult",
+  "punishResult",
   "relation_type",
   "inputType",
   "type",
@@ -69,9 +82,15 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "eventId",
   "queryTime",
   "featureGroup",
+  "policyCode",
+  "policyVersion",
   "policyTreeCode",
   "policyTreeVersion",
+  "policyTreeNodeCode",
   "targetPolicyCode",
+  "statusCode",
+  "size",
+  "region",
   "output_scope"
 ]);
 
@@ -128,6 +147,7 @@ const DEFAULT_OUTPUT_SCOPE = "internal_risk_review";
 const OUTPUT_SCOPES = Object.freeze(["internal_risk_review", "external_share"]);
 const DEFAULT_RESPONSE_MODE = "compat_summary";
 const RESPONSE_MODES = Object.freeze(["compat_summary", "passthrough"]);
+const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
 const FIELD_CLASSIFICATION = Object.freeze({
   credential_secret: Object.freeze([
     "cookie",
@@ -182,6 +202,8 @@ const ARCHIVES_USER_ANALYSIS_PATH = "/v3/user/log/coreLogs/fetch";
 const ARCHIVES_PHOTO_SEARCH_PATH = "/v4/archives/report/photo/search";
 const ARCHIVES_USER_PROFILE_PATH = "/archives/user/home/info";
 const ARCHIVES_RELATED_USERS_PATH = "/archives/user/search/device";
+const ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH = "/archives/user/message/search";
+const ARCHIVES_PAST_FOUR_ITEMS_PATH = "/v4/audit/user/fourinfo/log/search";
 const ARCHIVES_MAX_PAGE_SIZE = 100;
 const ARCHIVES_USER_ANALYSIS_FILTER_FIELDS = Object.freeze([
   "loginStart",
@@ -197,13 +219,29 @@ const ARCHIVES_RELATED_USER_TYPES = Object.freeze({
   same_device_registered: 0,
   same_device_login: 1
 });
+const ARCHIVES_PRIVATE_MESSAGE_DIRECTIONS = Object.freeze({
+  sent: "fromUserId",
+  received: "toUserId"
+});
+const ARCHIVES_FOUR_INFO_TYPES = Object.freeze({
+  all: 0,
+  username: 1,
+  avatar: 2,
+  profile_description: 3,
+  background: 4
+});
 
 const RCP_EVENT_DETAIL_PATH = "/v2/rest/event/rcpEventDetail";
 const RCP_EVENT_FEATURE_LIST_PATH = "/v2/rest/event/rcpEventFeatureList";
+const RCP_POLICY_VERSION_LOOKUP_PATH = "/v2/rest/pc/policy/getPolicyVersionListByEvent";
+const RCP_POLICY_DETAIL_LOOKUP_PATH = "/v2/rest/pro/policy/getPolicyDetailByVersion";
+const RCP_POLICY_RELEASE_RECORD_PATH = "/v2/rest/common/pipeline/list";
 const RCP_POLICY_TREE_LOOKUP_PATH = "/v2/rest/pro/policyTree/queryProPolicyTree";
 const RCP_POLICY_TREE_LIST_PATH = "/v2/rest/pro/policyTree/policyTreeList";
 const RCP_POLICY_TREE_BINDING_BY_NODE_PATH = "/v2/rest/pro/policyTree/queryBindingByNodeCode";
 const RCP_POLICY_TREE_ALL_POLICY_CODE_PATH = "/v2/rest/pro/policyTree/getAllPolicyCodeByPage";
+const RCP_NODE_POLICY_ATTRIBUTION_PATH = "/v2/rest/pc/policy/nodePolicyAttribution";
+const RCP_NODE_BIND_POLICY_ATTRIBUTION_PATH = "/v2/rest/pc/policy/nodeBindPolicyAttribution";
 const SAFE_CODE_PATTERN = /^[A-Za-z0-9_:-]{1,128}$/;
 
 const FORBIDDEN_INPUT_KEYS = Object.freeze([
@@ -430,6 +468,51 @@ export const ACTIONS = Object.freeze({
     summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_related_users"),
     mockData: mockArchivesRelatedUsersData
   }),
+  archives_private_message_search: freezeAction({
+    name: "archives_private_message_search",
+    domainKey: "archives",
+    description: "Passthrough Archives Center private-message search for typed user direction and bounded page params.",
+    method: "POST",
+    apiPath: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string",
+      direction: "required enum sent|received; maps to fromUserId or toUserId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20",
+      status: "optional safe short string; default empty",
+      sort: "optional enum string 0|1; default 0"
+    },
+    validateParams: validateArchivesPrivateMessageSearchInput,
+    buildRequest: buildArchivesPrivateMessageSearchRequest,
+    mockData: mockArchivesPrivateMessageSearchData
+  }),
+  archives_past_four_items: freezeAction({
+    name: "archives_past_four_items",
+    domainKey: "archives",
+    description: "Passthrough Archives Center four-info change-log search for typed user and info type params.",
+    method: "POST",
+    apiPath: ARCHIVES_PAST_FOUR_ITEMS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to keyword",
+      info_type: "optional enum all|username|avatar|profile_description|background; default all",
+      infoType: "optional enum 0|1|2|3|4; must match info_type when both are provided",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20",
+      markResult: "optional safe short string; default empty",
+      punishResult: "optional safe short string; default empty"
+    },
+    validateParams: validateArchivesPastFourItemsInput,
+    buildRequest: buildArchivesPastFourItemsRequest,
+    mockData: mockArchivesPastFourItemsData
+  }),
   rcp_event_detail: freezeAction({
     name: "rcp_event_detail",
     domainKey: "rcp",
@@ -466,6 +549,65 @@ export const ACTIONS = Object.freeze({
     summarizeParseFailureResponse: summarizeRcpEventFeatureListParseFailureResponse,
     mockData: mockRcpEventFeatureListData
   }),
+  rcp_policy_version_lookup: freezeAction({
+    name: "rcp_policy_version_lookup",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy version lookup for typed event and policy identity params.",
+    method: "GET",
+    apiPath: RCP_POLICY_VERSION_LOOKUP_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      policyCode: "required safe policy code",
+      policyVersion: "required positive integer",
+      queryTime: "required exact event time epoch ms"
+    },
+    validateParams: validateRcpPolicyVersionLookupInput,
+    buildRequest: buildRcpPolicyVersionLookupRequest,
+    mockData: mockRcpPolicyVersionLookupData
+  }),
+  rcp_policy_detail_lookup: freezeAction({
+    name: "rcp_policy_detail_lookup",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy detail lookup for typed policy code and version.",
+    method: "GET",
+    apiPath: RCP_POLICY_DETAIL_LOOKUP_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code",
+      policyVersion: "required positive integer"
+    },
+    validateParams: validateRcpPolicyDetailLookupInput,
+    buildRequest: buildRcpPolicyDetailLookupRequest,
+    mockData: mockRcpPolicyDetailLookupData
+  }),
+  rcp_policy_release_record_lookup: freezeAction({
+    name: "rcp_policy_release_record_lookup",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy release-record lookup with a fixed pipeline list body.",
+    method: "POST",
+    apiPath: RCP_POLICY_RELEASE_RECORD_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code; maps to extrbB",
+      statusCode: "optional safe workflow status code; default empty",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicyReleaseRecordLookupInput,
+    buildRequest: buildRcpPolicyReleaseRecordLookupRequest,
+    mockData: mockRcpPolicyReleaseRecordLookupData
+  }),
   rcp_policy_tree_lookup: freezeAction({
     name: "rcp_policy_tree_lookup",
     domainKey: "rcp",
@@ -482,6 +624,51 @@ export const ACTIONS = Object.freeze({
     buildRequest: buildRcpPolicyTreeLookupRequest,
     summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_policy_tree_lookup"),
     mockData: mockRcpPolicyTreeLookupData
+  }),
+  rcp_node_policy_attribution: freezeAction({
+    name: "rcp_node_policy_attribution",
+    domainKey: "rcp",
+    description: "Passthrough RCP node policy attribution for typed event and policy identity params.",
+    method: "POST",
+    apiPath: RCP_NODE_POLICY_ATTRIBUTION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      policyCode: "required safe policy code",
+      policyVersion: "required positive integer",
+      queryTime: "required exact event time epoch ms",
+      region: "optional enum china|oversea|empty; default china",
+      type: "optional fixed empty string"
+    },
+    validateParams: validateRcpNodePolicyAttributionInput,
+    buildRequest: buildRcpNodePolicyAttributionRequest,
+    mockData: mockRcpNodePolicyAttributionData
+  }),
+  rcp_node_bind_policy_attribution: freezeAction({
+    name: "rcp_node_bind_policy_attribution",
+    domainKey: "rcp",
+    description: "Passthrough RCP node-binding policy attribution for typed event and resolved policy-tree node params.",
+    method: "GET",
+    apiPath: RCP_NODE_BIND_POLICY_ATTRIBUTION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      queryTime: "required exact event time epoch ms",
+      policyTreeCode: "required safe policy tree code",
+      policyTreeVersion: "required positive integer",
+      policyTreeNodeCode: "required safe resolved policy tree node code"
+    },
+    validateParams: validateRcpNodeBindPolicyAttributionInput,
+    buildRequest: buildRcpNodeBindPolicyAttributionRequest,
+    mockData: mockRcpNodeBindPolicyAttributionData
   }),
   track_analysis_check_data_ready: freezeAction({
     name: "track_analysis_check_data_ready",
@@ -514,6 +701,9 @@ assertAllowlistMatchesRegistry();
 export function listActions(config) {
   return Object.values(ACTIONS).map((action) => {
     const domain = config.domains[action.domainKey];
+    const responseModes = actionResponseModes(action);
+    const defaultResponseMode = actionDefaultResponseMode(action);
+    const includesCompatSummary = responseModes.includes("compat_summary");
     return {
       name: action.name,
       description: action.description,
@@ -521,19 +711,19 @@ export function listActions(config) {
       method: action.method,
       registry_status: action.registryStatus || "service_registered",
       platform_enabled: domain.enabled !== false,
-      default_response_mode: DEFAULT_RESPONSE_MODE,
-      response_modes: [...RESPONSE_MODES],
+      default_response_mode: defaultResponseMode,
+      response_modes: responseModes,
       default_runtime_routing: false,
       live_verified: false,
       input_contract: {
         ...action.inputContract,
-        response_mode: "optional enum compat_summary|passthrough; default compat_summary"
+        response_mode: responseModeContractText(responseModes, defaultResponseMode)
       },
       response_policy: {
-        includes_source_card: true,
-        includes_source_quality: true,
-        compat_summary_includes_source_card: true,
-        compat_summary_includes_source_quality: true,
+        includes_source_card: includesCompatSummary,
+        includes_source_quality: includesCompatSummary,
+        compat_summary_includes_source_card: includesCompatSummary,
+        compat_summary_includes_source_quality: includesCompatSummary,
         passthrough_includes_source_card: false,
         passthrough_includes_source_quality: false,
         raw_response_full_body: false,
@@ -587,7 +777,7 @@ export function runMockAction(action, input, config, meta = {}) {
     });
   }
   const data = action.mockData(safeInput);
-  const responseMode = actionResponseMode(safeInput);
+  const responseMode = actionResponseMode(safeInput, action);
   const sourceRequest = typeof action.buildRequest === "function"
     ? action.buildRequest(safeInput)
     : { path: action.apiPath, method: action.method };
@@ -1013,10 +1203,11 @@ export function validateActionInput(input) {
 }
 
 export function getActionParameterError(action, input) {
-  if (input && Object.hasOwn(input, "response_mode") && !RESPONSE_MODES.includes(input.response_mode)) {
+  const responseModes = actionResponseModes(action);
+  if (input && Object.hasOwn(input, "response_mode") && !responseModes.includes(input.response_mode)) {
     return {
-      message: "response_mode must be compat_summary or passthrough",
-      required: ["response_mode=compat_summary|passthrough"],
+      message: `response_mode must be ${responseModes.join(" or ")}`,
+      required: [`response_mode=${responseModes.join("|")}`],
       errorType: "invalid_parameter"
     };
   }
@@ -1163,25 +1354,137 @@ function buildArchivesRelatedUsersRequest(input) {
   };
 }
 
+function validateArchivesPrivateMessageSearchInput(input) {
+  const userError = validateDecimalUserId("archives_private_message_search", input);
+  if (userError) {
+    return userError;
+  }
+  if (!Object.hasOwn(ARCHIVES_PRIVATE_MESSAGE_DIRECTIONS, input.direction)) {
+    return {
+      message: "archives_private_message_search direction must be sent or received",
+      required: ["direction=sent|received"],
+      errorType: "parameter_error"
+    };
+  }
+  const pageError = validatePageControls("archives_private_message_search", input, 100, 20, "page", "count");
+  if (pageError) {
+    return pageError;
+  }
+  if (Object.hasOwn(input, "status") && !safeOptionalShortString(input.status)) {
+    return {
+      message: "archives_private_message_search status must be a safe short string",
+      required: ["status safe string <= 64 chars"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "sort") && !["0", "1"].includes(String(input.sort))) {
+    return {
+      message: "archives_private_message_search sort must be 0 or 1",
+      required: ["sort=0|1"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildArchivesPrivateMessageSearchRequest(input) {
+  const directionKey = ARCHIVES_PRIVATE_MESSAGE_DIRECTIONS[input.direction];
+  return {
+    path: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
+    displayPath: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
+    method: "POST",
+    body: {
+      [directionKey]: input.user_id.trim(),
+      status: Object.hasOwn(input, "status") ? String(input.status) : "",
+      sort: Object.hasOwn(input, "sort") ? String(input.sort) : "0",
+      page: positiveIntegerParam(input, "page", 1),
+      count: positiveIntegerParam(input, "count", 20)
+    }
+  };
+}
+
+function validateArchivesPastFourItemsInput(input) {
+  const userError = validateDecimalUserId("archives_past_four_items", input);
+  if (userError) {
+    return userError;
+  }
+  const infoTypeError = validateArchivesFourInfoType(input);
+  if (infoTypeError) {
+    return infoTypeError;
+  }
+  const pageError = validatePageControls("archives_past_four_items", input, 100, 20, "page", "count");
+  if (pageError) {
+    return pageError;
+  }
+  for (const key of ["markResult", "punishResult"]) {
+    if (Object.hasOwn(input, key) && !safeOptionalShortString(input[key])) {
+      return {
+        message: `archives_past_four_items ${key} must be a safe short string`,
+        required: [`${key} safe string <= 64 chars`],
+        errorType: "invalid_parameter"
+      };
+    }
+  }
+  return null;
+}
+
+function buildArchivesPastFourItemsRequest(input) {
+  return {
+    path: ARCHIVES_PAST_FOUR_ITEMS_PATH,
+    displayPath: ARCHIVES_PAST_FOUR_ITEMS_PATH,
+    method: "POST",
+    body: {
+      keyword: input.user_id.trim(),
+      infoType: archivesFourInfoTypeValue(input),
+      markResult: Object.hasOwn(input, "markResult") ? String(input.markResult) : "",
+      punishResult: Object.hasOwn(input, "punishResult") ? String(input.punishResult) : "",
+      page: positiveIntegerParam(input, "page", 1),
+      count: positiveIntegerParam(input, "count", 20)
+    }
+  };
+}
+
 function validateRcpEventIdentityInput(input) {
+  return validateRcpEventIdentityForAction("rcp_event_detail", input);
+}
+
+function validateRcpEventIdentityForAction(actionName, input) {
   if (!safeCode(input.eventType)) {
     return {
-      message: "rcp_event_detail requires a safe eventType",
+      message: `${actionName} requires a safe eventType`,
       required: ["eventType"],
       errorType: "parameter_error"
     };
   }
   if (!safeCode(input.eventId)) {
     return {
-      message: "rcp_event_detail requires a safe eventId",
+      message: `${actionName} requires a safe eventId`,
       required: ["eventId"],
       errorType: "parameter_error"
     };
   }
   if (!validPositiveInteger(input.queryTime)) {
     return {
-      message: "rcp_event_detail requires queryTime as a positive epoch millisecond integer",
+      message: `${actionName} requires queryTime as a positive epoch millisecond integer`,
       required: ["queryTime positive integer"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function validateRcpPolicyIdentityForAction(actionName, input) {
+  if (!safeCode(input.policyCode)) {
+    return {
+      message: `${actionName} requires a safe policyCode`,
+      required: ["policyCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.policyVersion)) {
+    return {
+      message: `${actionName} requires policyVersion as a positive integer`,
+      required: ["policyVersion positive integer"],
       errorType: "parameter_error"
     };
   }
@@ -1246,6 +1549,101 @@ function buildRcpEventFeatureListRequest(input) {
   };
 }
 
+function validateRcpPolicyVersionLookupInput(input) {
+  const eventError = validateRcpEventIdentityForAction("rcp_policy_version_lookup", input);
+  if (eventError) {
+    return eventError;
+  }
+  return validateRcpPolicyIdentityForAction("rcp_policy_version_lookup", input);
+}
+
+function buildRcpPolicyVersionLookupRequest(input) {
+  const params = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: input.eventId.trim(),
+    policyCode: input.policyCode.trim(),
+    policyVersion: String(input.policyVersion),
+    queryTime: String(input.queryTime)
+  });
+  const displayParams = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: "[typed_event_id]",
+    policyCode: input.policyCode.trim(),
+    policyVersion: String(input.policyVersion),
+    queryTime: String(input.queryTime)
+  });
+  return {
+    path: `${RCP_POLICY_VERSION_LOOKUP_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_VERSION_LOOKUP_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyDetailLookupInput(input) {
+  return validateRcpPolicyIdentityForAction("rcp_policy_detail_lookup", input);
+}
+
+function buildRcpPolicyDetailLookupRequest(input) {
+  const params = new URLSearchParams({
+    policyCode: input.policyCode.trim(),
+    policyVersion: String(input.policyVersion)
+  });
+  return {
+    path: `${RCP_POLICY_DETAIL_LOOKUP_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_DETAIL_LOOKUP_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {},
+    companionPaths: [
+      "/v2/rest/pro/policy/getPolicyAllVersion",
+      "/v2/rest/pc/policyReview/getRelationPolicyTree"
+    ]
+  };
+}
+
+function validateRcpPolicyReleaseRecordLookupInput(input) {
+  if (!safeCode(input.policyCode)) {
+    return {
+      message: "rcp_policy_release_record_lookup requires a safe policyCode",
+      required: ["policyCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "statusCode") && !safeOptionalWorkflowCode(input.statusCode)) {
+    return {
+      message: "rcp_policy_release_record_lookup statusCode must be a safe workflow status code",
+      required: ["statusCode safe string <= 32 chars"],
+      errorType: "invalid_parameter"
+    };
+  }
+  const pageError = validatePageControls("rcp_policy_release_record_lookup", input, 100, 20, "page", "size");
+  if (pageError) {
+    return pageError;
+  }
+  return null;
+}
+
+function buildRcpPolicyReleaseRecordLookupRequest(input) {
+  return {
+    path: RCP_POLICY_RELEASE_RECORD_PATH,
+    displayPath: RCP_POLICY_RELEASE_RECORD_PATH,
+    method: "POST",
+    body: {
+      configCode: "",
+      createUser: "",
+      extrbA: "",
+      extrbB: input.policyCode.trim(),
+      extrbC: "",
+      pageInfoRequest: {
+        page: positiveIntegerParam(input, "page", 1),
+        size: positiveIntegerParam(input, "size", 20)
+      },
+      statusCode: Object.hasOwn(input, "statusCode") ? String(input.statusCode) : ""
+    },
+    companionPaths: ["/v2/rest/common/pipeline/selectInfo"]
+  };
+}
+
 function validateRcpPolicyTreeLookupInput(input) {
   if (!safeCode(input.policyTreeCode)) {
     return {
@@ -1290,6 +1688,103 @@ function buildRcpPolicyTreeLookupRequest(input) {
       RCP_POLICY_TREE_ALL_POLICY_CODE_PATH
     ],
     targetPolicyCode: isNonEmptyString(input.targetPolicyCode) ? input.targetPolicyCode.trim() : null
+  };
+}
+
+function validateRcpNodePolicyAttributionInput(input) {
+  const eventError = validateRcpEventIdentityForAction("rcp_node_policy_attribution", input);
+  if (eventError) {
+    return eventError;
+  }
+  const policyError = validateRcpPolicyIdentityForAction("rcp_node_policy_attribution", input);
+  if (policyError) {
+    return policyError;
+  }
+  if (Object.hasOwn(input, "region") && !["china", "oversea", ""].includes(input.region)) {
+    return {
+      message: "rcp_node_policy_attribution region must be china, oversea, or empty string",
+      required: ["region=china|oversea|empty"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "type") && input.type !== "") {
+    return {
+      message: "rcp_node_policy_attribution type must remain an empty string",
+      required: ["type empty string"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpNodePolicyAttributionRequest(input) {
+  return {
+    path: RCP_NODE_POLICY_ATTRIBUTION_PATH,
+    displayPath: RCP_NODE_POLICY_ATTRIBUTION_PATH,
+    method: "POST",
+    body: {
+      eventType: input.eventType.trim(),
+      eventId: input.eventId.trim(),
+      policyCode: input.policyCode.trim(),
+      policyVersion: input.policyVersion,
+      queryTime: input.queryTime,
+      region: Object.hasOwn(input, "region") ? input.region : "china",
+      type: ""
+    }
+  };
+}
+
+function validateRcpNodeBindPolicyAttributionInput(input) {
+  const eventError = validateRcpEventIdentityForAction("rcp_node_bind_policy_attribution", input);
+  if (eventError) {
+    return eventError;
+  }
+  if (!safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_node_bind_policy_attribution requires a safe policyTreeCode",
+      required: ["policyTreeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.policyTreeVersion)) {
+    return {
+      message: "rcp_node_bind_policy_attribution requires policyTreeVersion as a positive integer",
+      required: ["policyTreeVersion positive integer"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!safeCode(input.policyTreeNodeCode)) {
+    return {
+      message: "rcp_node_bind_policy_attribution requires a safe resolved policyTreeNodeCode",
+      required: ["policyTreeNodeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildRcpNodeBindPolicyAttributionRequest(input) {
+  const params = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: input.eventId.trim(),
+    queryTime: String(input.queryTime),
+    policyTreeCode: input.policyTreeCode.trim(),
+    policyTreeVersion: String(input.policyTreeVersion),
+    policyTreeNodeCode: input.policyTreeNodeCode.trim()
+  });
+  const displayParams = new URLSearchParams({
+    eventType: input.eventType.trim(),
+    eventId: "[typed_event_id]",
+    queryTime: String(input.queryTime),
+    policyTreeCode: input.policyTreeCode.trim(),
+    policyTreeVersion: String(input.policyTreeVersion),
+    policyTreeNodeCode: input.policyTreeNodeCode.trim()
+  });
+  return {
+    path: `${RCP_NODE_BIND_POLICY_ATTRIBUTION_PATH}?${params.toString()}`,
+    displayPath: `${RCP_NODE_BIND_POLICY_ATTRIBUTION_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
   };
 }
 
@@ -1440,8 +1935,54 @@ function archivesRelationType(input) {
   return isNonEmptyString(input.relation_type) ? input.relation_type.trim() : "same_device_registered";
 }
 
+function validateArchivesFourInfoType(input) {
+  if (Object.hasOwn(input, "info_type") && !Object.hasOwn(ARCHIVES_FOUR_INFO_TYPES, input.info_type)) {
+    return {
+      message: "archives_past_four_items info_type must be all, username, avatar, profile_description, or background",
+      required: ["info_type=all|username|avatar|profile_description|background"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "infoType") && ![0, 1, 2, 3, 4].includes(input.infoType)) {
+    return {
+      message: "archives_past_four_items infoType must be 0, 1, 2, 3, or 4",
+      required: ["infoType=0|1|2|3|4"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "info_type") && Object.hasOwn(input, "infoType")) {
+    const expected = ARCHIVES_FOUR_INFO_TYPES[input.info_type];
+    if (input.infoType !== expected) {
+      return {
+        message: "archives_past_four_items infoType must match info_type",
+        required: ["matching info_type and infoType"],
+        errorType: "invalid_parameter"
+      };
+    }
+  }
+  return null;
+}
+
+function archivesFourInfoTypeValue(input) {
+  if (Object.hasOwn(input, "info_type")) {
+    return ARCHIVES_FOUR_INFO_TYPES[input.info_type];
+  }
+  if (Object.hasOwn(input, "infoType")) {
+    return input.infoType;
+  }
+  return ARCHIVES_FOUR_INFO_TYPES.all;
+}
+
 function safeCode(value) {
   return isNonEmptyString(value) && SAFE_CODE_PATTERN.test(value.trim());
+}
+
+function safeOptionalShortString(value) {
+  return typeof value === "string" && value.length <= 64 && /^[A-Za-z0-9_.:-]*$/.test(value);
+}
+
+function safeOptionalWorkflowCode(value) {
+  return typeof value === "string" && value.length <= 32 && /^[A-Za-z0-9_:-]*$/.test(value);
 }
 
 function safeLabel(value) {
@@ -1463,8 +2004,26 @@ function outputScope(input) {
   return OUTPUT_SCOPES.includes(input?.output_scope) ? input.output_scope : DEFAULT_OUTPUT_SCOPE;
 }
 
-export function actionResponseMode(input) {
-  return RESPONSE_MODES.includes(input?.response_mode) ? input.response_mode : DEFAULT_RESPONSE_MODE;
+export function actionResponseMode(input, action = null) {
+  const responseModes = actionResponseModes(action);
+  if (responseModes.includes(input?.response_mode)) {
+    return input.response_mode;
+  }
+  return actionDefaultResponseMode(action);
+}
+
+function actionResponseModes(action) {
+  return Object.freeze([...(action?.responseModes || RESPONSE_MODES)]);
+}
+
+function actionDefaultResponseMode(action) {
+  const responseModes = actionResponseModes(action);
+  const defaultMode = action?.defaultResponseMode || DEFAULT_RESPONSE_MODE;
+  return responseModes.includes(defaultMode) ? defaultMode : responseModes[0];
+}
+
+function responseModeContractText(responseModes, defaultResponseMode) {
+  return `optional enum ${responseModes.join("|")}; default ${defaultResponseMode}`;
 }
 
 function fieldClassificationSummary() {
@@ -4864,6 +5423,50 @@ function mockArchivesRelatedUsersData(input) {
   );
 }
 
+function mockArchivesPrivateMessageSearchData(input) {
+  const request = buildArchivesPrivateMessageSearchRequest(input);
+  return {
+    code: 0,
+    data: {
+      dataList: [
+        {
+          messageId: "mock_message_1",
+          fromUserId: input.direction === "sent" ? input.user_id : "772671837",
+          toUserId: input.direction === "received" ? input.user_id : "772671837",
+          status: request.body.status,
+          direction: input.direction,
+          createTime: 1780000001000
+        }
+      ],
+      totalCount: 1,
+      page: request.body.page,
+      count: request.body.count
+    }
+  };
+}
+
+function mockArchivesPastFourItemsData(input) {
+  const request = buildArchivesPastFourItemsRequest(input);
+  return {
+    code: 0,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          infoType: request.body.infoType,
+          markResult: request.body.markResult,
+          punishResult: request.body.punishResult,
+          updateTime: 1780000002000,
+          auditStatus: "shape_only_present"
+        }
+      ],
+      totalCount: 1,
+      page: request.body.page,
+      count: request.body.count
+    }
+  };
+}
+
 function mockRcpEventDetailData(input) {
   const request = buildRcpEventDetailRequest(input);
   return mockFixedActionData(
@@ -4914,6 +5517,63 @@ function mockRcpEventFeatureListData(input) {
   );
 }
 
+function mockRcpPolicyVersionLookupData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      eventType: input.eventType,
+      eventId: input.eventId,
+      queryTime: input.queryTime,
+      versions: [
+        {
+          policyVersion: input.policyVersion,
+          versionStr: `v${input.policyVersion}`,
+          status: "shape_only_present"
+        }
+      ]
+    }
+  };
+}
+
+function mockRcpPolicyDetailLookupData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      policyVersion: input.policyVersion,
+      policyName: "mock_policy_detail",
+      conditionList: [
+        {
+          conditionCode: "mock_condition",
+          result: true
+        }
+      ]
+    }
+  };
+}
+
+function mockRcpPolicyReleaseRecordLookupData(input) {
+  const request = buildRcpPolicyReleaseRecordLookupRequest(input);
+  return {
+    code: 0,
+    data: {
+      records: [
+        {
+          businessUnionKey: `${input.policyCode}_1_USER_REGISTER_NEW`,
+          pipelineVersion: "mock_pipeline_version",
+          statusCode: request.body.statusCode
+        }
+      ],
+      pagination: {
+        page: request.body.pageInfoRequest.page,
+        size: request.body.pageInfoRequest.size,
+        total: 1
+      }
+    }
+  };
+}
+
 function mockRcpPolicyTreeLookupData(input) {
   const request = buildRcpPolicyTreeLookupRequest(input);
   return mockFixedActionData(
@@ -4938,6 +5598,45 @@ function mockRcpPolicyTreeLookupData(input) {
       strategy_governance_only: true
     }
   );
+}
+
+function mockRcpNodePolicyAttributionData(input) {
+  return {
+    code: 0,
+    data: {
+      eventType: input.eventType,
+      eventId: input.eventId,
+      policyCode: input.policyCode,
+      policyVersion: input.policyVersion,
+      queryTime: input.queryTime,
+      conditionList: [
+        {
+          conditionCode: "mock_condition",
+          result: true
+        }
+      ]
+    }
+  };
+}
+
+function mockRcpNodeBindPolicyAttributionData(input) {
+  return {
+    code: 0,
+    data: {
+      eventType: input.eventType,
+      eventId: input.eventId,
+      queryTime: input.queryTime,
+      policyTreeCode: input.policyTreeCode,
+      policyTreeVersion: input.policyTreeVersion,
+      policyTreeNodeCode: input.policyTreeNodeCode,
+      nodebindingPolicyList: [
+        {
+          policyCode: "mock_bound_policy",
+          result: true
+        }
+      ]
+    }
+  };
 }
 
 function mockTrackAnalysisCheckDataReadyData(input) {

@@ -191,7 +191,7 @@ export class BrowserBackedApiService {
     }
 
     validateActionInput(input);
-    const responseMode = actionResponseMode(input || {});
+    const responseMode = actionResponseMode(input || {}, action);
     const passthrough = responseMode === "passthrough";
 
     const startedAt = Date.now();

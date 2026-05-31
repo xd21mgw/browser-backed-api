@@ -28,6 +28,7 @@ state.
 - `RISK_SOURCE_CAPABILITY_REGISTRY.md`
 - `BROWSER_BACKED_AGENT_SKILL.md`
 - `PASSTHROUGH_SERVICE_CONTRACT.md`
+- `CONTRACT_RECOVERY_REPORT.md`
 - `README.md`
 - `ONLINE_SOURCE_SUMMARY.md`
 - `RCP_SOURCE_CONTRACT.md`
@@ -88,24 +89,23 @@ request explicitly names the relevant platform action/domain.
 | `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode`, `response_mode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version params only; no arbitrary RCP policy path. |
 | `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, optional `product`, `category`, `event`, `appPlatform`, `metric`, `type`; required `startTime`, `endTime`; `response_mode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `contract_ready` | Fixed readiness path; typed device/time/filter arrays only. |
 
-## Contract-Recovered Candidates
+## Recovered Passthrough-Only Actions
 
-These names are known non-noise candidates and local contract recovery found
-fixed origin, method, path, and typed-param material for each one. They are not
-service actions in this repo today and cannot be called until action
-registration, typed validation, request builders, mock tests, and later live
-smoke are added through the normal promotion process. See
-`CONTRACT_RECOVERY_REPORT.md` and `BLOCKED_ACTIONS.md`.
+These non-noise actions were recovered from local contract material and are now
+registered as fixed passthrough-only service actions. They do not support
+`compat_summary`, do not generate `source_card` or `source_quality`, and do not
+perform business interpretation. Live smoke was not run in the implementation
+round.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional `page`, `count`, `status`, `sort` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
-| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional `info_type`, `infoType`, `page`, `count`, `markResult`, `punishResult` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
-| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
-| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; primary path only; companion reads need explicit design if added. |
-| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; request body must remain service-owned and typed. |
-| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
-| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; resolved `policyTreeNodeCode` is required and must not be guessed. |
+| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional `page`, `count`, `status`, `sort` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed body maps `direction` to `fromUserId` or `toUserId`; no caller URL/path/header/auth/raw body. |
+| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional `info_type`, `infoType`, `page`, `count`, `markResult`, `punishResult` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed body maps `user_id` to `keyword` and validates `infoType=0..4`; no arbitrary Archives query. |
+| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed query fields only; no caller URL/path/header/auth/raw query. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Primary fixed path only; companion reads remain service-owned follow-up design, not caller paths. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed body maps `extrbB=policyCode`; service-owned workflow fields; bounded pagination. |
+| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed event/policy identity body; fixed `type=""`; no arbitrary RCP fetch. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Requires resolved `policyTreeNodeCode`; service does not infer node code from labels or names. |
 
 ## Excluded Noise
 
@@ -139,22 +139,22 @@ using the same service-layer fields.
 | `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `live_smoke_verified`; partial broader page | `open_explicit` | Fixed request body from typed fields only. |
 | `archives_photo_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/photo/search` | `user_id`, `begin`, `end`, optional page/filter params | `compat_summary` / `passthrough` | yes | yes | yes | `no_data` smoke | `contract_ready` | Fixed path and typed params only. |
 | `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
-| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
-| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
+| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed private-message search body. |
+| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed four-info search body. |
 | `rcp_event_detail` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, `queryTime` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Typed event identity only. |
 | `rcp_event_feature_list` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, `queryTime`, optional empty `featureGroup` | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `partial_observation_available` | `open_explicit` | Large upstream body may be omitted/capped. |
-| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
-| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered primary contract; not callable until implemented. |
-| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
+| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed policy-version query. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed policy-detail query. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed release-record body. |
 | `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version only. |
-| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
-| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; resolved node code required. |
+| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed node-policy attribution body. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | `passthrough` only | yes | yes | yes | not run | `open_explicit` | Fixed node-bind attribution query. |
 | `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, `startTime`, `endTime`, optional filters | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `contract_ready` | Fixed readiness path and typed params only. |
 
 ## Promotion Requirements
 
 An `inventory_pending` or `contract_ready` candidate can become an allowlisted
-service action only after all of the following exist:
+mock-ready service action only after all of the following exist:
 
 - fixed `origin_key`
 - fixed method and same-origin path
@@ -162,7 +162,11 @@ service action only after all of the following exist:
 - forbidden input validation for URL/path/header/cookie/token/session/raw_body
 - passthrough safety policy for upstream body size and credential fields
 - mock tests
-- live smoke record
+- live smoke plan
+
+Live smoke is required before marking an action `live_smoke_verified`, but this
+registry may list a mock-ready action as allowlisted with `live_smoke_status=not
+run` when implementation intentionally avoids platform access.
 
 Adding a new action must not add arbitrary URL fetch, caller-provided request
 headers, browser auth material output, profile storage output, or automatic

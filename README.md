@@ -22,8 +22,9 @@ platform URLs.
   baseline.
 - `ACTION_REGISTRY.md` - service-layer fixed action registry for controlled
   passthrough actions, typed params, fixed paths, and open status.
-- `BLOCKED_ACTIONS.md` - non-noise action candidates that are not callable yet
-  because fixed path, typed params, or source contract material is missing.
+- `BLOCKED_ACTIONS.md` - non-noise action candidates that are not callable yet;
+  the recovered seven-action batch is now cleared and allowlisted as
+  passthrough-only.
 - `TEAM_LOCAL_SETUP.md` - teammate setup guide for installing, opening profile,
   refreshing auth state, and starting the local service.
 - `TROUBLESHOOTING.md` - common local setup, profile, auth, origin readiness,
@@ -47,6 +48,25 @@ automatic disposal, permission bypass, DataAgent/Hive calls, or final risk
 classification. See `RISK_SOURCE_CAPABILITY_REGISTRY.md` before calling beta or
 explicit capabilities.
 
+## Current Passthrough-Only Actions
+
+These recovered actions are fixed, typed, and allowlisted, but they intentionally
+do not support `compat_summary`. They return only the passthrough envelope and
+upstream business response body.
+
+| action_name | origin_key | method | fixed_path |
+| --- | --- | --- | --- |
+| `archives_private_message_search` | `archives` | `POST` | `/archives/user/message/search` |
+| `archives_past_four_items` | `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` |
+| `rcp_policy_version_lookup` | `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` |
+| `rcp_policy_detail_lookup` | `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` |
+| `rcp_policy_release_record_lookup` | `rcp` | `POST` | `/v2/rest/common/pipeline/list` |
+| `rcp_node_policy_attribution` | `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` |
+| `rcp_node_bind_policy_attribution` | `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` |
+
+These actions do not generate `source_card`, `source_quality`, evidence
+summaries, no-data interpretation, or risk conclusions inside this service.
+
 The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and does not touch real platforms.
 
 ## Goals Covered
@@ -61,8 +81,10 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - Adds `source_card` and `source_quality` to every default `compat_summary`
   action response.
 - Does not call Playwright cookie/session/header inspection APIs.
-- Keeps `compat_summary` live outputs shape-only; opt-in `passthrough` returns a
-  controlled upstream response envelope.
+- Keeps existing `compat_summary` live outputs shape-only; opt-in `passthrough`
+  returns a controlled upstream response envelope for dual-mode actions.
+- Allows recovered passthrough-only actions to return only the upstream response
+  envelope, without summary/source-card/source-quality generation.
 - Exposes Dennis runtime-oriented health, prewarm, action latency, and source quality metadata.
 
 ## Files
@@ -269,9 +291,16 @@ Lists fixed actions and their input contracts. The allowlist is exactly:
 - `archives_user_profile`
 - `archives_photo_search`
 - `archives_related_users`
+- `archives_private_message_search`
+- `archives_past_four_items`
 - `rcp_event_detail`
 - `rcp_event_feature_list`
+- `rcp_policy_version_lookup`
+- `rcp_policy_detail_lookup`
+- `rcp_policy_release_record_lookup`
 - `rcp_policy_tree_lookup`
+- `rcp_node_policy_attribution`
+- `rcp_node_bind_policy_attribution`
 - `track_analysis_check_data_ready`
 
 ### `POST /prewarm`
@@ -303,13 +332,17 @@ Allowed action names:
 
 Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
 
-Every fixed action accepts optional `response_mode`:
+Every dual-mode fixed action accepts optional `response_mode`:
 
 - `compat_summary` is the default and preserves the existing `source_card`,
   `source_quality`, and evidence-summary response shape.
 - `passthrough` returns only the controlled upstream response envelope:
   `ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and
   `safety`.
+
+Passthrough-only recovered actions accept only `response_mode=passthrough` and
+default to passthrough. They reject `compat_summary` instead of producing a
+summary.
 
 Passthrough does not accept caller-provided URL, path, header, cookie, token,
 session, raw body, or raw query fields. It may forward upstream business
@@ -412,7 +445,7 @@ Track Analysis source status:
 - evidence use: activity summary, profile summary, device relation summary, and recency shape evidence
 - `no_data`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
 
-Every action response includes:
+Every `compat_summary` action response includes:
 
 - `latency_ms`
 - `origin_warmed`
@@ -422,13 +455,18 @@ Every action response includes:
 - `source_card`
 - `source_quality`
 
+Passthrough-only action responses include the passthrough envelope instead:
+`ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and `safety`.
+
 ## Safety Boundaries
 
 - No endpoint accepts a URL, origin, path, header, cookie, token, or session value from the caller.
 - Live fetches use `credentials: "include"` so the browser may use its own ambient login state, but the service does not read or return that state.
 - Refresh scripts use the persistent browser profile only through Playwright; they do not inspect cookie DBs, localStorage dumps, tokens, sessions, or request headers.
 - All actions still go through the fixed action allowlist in `src/actions.js`.
-- Response bodies are read only up to `MAX_LIVE_BODY_BYTES` for summarization, and returned live data is shape-only.
+- Response bodies are read only up to `MAX_LIVE_BODY_BYTES`; `compat_summary`
+  returns shape-only summaries, while passthrough returns the bounded upstream
+  business body or omits it when too large.
 - Sensitive-looking JSON key names are redacted in shape summaries.
 - Inputs containing URL-like values, raw header fields, raw cookie fields, tokens, sessions, or secrets are rejected with `forbidden_action_input`.
 - `external_share` masks risk entity identifiers; `internal_risk_review` can display the compact risk entity samples needed for fraud review.
@@ -466,7 +504,11 @@ Verify:
 
 - `/health` reports `service_mode: "live"`, `browser_initialized: true`, and `context_initialized: true`.
 - `/prewarm` returns one result per fixed origin and no unexpected `origin_mismatch`.
-- action responses include `source_card`, `source_quality`, `latency_ms`, `origin_warmed`, and `sensitive_output: false`.
+- dual-mode `compat_summary` action responses include `source_card`,
+  `source_quality`, `latency_ms`, `origin_warmed`, and `sensitive_output:
+  false`.
+- passthrough-only action responses include the passthrough envelope and no
+  `source_card` or `source_quality`.
 - no response contains raw cookies, tokens, sessions, request headers, or a full raw upstream response body.
 
 ## Local Checks
