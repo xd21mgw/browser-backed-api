@@ -6,15 +6,16 @@ This service runs locally on `127.0.0.1` and gives Agent, Skill, or local
 scripts a controlled way to call fixed risk-platform actions with typed params.
 Each teammate uses their own Chrome profile and their own platform permissions.
 The service maps a fixed action to a fixed origin/path, performs a same-origin
-browser-backed fetch, and returns either the legacy compatibility summary or a
-controlled upstream passthrough envelope.
+browser-backed fetch, and returns a controlled upstream passthrough envelope.
+The legacy `compat_summary` response shape remains available only as a
+deprecated migration fallback for old callers.
 
 Team-facing use should treat this as a passthrough access layer. The service
 does not read cookies, tokens, sessions, request headers, Chrome cookie DBs, or
 browser storage. It does not output authentication material. It does not perform
 business summary, evidence-card generation, `source_card`/`source_quality`
 generation, risk judgment, no-data interpretation, next-step recommendation,
-permission bypass, or DataAgent/Hive calls for passthrough-only use.
+permission bypass, or DataAgent/Hive calls in the target passthrough path.
 
 Current `action_count=19`.
 
@@ -26,8 +27,8 @@ Current `action_count=19`.
 - `BROWSER_BACKED_AGENT_SKILL.md` - Agent Skill draft for using the service as a
   browser-backed risk platform access layer.
 - `PASSTHROUGH_SERVICE_CONTRACT.md` - `response_mode=passthrough` service
-  contract; current default `compat_summary` behavior remains the stable
-  baseline.
+  contract; `compat_summary` is now documented as deprecated legacy migration
+  fallback.
 - `ACTION_REGISTRY.md` - service-layer fixed action registry for controlled
   passthrough actions, typed params, fixed paths, and open status.
 - `BLOCKED_ACTIONS.md` - non-noise action candidates that are not callable yet;
@@ -48,8 +49,10 @@ The fixed action allowlist currently contains 19 actions.
 
 ### Dual-Mode Actions
 
-These 12 actions support the legacy default `compat_summary` mode and opt-in
-`response_mode=passthrough`.
+These 12 actions still support the deprecated legacy `compat_summary` fallback
+and opt-in `response_mode=passthrough`. This Phase A marker does not change
+their default behavior, but no new action may add `compat_summary`; new actions
+must be passthrough-only.
 
 | action_name | origin_key |
 | --- | --- |
@@ -85,6 +88,21 @@ bounded upstream business response body.
 These actions do not generate `source_card`, `source_quality`, evidence
 summaries, no-data interpretation, or risk conclusions inside this service.
 
+## Phase A Deprecation Marker
+
+`compat_summary`, service-generated `source_card`, service-generated
+`source_quality`, and service-side evidence summaries are deprecated migration
+fallbacks. They remain present in this phase only to avoid breaking old callers.
+Do not add new summary logic to the service. New actions must be
+passthrough-only.
+
+Removal gates:
+
+1. Dennis `full_runtime` controlled pilot continues to pass on passthrough.
+2. All active consumers no longer depend on `compat_summary`.
+3. Reference scans are clean for default-path summary dependencies.
+4. Tests are updated to a passthrough-only baseline.
+
 The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and does not touch real platforms.
 
 ## Goals Covered
@@ -96,10 +114,12 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - Prewarms the fixed registry origins for enabled platforms in live mode.
 - Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
 - Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
-- Preserves legacy `compat_summary` output for existing callers.
+- Retains deprecated legacy `compat_summary` output only for existing callers
+  during migration.
 - Does not call Playwright cookie/session/header inspection APIs.
-- Keeps existing `compat_summary` live outputs shape-only; opt-in `passthrough`
-  returns a controlled upstream response envelope for dual-mode actions.
+- Keeps existing `compat_summary` live outputs shape-only as a deprecated
+  fallback; opt-in `passthrough` returns a controlled upstream response envelope
+  for dual-mode actions.
 - Allows recovered passthrough-only actions to return only the upstream response
   envelope, without summary/source-card/source-quality generation.
 - Exposes health, prewarm, action latency, and sanitized auth/origin metadata.
@@ -112,13 +132,14 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - `src/config.js` - environment loading and origin registry materialization.
 - `src/originRegistry.js` - extendable registry for fixed origins, warmup paths, TTLs, and action ownership.
 - `src/authState.js` - profile/state path helpers and sanitized refresh-state manager.
-- `src/quality.js` - legacy `compat_summary` quality and shape-only summarization helpers.
+- `src/quality.js` - deprecated legacy `compat_summary` quality and shape-only summarization helpers.
 
 ## Legacy Compat Summary Notes
 
 The notes in this section apply to the retained `compat_summary` compatibility
-mode. They do not define the service-layer passthrough contract for new
-team-facing use.
+mode. This mode is deprecated legacy migration fallback only. It does not define
+the service-layer passthrough contract for new team-facing use, and new actions
+must not add service-side summary/source-card/source-quality logic.
 
 See `ONLINE_SOURCE_SUMMARY.md` for the first batch browser-backed online source closure.
 See `browser_backed_live_smoke_readiness_v1.md` and `har_platform_interface_inventory_v1.md` for second-stage fixed action readiness and inventory.
@@ -354,10 +375,11 @@ listed in `ACTION_REGISTRY.md`.
 
 Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
 
-The 12 dual-mode fixed actions accept optional `response_mode`:
+The 12 legacy dual-mode fixed actions accept optional `response_mode`:
 
-- `compat_summary` is the default and preserves the existing `source_card`,
-  `source_quality`, and evidence-summary response shape.
+- `compat_summary` is the current default for legacy compatibility only. It is
+  deprecated and preserves the existing `source_card`, `source_quality`, and
+  evidence-summary response shape until fallback consumers are migrated.
 - `passthrough` returns only the controlled upstream response envelope:
   `ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and
   `safety`.
@@ -467,7 +489,7 @@ Track Analysis source status:
 - evidence use: activity summary, profile summary, device relation summary, and recency shape evidence
 - `no_data`, `auth_failed`, `blocked`, `timeout`, `network_error`, and `platform_error` are source completion/quality states, not no-risk counterevidence
 
-Every `compat_summary` action response includes:
+Every deprecated legacy `compat_summary` action response includes:
 
 - `latency_ms`
 - `origin_warmed`
@@ -486,9 +508,9 @@ Passthrough-only action responses include the passthrough envelope instead:
 - Live fetches use `credentials: "include"` so the browser may use its own ambient login state, but the service does not read or return that state.
 - Refresh scripts use the persistent browser profile only through Playwright; they do not inspect cookie DBs, localStorage dumps, tokens, sessions, or request headers.
 - All actions still go through the fixed action allowlist in `src/actions.js`.
-- Response bodies are read only up to `MAX_LIVE_BODY_BYTES`; `compat_summary`
-  returns shape-only summaries, while passthrough returns the bounded upstream
-  business body or omits it when too large.
+- Response bodies are read only up to `MAX_LIVE_BODY_BYTES`; deprecated
+  `compat_summary` returns shape-only summaries, while passthrough returns the
+  bounded upstream business body or omits it when too large.
 - Sensitive-looking JSON key names are redacted in shape summaries.
 - Inputs containing URL-like values, raw header fields, raw cookie fields, tokens, sessions, or secrets are rejected with `forbidden_action_input`.
 - `external_share` masks risk entity identifiers; `internal_risk_review` can display the compact risk entity samples needed for fraud review.
@@ -526,8 +548,8 @@ Verify:
 
 - `/health` reports `service_mode: "live"`, `browser_initialized: true`, and `context_initialized: true`.
 - `/prewarm` returns one result per fixed origin and no unexpected `origin_mismatch`.
-- dual-mode `compat_summary` action responses keep the legacy compatibility
-  shape.
+- dual-mode `compat_summary` action responses keep the deprecated legacy
+  compatibility shape.
 - passthrough action responses include the passthrough envelope and no
   `source_card` or `source_quality`.
 - no response contains cookies, tokens, sessions, request headers,

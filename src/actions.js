@@ -145,6 +145,11 @@ const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
 const DEFAULT_OUTPUT_SCOPE = "internal_risk_review";
 const OUTPUT_SCOPES = Object.freeze(["internal_risk_review", "external_share"]);
+// @deprecated legacy migration fallback. `compat_summary`, `source_card`,
+// `source_quality`, and service-side summary construction are retained only for
+// old callers during passthrough migration. Do not add new summary logic; new
+// actions must be passthrough-only. Scheduled for removal after passthrough-only
+// cutover and consumer reference scans pass.
 const DEFAULT_RESPONSE_MODE = "compat_summary";
 const RESPONSE_MODES = Object.freeze(["compat_summary", "passthrough"]);
 const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
@@ -833,6 +838,9 @@ export function runMockAction(action, input, config, meta = {}) {
   };
 }
 
+// @deprecated legacy compat_summary response builder. The target service path is
+// passthrough-only; summary/source_card/source_quality construction stays only
+// as migration fallback and must not be extended for new actions.
 export function buildLiveActionResponse(action, input, config, fetchResult, meta = {}) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
@@ -998,6 +1006,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   };
 }
 
+// @deprecated legacy compat_summary failure builder. Keep behavior stable until
+// explicit fallback consumers are removed; new failure paths should use the
+// passthrough envelope.
 export function buildLiveActionFailureResponse(action, input, config, meta = {}) {
   validateActionInput(input);
   const safeInput = sanitizeInput(input);
@@ -1059,6 +1070,9 @@ export function buildLiveActionFailureResponse(action, input, config, meta = {})
   };
 }
 
+// @deprecated legacy compat_summary parameter-error shape with source_card and
+// source_quality. New actions must be passthrough-only and use passthrough
+// failure envelopes.
 export function buildActionParameterErrorResponse(action, config, meta = {}) {
   const errorType = meta.parameterError?.errorType || "parameter_error";
   const sourceStatus = meta.parameterError?.sourceStatus || "parameter_error";
@@ -1108,6 +1122,8 @@ export function buildActionParameterErrorResponse(action, config, meta = {}) {
   };
 }
 
+// @deprecated legacy compat_summary platform-scope response with source_card and
+// source_quality. Retained only as migration fallback.
 export function buildActionDisabledByPlatformScopeResponse(action, config, meta = {}) {
   const errorType = "platform_not_enabled";
   const sourceStatus = "blocked";
@@ -2261,6 +2277,11 @@ function parseErrorDetail(fetchResult, parseErrorType) {
   return "invalid_or_unparseable_json";
 }
 
+// @deprecated All service-side `summarize*` helpers below belong to the legacy
+// compat_summary fallback path. Do not add new service summary/evidence logic
+// here; Dennis or another upper layer owns parser, normalized_observation,
+// source_quality, evidence cards, and risk reasoning. These helpers are
+// scheduled for removal after passthrough-only cutover.
 function summarizeRcpEventFeatureListParseFailureResponse(bodyText, input, meta = {}) {
   const fetchResult = meta.fetchResult || {};
   if (!fetchResult.bodyTruncated || meta.parseErrorType !== "parse_error") {

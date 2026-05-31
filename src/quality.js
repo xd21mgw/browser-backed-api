@@ -1,3 +1,8 @@
+// @deprecated Legacy compat_summary source_card/source_quality helpers.
+// Retained only as migration fallback for old callers. The target service path
+// is passthrough-only; Dennis or another upper layer owns source_quality,
+// evidence cards, and risk reasoning. Do not add new summary logic here.
+// Scheduled for removal after passthrough-only cutover and reference scans pass.
 export function buildSourceCard({ action, config, fetchMeta, mock, meta = {} }) {
   const domain = config.domains[action.domainKey];
   return {

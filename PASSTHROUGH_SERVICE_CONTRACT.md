@@ -1,8 +1,9 @@
 # Passthrough Service Contract
 
 This document defines the `response_mode=passthrough` contract for the
-browser-backed service. It is a service-layer contract only. It does not change
-the current stable default `compat_summary` behavior.
+browser-backed service. It is a service-layer contract only. `compat_summary`
+is deprecated legacy migration fallback; this Phase A marker does not delete it
+or change current behavior.
 
 ## Positioning
 
@@ -19,18 +20,16 @@ automatic disposal.
 
 ## Current Compatibility Baseline
 
-`compat_summary` mode is the current stable compatibility mode. It remains the
-baseline used by existing callers, including the controlled Dennis full-runtime
-pilot.
+`compat_summary` mode is deprecated legacy compatibility fallback. It remains
+available only for existing callers during migration and must not be extended.
 
-`passthrough` mode is an additive opt-in response mode for actions that already
-have a `compat_summary` baseline. It must not replace existing default behavior
-until downstream parsers and migration checks are ready.
+`passthrough` mode is the target service contract. For existing dual-mode
+actions, it remains opt-in until downstream parsers and migration checks are
+ready to cut over the default.
 
-New actions that have no `compat_summary` baseline may be registered as
-passthrough-only. Those actions must not generate `source_card`,
-`source_quality`, evidence summaries, no-data interpretation, or risk
-judgment inside this service.
+New actions must be registered as passthrough-only. They must not generate
+`source_card`, `source_quality`, evidence summaries, no-data interpretation, or
+risk judgment inside this service.
 
 During migration, an existing fixed action may support both:
 
@@ -72,6 +71,11 @@ The service is not responsible for:
 - DataAgent or Hive calls.
 - Automatic disposal or any upstream write action.
 - Permission bypass or account/role escalation.
+
+Deprecated fallback exception: legacy `compat_summary` still builds
+`source_card`, `source_quality`, and shape-only summaries for old callers. Do
+not add new logic to that path. It is scheduled for removal after
+passthrough-only cutover.
 
 ## Passthrough Envelope
 
@@ -175,7 +179,8 @@ The service listens only on `127.0.0.1`.
 
 Compatibility rules:
 
-- Existing `compat_summary` behavior stays stable.
+- Existing `compat_summary` behavior stays stable only as deprecated migration
+  fallback.
 - `response_mode=passthrough` is additive for existing dual-mode actions.
 - Adding passthrough support must not change existing default action output.
 - Dennis or another upper layer must opt in explicitly before receiving
@@ -184,6 +189,7 @@ Compatibility rules:
   side-by-side comparison, and migration sign-off.
 - Passthrough-only actions may default to `passthrough` because no
   `compat_summary` output existed for them.
+- New actions must be passthrough-only.
 
 Migration period:
 
@@ -193,6 +199,13 @@ Migration period:
 - Live smoke must verify that passthrough does not output credential material.
 - The allowlist remains unchanged unless a separate source-contract promotion
   process adds a new fixed action.
+
+Removal gates:
+
+1. Dennis `full_runtime` controlled pilot continues to pass on passthrough.
+2. All active consumers no longer depend on `compat_summary`.
+3. Reference scans are clean for default-path summary dependencies.
+4. Tests are updated to a passthrough-only baseline.
 
 ## Division Of Responsibility With Dennis
 

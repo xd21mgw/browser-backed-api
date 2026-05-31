@@ -192,6 +192,10 @@ export class BrowserBackedApiService {
 
     validateActionInput(input);
     const responseMode = actionResponseMode(input || {}, action);
+    // @deprecated The non-passthrough branch is a legacy migration fallback for
+    // old compat_summary consumers. Do not add new summary/source_card/
+    // source_quality behavior here; new actions must be passthrough-only. This
+    // branch is scheduled for removal after passthrough-only cutover.
     const passthrough = responseMode === "passthrough";
 
     const startedAt = Date.now();

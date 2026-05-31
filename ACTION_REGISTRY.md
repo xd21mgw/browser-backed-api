@@ -63,8 +63,10 @@ credential-material denylist. Large bodies may be omitted with
 
 ## Current Stable Passthrough / Compat Actions
 
-These four actions are the current stable service actions. They support the
-existing default `compat_summary` mode and opt-in `passthrough` mode.
+These four actions are the current stable service actions. They still support
+the existing default `compat_summary` response shape as deprecated legacy
+migration fallback and opt-in `passthrough` mode. Do not add new service-side
+summary logic here; new actions must be passthrough-only.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -79,6 +81,11 @@ These actions already exist in `src/actions.js`, `src/originRegistry.js`, mock
 tests, and readiness notes. They are callable service actions, but they are not
 default actions for every caller. Use them only when an upper-layer plan or user
 request explicitly names the relevant platform action/domain.
+
+For Phase A cleanup, dual-mode rows in this section keep their existing behavior
+but `compat_summary`, `source_card`, and `source_quality` are deprecated
+migration fallback outputs. They are scheduled for removal after the
+passthrough-only cutover gates pass.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -131,6 +138,11 @@ does not make them callable.
 
 This matrix repeats the callable and non-callable action names in one place
 using the same service-layer fields.
+
+Compatibility note: every `compat_summary / passthrough` cell is legacy
+dual-mode compatibility, not a pattern for new actions. New actions must be
+registered as `passthrough only`; the service must not add new
+summary/source-card/source-quality/evidence/risk-judgement logic.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

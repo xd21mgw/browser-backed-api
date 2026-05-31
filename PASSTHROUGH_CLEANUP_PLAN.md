@@ -320,4 +320,14 @@ Current status:
 
 Proceed with Phase A only.
 
+Phase A marker applied:
+
+- `compat_summary` is deprecated legacy migration fallback.
+- Service-generated `source_card` and `source_quality` are deprecated legacy
+  fallback outputs.
+- Service-side `summarize*` helpers are deprecated legacy fallback helpers.
+- New actions must be passthrough-only.
+- Do not add new service-side summary, evidence, no-data interpretation, or
+  risk-judgement logic.
+
 Do not start Phase C deletion until Dennis completes fallback migration and another `full_runtime` controlled pilot passes with service-side summary assumptions removed from the default path.

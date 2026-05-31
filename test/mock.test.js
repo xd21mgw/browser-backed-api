@@ -806,7 +806,10 @@ test("prewarm reports per-origin status, latency, and error type", async () => {
   }
 });
 
-test("compat_summary actions return source card, source quality, latency, warm state, and sensitivity flag", async () => {
+// Legacy compat_summary tests are retained only to protect migration fallback
+// behavior. They should not be used as a pattern for new actions; new actions
+// must be passthrough-only.
+test("legacy compat_summary fallback actions return source card, source quality, latency, warm state, and sensitivity flag", async () => {
   const service = createService();
   await service.prewarm();
 
@@ -829,7 +832,7 @@ test("compat_summary actions return source card, source quality, latency, warm s
   }
 });
 
-test("explicit compat_summary keeps the existing summary response shape", async () => {
+test("explicit legacy compat_summary fallback keeps the existing summary response shape", async () => {
   const service = createService();
   await service.prewarm();
 
