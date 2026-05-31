@@ -51,7 +51,12 @@ If you intentionally use a custom profile path:
 
 ```sh
 BROWSER_BACKED_PROFILE_DIR=/path/to/profile npm run open:profile
+BROWSER_BACKED_PROFILE_DIR=/path/to/profile npm run refresh:once
+BROWSER_BACKED_PROFILE_DIR=/path/to/profile npm run start:live
 ```
+
+If `BROWSER_BACKED_PROFILE_DIR` is not set, the default profile is
+`~/.dennis-browser-backed/profile`.
 
 ## auth_state=auth_required
 
@@ -141,17 +146,30 @@ Symptom:
 
 - Playwright cannot launch persistent context.
 - Chrome says the profile is in use.
+- You see a `ProcessSingleton`, `SingletonLock`, or profile-in-use style error.
 
 Fix:
 
-- Close other Chrome instances using the same profile.
+- First confirm whether this profile is already used by `npm run start:live`,
+  `npm run refresh:daemon`, `npm run open:profile`, a previous refresh command,
+  or a normal Chrome window.
+- Close or stop the process that is using the same profile, then retry.
 - Use a dedicated `BROWSER_BACKED_PROFILE_DIR`.
 - Do not copy another person's profile.
+- Do not delete the profile directory to fix a lock unless you have separately
+  confirmed it is disposable test data.
 
 You can check whether the local service is still running:
 
 ```sh
 lsof -ti tcp:8787
+```
+
+You can also inspect obvious local Chrome/Playwright processes without reading
+the profile contents:
+
+```sh
+pgrep -fl "chrome|Chromium|playwright|start:live|refresh:daemon|open-profile" || true
 ```
 
 ## Action Returns blocked/auth_failed/network_error
@@ -298,5 +316,19 @@ Collect only sanitized information:
 - `error_type`
 
 Do not share profile directories, refresh-state files, `.env`, cookies, tokens,
-sessions, headers, screenshots with sensitive content, or raw upstream response
-bodies.
+sessions, headers, screenshots with sensitive content, or full raw upstream
+response bodies.
+
+For passthrough smoke, record only:
+
+- `http_status`
+- `ok`
+- `action`
+- `response_mode`
+- `upstream.status`
+- `upstream.content_type`
+- `upstream.body_present`
+- `upstream.body_omitted`
+- `error_type`
+- `safety.credential_material_output`
+- whether cookie/token/session/header/authorization/password appeared: `false`

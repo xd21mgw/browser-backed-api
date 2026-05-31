@@ -56,6 +56,25 @@ the terminal and press Enter.
 The service does not read cookie/token/session/header values during this step.
 It only lets Chrome store its own login state in your local profile directory.
 
+If you already have a dedicated local profile for this service, you can point
+the service at it with `BROWSER_BACKED_PROFILE_DIR`:
+
+```sh
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run refresh:once
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run start:live
+```
+
+If you do not set `BROWSER_BACKED_PROFILE_DIR`, the service uses:
+
+```txt
+~/.dennis-browser-backed/profile
+```
+
+Do not copy another teammate's profile. Do not commit or send your profile
+directory. A single profile can be used by only one Chrome/Playwright process at
+the same time, so close `start:live`, `refresh:daemon`, `open:profile`, or other
+Chrome instances using that profile before reusing it.
+
 ### 4. Check and refresh login state once
 
 ```sh
@@ -126,6 +145,33 @@ Some actions are passthrough-only. For those, call with
 `"response_mode":"passthrough"` and expect only the passthrough envelope. See
 `ACTION_REGISTRY.md` before calling an action you have not used before.
 
+For live smoke, replace sample IDs with test entities that you personally have
+permission to view and that are likely to have platform data:
+
+- `user_id`
+- `device_id`
+- `eventId`
+- `policyCode`
+
+If you do not have a suitable sample, an action may return `no_data`,
+`auth_blocked`, or `param_needed`. That does not automatically mean the local
+service is broken.
+
+When sharing a smoke result, do not paste the full `upstream.body`. Record only
+the envelope summary:
+
+- `http_status`
+- `ok`
+- `action`
+- `response_mode`
+- `upstream.status`
+- `upstream.content_type`
+- `upstream.body_present`
+- `upstream.body_omitted`
+- `error_type`
+- `safety.credential_material_output`
+- whether cookie/token/session/header/authorization/password appeared: `false`
+
 ## Important Safety Rules
 
 - Code can be shared. Login state must not be shared.
@@ -136,6 +182,9 @@ Some actions are passthrough-only. For those, call with
 - Do not send your profile directory or refresh-state file to anyone.
 - Do not commit `.env`, profile directories, state files, HAR captures,
   screenshots, or temporary captures.
+- Do not paste full `upstream.body`, request headers, cookie/token/session/header
+  values, authorization strings, localStorage, browser storage dumps, or
+  Playwright storage state into feedback.
 
 ## Useful Environment Variables
 

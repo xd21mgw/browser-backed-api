@@ -40,8 +40,37 @@ curl http://127.0.0.1:8787/actions
 ```sh
 curl -X POST http://127.0.0.1:8787/actions/track_analysis_summary \
   -H 'content-type: application/json' \
-  -d '{"response_mode":"passthrough","sub_interface":"profile","user_id":"123","appName":"KUAISHOU"}'
+  -d '{"response_mode":"passthrough","sub_interface":"profile","user_id":"<replace_with_test_user_id>","appName":"KUAISHOU"}'
 ```
+
+Replace sample entity values with a `user_id`, `device_id`, `eventId`, or
+`policyCode` that you personally have permission to view and that is likely to
+have data on the platform. If you do not have a suitable sample, the result may
+be `no_data`, `auth_blocked`, or `param_needed`; that is not automatically a
+service failure.
+
+## Existing Local Profile
+
+If you already have a dedicated local Chrome/Playwright profile for this
+service, run refresh and live mode with that profile path:
+
+```sh
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run refresh:once
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run start:live
+```
+
+If `BROWSER_BACKED_PROFILE_DIR` is not set, the default profile is:
+
+```txt
+~/.dennis-browser-backed/profile
+```
+
+Rules:
+
+- Do not copy another teammate's profile.
+- Do not commit a profile directory to git.
+- Do not send a profile directory to anyone.
+- The same profile can be used by only one Chrome/Playwright process at a time.
 
 ## Service Ready Standard
 
@@ -104,6 +133,32 @@ Excluded-noise categories are never open:
 - Treat upstream business fields such as `user_id`, `deviceId`, IP, `eventId`,
   `sourceId`, and policy codes as risk entities, not authentication material.
 
+## Passthrough Smoke Record Format
+
+When recording passthrough smoke results, collect only the envelope summary and
+safety fields:
+
+- `http_status`
+- `ok`
+- `action`
+- `response_mode`
+- `upstream.status`
+- `upstream.content_type`
+- `upstream.body_present`
+- `upstream.body_omitted`
+- `error_type`
+- `safety.credential_material_output`
+- whether cookie/token/session/header/authorization/password appeared: `false`
+
+Do not paste:
+
+- full `upstream.body`
+- request headers
+- cookie/token/session/header values
+- authorization strings or passwords
+- Chrome profile contents
+- localStorage, browser storage dumps, or Playwright storage state
+
 ## Upgrade And Rollback
 
 Upgrade:
@@ -130,8 +185,13 @@ Collect only sanitized information:
 
 - `action_name`
 - request params used
+- `http_status`
+- `ok`
 - `response_mode`
 - `upstream.status`
+- `upstream.content_type`
+- `upstream.body_present`
+- `upstream.body_omitted`
 - `live_status`
 - `error_type`
 - whether `safety.credential_material_output=false`

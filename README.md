@@ -231,6 +231,16 @@ Override these paths with:
 - `BROWSER_BACKED_PROFILE_DIR`
 - `BROWSER_BACKED_STATE_FILE`
 
+For an existing dedicated local profile:
+
+```sh
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run refresh:once
+BROWSER_BACKED_PROFILE_DIR=/path/to/your/profile npm run start:live
+```
+
+Do not copy another teammate's profile. A single profile can be used by only one
+Chrome/Playwright process at a time.
+
 Profile, state, and credential material are different:
 
 - Token/cookie/session/localStorage values are credential material. The service lets the browser use them but does not read, parse, or output them.
@@ -525,6 +535,13 @@ Verify:
   Playwright storage state.
 - passthrough may include bounded upstream business response bodies; large
   bodies are omitted with `response_too_large`.
+
+Replace sample entity values with a `user_id`, `device_id`, `eventId`, or
+`policyCode` that you personally have permission to view and that is likely to
+have data. When sharing smoke results, record only the passthrough envelope
+summary and safety fields; do not paste full `upstream.body`, request headers,
+cookies, tokens, sessions, authorization strings, profile contents, localStorage,
+or Playwright storage state.
 
 ## Local Checks
 
