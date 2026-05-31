@@ -1,0 +1,22 @@
+{
+  "name": "browser-backed-api-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local browser-backed API service POC using a persistent Playwright browser profile.",
+  "scripts": {
+    "start": "node src/server.js",
+    "start:mock": "SERVICE_MODE=mock node src/server.js",
+    "start:live": "SERVICE_MODE=live node src/server.js",
+    "open:profile": "node scripts/open-profile.js",
+    "refresh:once": "node scripts/refresh-profile.js",
+    "refresh:daemon": "node scripts/refresh-daemon.js",
+    "check": "node --check src/server.js && node --check src/service.js && node --check src/config.js && node --check src/actions.js && node --check src/browser.js && node --check src/authState.js && node --check src/originRegistry.js && node --check src/quality.js && node --check src/diagnostics.js && node --check scripts/open-profile.js && node --check scripts/refresh-profile.js && node --check scripts/refresh-daemon.js"
+  },
+  "dependencies": {
+    "playwright": "^1.53.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
