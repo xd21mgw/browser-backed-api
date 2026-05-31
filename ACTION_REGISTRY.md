@@ -49,7 +49,7 @@ registry was written. No HAR inventory was rerun.
 | --- | --- |
 | `open_default` | Stable fixed action; current callers may use it without a special action-opening step. |
 | `open_explicit` | Fixed action exists in service allowlist/mock/readiness, but callers should invoke it only through an explicit action request or plan step. |
-| `contract_ready` | Fixed action exists and has typed service contract coverage, but remains explicit and not default-open. |
+| `contract_ready` | Fixed path, origin, method, and typed-param contract exists locally; action may still require service implementation before it becomes callable. |
 | `inventory_pending` | Known candidate name only; not currently a service action and cannot be called. |
 | `excluded_noise` | Intentionally not eligible for action registration. |
 
@@ -88,23 +88,24 @@ request explicitly names the relevant platform action/domain.
 | `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode`, `response_mode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version params only; no arbitrary RCP policy path. |
 | `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, optional `product`, `category`, `event`, `appPlatform`, `metric`, `type`; required `startTime`, `endTime`; `response_mode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `contract_ready` | Fixed readiness path; typed device/time/filter arrays only. |
 
-## Inventory-Pending Candidates
+## Contract-Recovered Candidates
 
-These names are known non-noise candidates, but they are not service actions in
-this repo today. They cannot be called until a fixed path, typed params, origin
-binding, mock tests, and live smoke have been added through the normal action
-promotion process. See `BLOCKED_ACTIONS.md` for the exact missing contract
-material for each candidate.
+These names are known non-noise candidates and local contract recovery found
+fixed origin, method, path, and typed-param material for each one. They are not
+service actions in this repo today and cannot be called until action
+registration, typed validation, request builders, mock tests, and later live
+smoke are added through the normal promotion process. See
+`CONTRACT_RECOVERY_REPORT.md` and `BLOCKED_ACTIONS.md`.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `archives_private_message_search` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
-| `archives_past_four_items` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
-| `rcp_policy_version_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; no action-level mapping from existing RCP companion paths to this contract. |
-| `rcp_policy_detail_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
-| `rcp_policy_release_record_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing fixed path, typed params, and source contract. |
-| `rcp_node_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; missing bounded service action contract. |
-| `rcp_node_bind_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | Not callable; no typed contract for the existing node-binding companion path. |
+| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional `page`, `count`, `status`, `sort` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
+| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional `info_type`, `infoType`, `page`, `count`, `markResult`, `punishResult` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
+| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; primary path only; companion reads need explicit design if added. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; request body must remain service-owned and typed. |
+| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; not callable until fixed action registration and tests exist. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Contract recovered; resolved `policyTreeNodeCode` is required and must not be guessed. |
 
 ## Excluded Noise
 
@@ -138,27 +139,27 @@ using the same service-layer fields.
 | `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `live_smoke_verified`; partial broader page | `open_explicit` | Fixed request body from typed fields only. |
 | `archives_photo_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/photo/search` | `user_id`, `begin`, `end`, optional page/filter params | `compat_summary` / `passthrough` | yes | yes | yes | `no_data` smoke | `contract_ready` | Fixed path and typed params only. |
 | `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
-| `archives_private_message_search` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
-| `archives_past_four_items` | Archives Center / `archives` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
+| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
 | `rcp_event_detail` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, `queryTime` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Typed event identity only. |
 | `rcp_event_feature_list` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, `queryTime`, optional empty `featureGroup` | `compat_summary` / `passthrough` | yes, size-limited | yes | yes | `partial_observation_available` | `open_explicit` | Large upstream body may be omitted/capped. |
-| `rcp_policy_version_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
-| `rcp_policy_detail_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
-| `rcp_policy_release_record_lookup` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered primary contract; not callable until implemented. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
 | `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode` | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version only. |
-| `rcp_node_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
-| `rcp_node_bind_policy_attribution` | RCP / `rcp` candidate | pending | pending | pending | none | no | no | no | no | `inventory_pending` | See `BLOCKED_ACTIONS.md`. |
+| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; not callable until implemented. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | none; `passthrough` planned | no | no | no | no | `contract_ready` | Recovered contract; resolved node code required. |
 | `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, `startTime`, `endTime`, optional filters | `compat_summary` / `passthrough` | yes | yes | yes | `live_smoke_verified` | `contract_ready` | Fixed readiness path and typed params only. |
 
 ## Promotion Requirements
 
-An `inventory_pending` candidate can become an allowlisted service action only
-after all of the following exist:
+An `inventory_pending` or `contract_ready` candidate can become an allowlisted
+service action only after all of the following exist:
 
 - fixed `origin_key`
 - fixed method and same-origin path
 - typed params
-- forbidden input validation for URL/path/header/cookie/token/session/raw body
+- forbidden input validation for URL/path/header/cookie/token/session/raw_body
 - passthrough safety policy for upstream body size and credential fields
 - mock tests
 - live smoke record
