@@ -231,6 +231,7 @@ Additional explicit dual-mode actions:
 - `rcp_event_detail`
 - `rcp_event_feature_list`
 - `rcp_policy_tree_lookup`
+- `track_analysis_check_data_ready`
 
 Recovered passthrough-only actions:
 

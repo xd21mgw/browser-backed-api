@@ -1,14 +1,22 @@
-# Browser-Backed Risk Source Service
+# Browser-Backed Risk Platform Access Service
 
-Local browser-backed risk platform access service for fixed, typed risk evidence
-actions. It is the first version of the team-facing "risk unified local
-hand-and-foot layer", not a Dennis-only adapter.
+Browser-backed Risk Platform Access Service / 风控统一受控透传服务.
 
-Each teammate runs the service on their own computer, with their own Chrome
-profile and their own internal platform permissions. Agent, Skill, or local
-scripts call only fixed local source actions on `127.0.0.1`; they do not read
-cookies, tokens, sessions, request headers, Chrome cookie DBs, or arbitrary
-platform URLs.
+This service runs locally on `127.0.0.1` and gives Agent, Skill, or local
+scripts a controlled way to call fixed risk-platform actions with typed params.
+Each teammate uses their own Chrome profile and their own platform permissions.
+The service maps a fixed action to a fixed origin/path, performs a same-origin
+browser-backed fetch, and returns either the legacy compatibility summary or a
+controlled upstream passthrough envelope.
+
+Team-facing use should treat this as a passthrough access layer. The service
+does not read cookies, tokens, sessions, request headers, Chrome cookie DBs, or
+browser storage. It does not output authentication material. It does not perform
+business summary, evidence-card generation, `source_card`/`source_quality`
+generation, risk judgment, no-data interpretation, next-step recommendation,
+permission bypass, or DataAgent/Hive calls for passthrough-only use.
+
+Current `action_count=19`.
 
 ## Team-Facing Entry Points
 
@@ -34,25 +42,35 @@ Passthrough means forwarding upstream business response bodies, not forwarding
 browser auth material, request headers, cookies, tokens, sessions, or profile
 storage.
 
-## Current Stable Capabilities
+## Current Action Layers
 
-| capability | action_name | evidence_domain | Use for |
-| --- | --- | --- | --- |
-| User activity/profile/device evidence summary | `track_analysis_summary` | 用户域 / 设备域 / 行为域 | User profile shape, use duration, active evidence, device list. |
-| Strategy event entry snapshot | `rcp_snapshot` | 策略域 | Event list, sourceId/eventId/deviceId/hitFusePolicyCode clues. |
-| Device graph and device-risk inventory | `weapon_inventory` | 设备域 / 社交域 | User-device graph, device risk labels, relation counts. |
-| Login behavior evidence | `login_logs_search` | 行为域 / 登录链路 | Recent login logs, login device/IP/source/method evidence. |
+The fixed action allowlist currently contains 19 actions.
 
-These stable capabilities are evidence sources only. They do not perform
-automatic disposal, permission bypass, DataAgent/Hive calls, or final risk
-classification. See `RISK_SOURCE_CAPABILITY_REGISTRY.md` before calling beta or
-explicit capabilities.
+### Dual-Mode Actions
 
-## Current Passthrough-Only Actions
+These 12 actions support the legacy default `compat_summary` mode and opt-in
+`response_mode=passthrough`.
 
-These recovered actions are fixed, typed, and allowlisted, but they intentionally
-do not support `compat_summary`. They return only the passthrough envelope and
-upstream business response body.
+| action_name | origin_key |
+| --- | --- |
+| `track_analysis_summary` | `track_analysis` |
+| `login_logs_search` | `login_logs` |
+| `weapon_inventory` | `weapon` |
+| `rcp_snapshot` | `rcp` |
+| `archives_user_profile` | `archives` |
+| `archives_user_analysis` | `archives` |
+| `archives_photo_search` | `archives` |
+| `archives_related_users` | `archives` |
+| `rcp_event_detail` | `rcp` |
+| `rcp_event_feature_list` | `rcp` |
+| `rcp_policy_tree_lookup` | `rcp` |
+| `track_analysis_check_data_ready` | `track_analysis` |
+
+### Passthrough-Only Actions
+
+These 7 recovered actions are fixed, typed, allowlisted, and intentionally do
+not support `compat_summary`. They return only the passthrough envelope and
+bounded upstream business response body.
 
 | action_name | origin_key | method | fixed_path |
 | --- | --- | --- | --- |
@@ -78,14 +96,13 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - Prewarms the fixed registry origins for enabled platforms in live mode.
 - Exposes fixed action names only; request bodies cannot provide arbitrary URLs.
 - Runs live calls with `page.evaluate(fetch)` from a page already on the configured origin.
-- Adds `source_card` and `source_quality` to every default `compat_summary`
-  action response.
+- Preserves legacy `compat_summary` output for existing callers.
 - Does not call Playwright cookie/session/header inspection APIs.
 - Keeps existing `compat_summary` live outputs shape-only; opt-in `passthrough`
   returns a controlled upstream response envelope for dual-mode actions.
 - Allows recovered passthrough-only actions to return only the upstream response
   envelope, without summary/source-card/source-quality generation.
-- Exposes Dennis runtime-oriented health, prewarm, action latency, and source quality metadata.
+- Exposes health, prewarm, action latency, and sanitized auth/origin metadata.
 
 ## Files
 
@@ -95,9 +112,13 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - `src/config.js` - environment loading and origin registry materialization.
 - `src/originRegistry.js` - extendable registry for fixed origins, warmup paths, TTLs, and action ownership.
 - `src/authState.js` - profile/state path helpers and sanitized refresh-state manager.
-- `src/quality.js` - `source_card`, `source_quality`, and shape-only summarization.
+- `src/quality.js` - legacy `compat_summary` quality and shape-only summarization helpers.
 
-## First Batch Source Summary
+## Legacy Compat Summary Notes
+
+The notes in this section apply to the retained `compat_summary` compatibility
+mode. They do not define the service-layer passthrough contract for new
+team-facing use.
 
 See `ONLINE_SOURCE_SUMMARY.md` for the first batch browser-backed online source closure.
 See `browser_backed_live_smoke_readiness_v1.md` and `har_platform_interface_inventory_v1.md` for second-stage fixed action readiness and inventory.
@@ -186,7 +207,10 @@ channel=chrome
 headless=true
 ```
 
-If a normal Chrome instance has the same profile locked, close it or point `BROWSER_BACKED_PROFILE_DIR` to a copied profile before running live mode. `USER_DATA_DIR` remains supported as a legacy alias, but `BROWSER_BACKED_PROFILE_DIR` takes precedence.
+If a normal Chrome instance has the same profile locked, close it or use a
+dedicated service profile created with `npm run open:profile` before running
+live mode. Do not copy another teammate's profile. `USER_DATA_DIR` remains
+supported as a legacy alias, but `BROWSER_BACKED_PROFILE_DIR` takes precedence.
 
 ## Profile, State, And Credential Material
 
@@ -271,7 +295,7 @@ Returns readiness metadata for Dennis runtime integration:
   },
   "warmed_origins": [],
   "uptime_ms": 123,
-  "action_count": 12
+  "action_count": 19
 }
 ```
 
@@ -315,24 +339,12 @@ Each result contains:
 
 ### `POST /actions/:actionName`
 
-Allowed action names:
-
-- `rcp_snapshot`
-- `weapon_inventory`
-- `login_logs_search`
-- `track_analysis_summary`
-- `archives_user_analysis`
-- `archives_user_profile`
-- `archives_photo_search`
-- `archives_related_users`
-- `rcp_event_detail`
-- `rcp_event_feature_list`
-- `rcp_policy_tree_lookup`
-- `track_analysis_check_data_ready`
+Allowed action names are the 19 fixed actions returned by `GET /actions` and
+listed in `ACTION_REGISTRY.md`.
 
 Each live action uses the configured domain page and calls `fetch()` with a fixed same-origin relative path from the action registry. The request body is sanitized to a small allowlist and capped at 128 KB.
 
-Every dual-mode fixed action accepts optional `response_mode`:
+The 12 dual-mode fixed actions accept optional `response_mode`:
 
 - `compat_summary` is the default and preserves the existing `source_card`,
   `source_quality`, and evidence-summary response shape.
@@ -504,12 +516,15 @@ Verify:
 
 - `/health` reports `service_mode: "live"`, `browser_initialized: true`, and `context_initialized: true`.
 - `/prewarm` returns one result per fixed origin and no unexpected `origin_mismatch`.
-- dual-mode `compat_summary` action responses include `source_card`,
-  `source_quality`, `latency_ms`, `origin_warmed`, and `sensitive_output:
-  false`.
-- passthrough-only action responses include the passthrough envelope and no
+- dual-mode `compat_summary` action responses keep the legacy compatibility
+  shape.
+- passthrough action responses include the passthrough envelope and no
   `source_card` or `source_quality`.
-- no response contains raw cookies, tokens, sessions, request headers, or a full raw upstream response body.
+- no response contains cookies, tokens, sessions, request headers,
+  authorization strings, Chrome profile contents, localStorage dumps, or
+  Playwright storage state.
+- passthrough may include bounded upstream business response bodies; large
+  bodies are omitted with `response_too_large`.
 
 ## Local Checks
 

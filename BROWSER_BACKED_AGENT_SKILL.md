@@ -3,69 +3,105 @@
 ## Positioning
 
 This skill uses the **Browser-backed Risk Platform Access Service** as a local
-risk evidence hand-and-foot layer.
+controlled passthrough service for risk-platform reads.
 
 - The service runs locally on `127.0.0.1`.
 - Each teammate uses their own Chrome profile and their own platform
   permissions.
-- Agent calls only fixed allowlist actions exposed by the local service.
+- Agent calls only allowlisted fixed actions exposed by the local service.
+- Agent sends typed params only.
 - Agent does not read cookies, tokens, sessions, request headers, Chrome cookie
-  DBs, or browser storage.
-- Agent does not compose arbitrary URLs or call platform endpoints directly.
+  DBs, browser storage, or profile files.
+- Agent does not compose arbitrary platform URLs or call platform endpoints
+  directly.
 - This is not Dennis-specific and not account-security-specific. It is a common
-  risk source access layer for internal review evidence.
+  browser-backed risk platform access layer.
+
+The service is not an evidence-writing or risk-judgment engine. In passthrough
+mode, it returns the upstream response envelope. Agent or another upper layer is
+responsible for parsing `upstream.body`, building normalized observations, and
+deciding how to present evidence.
 
 ## Agent Calling Principles
 
-1. Identify the evidence domain first: user, device, behavior, strategy,
-   content, social, or monitoring.
-2. Choose the highest-status matching capability from
-   `RISK_SOURCE_CAPABILITY_REGISTRY.md`.
-3. Prefer `stable` capabilities for general review.
-4. Use `beta` or `contract_ready` capabilities only when the user explicitly
-   asks for that evidence domain or an upstream plan requires it.
+1. Identify the platform/action needed, then choose an allowlisted action from
+   `ACTION_REGISTRY.md`.
+2. Prefer the 12 dual-mode actions for existing compatibility flows.
+3. Use the 7 passthrough-only actions only when the user or plan explicitly asks
+   for that upstream action.
+4. For passthrough calls, expect only the passthrough envelope:
+   `ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and
+   `safety`.
 5. Never call `excluded_noise` capabilities.
-6. Never call arbitrary URLs, raw paths, raw queries, headers, cookies, tokens,
-   sessions, or secrets.
-7. New actions must pass source contract, typed params, fixed origin/path,
-   `source_card`, `source_quality`, redaction policy, mock tests, and live smoke
-   before being added to the allowlist.
+6. Never send `url`, `path`, `header`, `headers`, `cookie`, `token`, `session`,
+   `authorization`, `raw_body`, `raw_query`, or `secret`.
+7. Never ask the service to create a summary, evidence card, `source_card`,
+   `source_quality`, no-data interpretation, risk judgment, or next-step
+   recommendation for passthrough-only actions.
+8. New actions require fixed origin/path, typed params, forbidden-input policy,
+   passthrough safety checks, mock tests, live smoke, and registry updates before
+   they can enter the allowlist.
 
-## Current Stable Source Actions
+## Dual-Mode Actions
 
-| action_name | Applicable questions | Typed params example | Output summary | Evidence boundary |
-| --- | --- | --- | --- | --- |
-| `track_analysis_summary` | User activity/profile/device list; active profile; use duration; frontend activity evidence. | `{"user_id":"123","appName":"KUAISHOU","sub_interface":"profile"}`; `{"user_id":"123","appName":"KUAISHOU","sub_interface":"getUseDuration"}`; `{"user_id":"123","appName":"KUAISHOU","sub_interface":"getDeviceIds"}` | `profile_summary`, `activity_summary`, `device_summary`, latest activity shape, field presence, counts, masked device sample. | Supporting activity/profile/device evidence only; no raw profile/body/device dump; no final risk conclusion. |
-| `rcp_snapshot` | Strategy event entry; event list; sourceId/eventId/deviceId/hitFusePolicyCode clues. | `{"eventType":"USER_REGISTER_NEW","source_id":"...","startTime":"2026-05-29 10:00:00","endTime":"2026-05-29 10:30:00"}` | Event count, pagination, observed columns, first-event shape keys, candidate chaining fields. | Strategy event entry only; not full attribution chain and not final risk classification. |
-| `weapon_inventory` | Device graph; device risk labels; user-device relation; related user/device counts. | `{"user_id":"123"}` or `{"device_id":"ANDROID_xxx"}` | Graph node/edge counts, related users/devices, masked device sample, risk labels/groups, userLevel, originalLog key summary. | Device relation and risk-label evidence only; no raw `labelInfo`, raw `originalLog`, raw device list, or disposal. |
-| `login_logs_search` | Recent login sequence; login device/IP/source/method; login chain evidence. | `{"user_id":"123"}` or `{"user_id":"123","from_timestamp":1780000000000,"to_timestamp":1780086400000}` | Records count, first/last login time, observed fields, IP/device/source/method samples under output-scope policy, parser diagnostics. | Login evidence only; empty logs are not no-risk evidence; no raw record dump. |
+These actions support `compat_summary` and `passthrough`. The default remains
+`compat_summary` for old callers.
+
+| action_name | origin_key | Notes |
+| --- | --- | --- |
+| `track_analysis_summary` | `track_analysis` | Track Analysis fixed sub-interfaces. |
+| `login_logs_search` | `login_logs` | Login log fixed search endpoint. |
+| `weapon_inventory` | `weapon` | Weapon graphData with service-owned riskData chaining. |
+| `rcp_snapshot` | `rcp` | RCP eventList entry action. |
+| `archives_user_profile` | `archives` | Archives user profile endpoint. |
+| `archives_user_analysis` | `archives` | Archives core log timeline endpoint. |
+| `archives_photo_search` | `archives` | Archives photo report search endpoint. |
+| `archives_related_users` | `archives` | Archives related-user same-device endpoint. |
+| `rcp_event_detail` | `rcp` | RCP event detail endpoint. |
+| `rcp_event_feature_list` | `rcp` | RCP event feature list endpoint. |
+| `rcp_policy_tree_lookup` | `rcp` | RCP policy tree lookup endpoint. |
+| `track_analysis_check_data_ready` | `track_analysis` | Track Analysis data-readiness endpoint. |
+
+## Passthrough-Only Actions
+
+These actions support only `response_mode=passthrough`. They reject
+`compat_summary` and do not return `source_card` or `source_quality`.
+
+| action_name | origin_key | Notes |
+| --- | --- | --- |
+| `archives_private_message_search` | `archives` | Private-message search by typed user/direction/page params. |
+| `archives_past_four_items` | `archives` | Past four profile-item change log by typed user/filter params. |
+| `rcp_policy_version_lookup` | `rcp` | RCP policy version lookup by typed event/policy identity. |
+| `rcp_policy_detail_lookup` | `rcp` | RCP policy detail lookup by typed policy code/version. |
+| `rcp_policy_release_record_lookup` | `rcp` | RCP policy release-record fixed pipeline lookup. |
+| `rcp_node_policy_attribution` | `rcp` | RCP node policy attribution by typed event/policy identity. |
+| `rcp_node_bind_policy_attribution` | `rcp` | RCP node-binding attribution by typed event/tree-node identity. |
 
 ## Scenario Mapping
 
 | User question | Agent action plan |
 | --- | --- |
-| "看这个用户近期登录和设备风险" | Call `login_logs_search`, `weapon_inventory`, and `track_analysis_summary`. Combine as evidence, not final judgment. |
-| "看这个设备关联和风险标签" | Call `weapon_inventory` with `device_id`. |
+| "看这个用户近期登录和设备风险" | Call `login_logs_search`, `weapon_inventory`, and optionally `track_analysis_summary`. Interpret returned bodies outside the service. |
+| "看这个设备关联和风险标签" | Call `weapon_inventory` with typed `device_id`. |
 | "看策略事件入口" | Call `rcp_snapshot` with typed event/time filters. |
-| "看用户活跃画像和设备列表" | Call `track_analysis_summary` with `profile`, `getUseDuration`, and `getDeviceIds` as needed. |
-| "看视频/私信/档案中心" | Check registry. These are beta/explicit or inventory-pending; do not call by default. |
-| "看某个 eventId 的详情/特征/策略树" | Only call beta RCP downstream actions when the user explicitly provides or requests that event/policy evidence. |
+| "看用户活跃画像和设备列表" | Call `track_analysis_summary` with the relevant fixed `sub_interface`. |
+| "看私信/档案中心明细" | Use an explicit Archives action from `ACTION_REGISTRY.md`; passthrough-only actions require explicit intent. |
+| "看某个 eventId 的详情/特征/策略树/归因" | Use explicit RCP downstream actions only when the event/policy/tree typed params are available. |
 
 ## Output Rules
 
-- Default `output_scope` is `internal_risk_review`.
-- In internal review, risk entity identifiers such as `user_id`, `deviceId`,
-  IP, `eventId`, `sourceId`, and strategy codes may appear in compact summaries
-  when needed for evidence chaining.
-- Use `output_scope=external_share` when preparing content for external sharing;
-  risk identifiers and strict PII must be masked.
-- `sensitive_output=false` means no credential secret and no raw dump. It does
-  not mean every risk entity identifier has been removed.
-- `no_data` does not mean no risk.
-- Strategy hits, device risk labels, activity profile, and login logs are
-  evidence sources. They do not automatically equal a final risk conclusion.
-- Preserve `source_card` and `source_quality` with evidence output, including
-  failures, no-data, partial, and auth/blocked states.
+- `compat_summary` is a legacy compatibility mode for existing callers.
+- `passthrough` returns upstream business response data in the envelope.
+- `safety.credential_material_output=false` means no authentication material was
+  output; it does not mean risk entity fields were removed from upstream
+  business data.
+- Upstream business fields such as `user_id`, `deviceId`, IP, `eventId`,
+  `sourceId`, and policy codes are not authentication material by themselves.
+- `no_data`, empty body, or empty arrays are interpreted by Agent or a human
+  reviewer, not by the service.
+- Agent must suppress raw upstream bodies in user-facing summaries unless the
+  workflow explicitly requires controlled internal inspection.
+- External sharing must apply its own masking/redaction policy.
 
 ## Forbidden Actions
 
@@ -78,25 +114,27 @@ Agent must not:
 - Call arbitrary URLs, platform paths, raw query strings, raw bodies, or
   caller-provided endpoints.
 - Automatically call DataAgent or Hive.
-- Output raw upstream full bodies, raw records, raw `labelInfo`, or raw
-  `originalLog`.
+- Ask passthrough-only actions to return `source_card`, `source_quality`,
+  evidence cards, no-data interpretations, or risk conclusions.
 - Call excluded-noise capabilities such as telemetry, static assets,
-  fingerprinting, radar/misc/log collection, log-sdk traffic, or menu/config
-  probes without direct evidence value.
+  fingerprinting, radar/misc/log collection, log-sdk traffic, mobile-device-info
+  traffic, or menu/config probes without direct evidence value.
 
-## Adding A New Capability
+## Adding A New Callable Action
 
-Before a new action can become callable by this skill, it must have:
+Before a new service action can become callable, it must have:
 
-- A source contract that states evidence value and non-goals.
-- Fixed registry origin and same-origin relative path.
-- Typed params and forbidden-input validation.
-- Redaction policy for raw bodies, records, labels, logs, PII, and risk entity
-  identifiers.
-- `source_card` and `source_quality` in all response states.
-- Mock tests for success, no-data, auth/blocked/error, forbidden input, and
-  redaction.
+- Fixed `origin_key`.
+- Fixed method and same-origin relative path.
+- Typed params and validation.
+- Forbidden-input rejection for URL/path/header/cookie/token/session/raw body/raw
+  query.
+- Passthrough response safety policy for credential-material keys and response
+  size.
+- Mock tests for success, parameter errors, forbidden inputs, upstream errors,
+  too-large responses, and credential-material protection.
 - Live smoke evidence showing no credential material output.
+- `ACTION_REGISTRY.md` status update.
 
-Until then, keep it `inventory_pending`, `contract_ready`, or `beta` with
-`explicit_trigger_required=yes`.
+Until then, keep it `inventory_pending`, `contract_ready`, or blocked in a local
+contract-recovery report.

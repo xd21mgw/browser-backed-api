@@ -1,25 +1,29 @@
 # Team Local Setup
 
-This guide is for teammates who want to run the local risk evidence service on
-their own computer.
+This guide is for teammates who want to run the local Browser-backed Risk
+Platform Access Service on their own computer.
 
 The short version:
 
 - Everyone runs the same tool code.
 - Everyone logs in with their own Chrome profile.
 - Whoever logs in, their platform permissions apply.
-- The service reads evidence through fixed local actions only.
+- The service calls fixed local actions only.
 - The service does not read or output cookies, tokens, sessions, or request
   headers.
+- The service returns controlled action responses. Passthrough mode forwards
+  upstream business response bodies, not browser authentication material.
 
 ## What This Service Does
 
 This is a local "risk platform hand-and-foot" service. Agent, Skill, or local
-scripts call `127.0.0.1:8787/actions/*`. The service uses your own local Chrome
-profile to access internal platforms that you already have permission to view.
+scripts call `127.0.0.1:8787/actions/<action_name>`. The service uses your own
+local Chrome profile to access internal platforms that you already have
+permission to view.
 
 It does not share login state between teammates. It does not give anyone new
-permissions. It does not call arbitrary URLs.
+permissions. It does not call arbitrary URLs. It does not make risk judgments or
+automatic disposal decisions.
 
 ## First-Time Setup
 
@@ -112,6 +116,16 @@ Callers provide typed params only, such as `user_id`, `device_id`, safe time
 windows, or fixed enum values. They do not provide URLs, paths, cookies, tokens,
 sessions, headers, or raw request bodies.
 
+You can list the 19 fixed actions with:
+
+```sh
+curl http://127.0.0.1:8787/actions
+```
+
+Some actions are passthrough-only. For those, call with
+`"response_mode":"passthrough"` and expect only the passthrough envelope. See
+`ACTION_REGISTRY.md` before calling an action you have not used before.
+
 ## Important Safety Rules
 
 - Code can be shared. Login state must not be shared.
@@ -148,9 +162,18 @@ Useful fields:
 - `last_refresh_at`
 - `origin_status`
 - `warmed_origins`
+- `action_count`
 
 `profile_dir_configured` is a boolean by design. The API does not echo your
 local filesystem path.
+
+Good local readiness usually means:
+
+- `/health` returns `ok=true`
+- `service_mode=live`
+- `auth_state=ready`, or the origin needed by your action is ready
+- `action_count=19`
+- no credential material is printed
 
 ## Permission Model
 

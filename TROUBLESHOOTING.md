@@ -1,7 +1,7 @@
 # Troubleshooting
 
 This page covers common local setup and runtime issues for the browser-backed
-risk source service.
+risk platform access service.
 
 Do not debug by reading Chrome cookie DBs, dumping localStorage, copying
 profiles, or printing cookies/tokens/sessions/headers. The service is designed
@@ -169,8 +169,52 @@ Fix:
 - Re-run `npm run open:profile` if auth is required.
 - Confirm you personally have permission for the platform.
 
-These states are not no-risk conclusions. Preserve `source_card` and
-`source_quality` when using the result.
+These states are not no-risk conclusions. In `compat_summary`, preserve the
+legacy diagnostic fields returned by the service. In `passthrough`, preserve the
+service `error_type` and `safety` envelope fields for upper-layer handling.
+
+## Passthrough-Only Action Rejects compat_summary
+
+Symptom:
+
+- A recovered action such as `archives_private_message_search` or
+  `rcp_policy_detail_lookup` returns `parameter_error` or `invalid_parameter`
+  when called with `response_mode=compat_summary`.
+
+Meaning:
+
+- The action is passthrough-only by design.
+- It does not generate `source_card`, `source_quality`, evidence summaries,
+  no-data interpretation, or risk judgments.
+
+Fix:
+
+```json
+{
+  "response_mode": "passthrough"
+}
+```
+
+Check `ACTION_REGISTRY.md` for each action's `response_mode_support`.
+
+## Action Is Not In The Allowlist
+
+Symptom:
+
+- `POST /actions/<action_name>` returns an unknown-action style error.
+- `GET /actions` does not list the action.
+
+Meaning:
+
+- The service only accepts fixed allowlisted actions from `src/actions.js`.
+- Passthrough mode does not allow arbitrary platform URLs, paths, or HAR
+  requests.
+
+Fix:
+
+- Use `GET /actions` or `ACTION_REGISTRY.md` to find a callable action.
+- If the action is `inventory_pending` or missing, it needs fixed path, typed
+  params, mock tests, and live smoke before it can be added.
 
 ## Re-Open Profile For Login
 
@@ -199,9 +243,32 @@ Expected boundaries:
 - No raw browser storage dumps.
 
 The service reports only sanitized metadata such as readiness, origin status,
-latency, error type, and shape summaries. `sensitive_output=false` means no
-credential secret or raw dump was returned; it does not mean internal risk
-entity identifiers are hidden in `internal_risk_review` scope.
+latency, error type, legacy shape summaries, or passthrough upstream business
+bodies. `sensitive_output=false` or
+`safety.credential_material_output=false` means no credential secret or raw
+browser/profile material was returned; it does not mean risk entity fields such
+as `user_id`, `deviceId`, IP, `eventId`, `sourceId`, or policy codes are hidden
+inside upstream business responses.
+
+If any response appears to contain cookie, token, session, authorization,
+password, request header, localStorage, or profile-storage content, stop using
+that output and treat it as a service bug.
+
+## Use ACTION_REGISTRY To Choose Actions
+
+`ACTION_REGISTRY.md` is the service-layer source of truth for:
+
+- action name
+- origin key
+- method
+- fixed path
+- typed params
+- `compat_summary` vs `passthrough` support
+- mock and live smoke status
+- open status
+- safety boundary
+
+It does not define how an Agent should interpret `upstream.body`.
 
 ## Why Some Capabilities Are Not Open
 

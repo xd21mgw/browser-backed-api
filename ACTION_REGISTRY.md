@@ -9,6 +9,8 @@ This file is service-layer documentation only. It does not define how an upper
 layer Agent interprets `upstream.body`, builds normalized observations, or
 formats user-facing review output.
 
+Current callable action count: 19.
+
 The service contract is:
 
 - fixed action name
@@ -94,8 +96,9 @@ request explicitly names the relevant platform action/domain.
 These non-noise actions were recovered from local contract material and are now
 registered as fixed passthrough-only service actions. They do not support
 `compat_summary`, do not generate `source_card` or `source_quality`, and do not
-perform business interpretation. Live smoke was not run in the implementation
-round.
+perform business interpretation. The recovered batch live smoke result is 6
+`live_pass`, 1 `live_no_data`, and 0 `live_fail`; see
+`LIVE_SMOKE_RECOVERED_PASSTHROUGH_ACTIONS.md`.
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
