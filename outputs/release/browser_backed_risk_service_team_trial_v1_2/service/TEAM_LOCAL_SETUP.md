@@ -17,13 +17,70 @@ The short version:
 ## What This Service Does
 
 This is a local "risk platform hand-and-foot" service. Agent, Skill, or local
-scripts call `127.0.0.1:8787/actions/<action_name>`. The service uses your own
-local Chrome profile to access internal platforms that you already have
-permission to view.
+scripts call `{service_base_url}/actions/<action_name>`. In normal local use,
+`service_base_url` is:
+
+```txt
+http://127.0.0.1:8787
+```
+
+The service uses your own local Chrome profile to access internal platforms
+that you already have permission to view.
 
 It does not share login state between teammates. It does not give anyone new
 permissions. It does not call arbitrary URLs. It does not make risk judgments or
 automatic disposal decisions.
+
+## Two Deployment Modes
+
+### Local Agent Mode
+
+Use this when the Agent, local script, or curl command runs on the same computer
+as this service.
+
+- Keep the default `service_base_url=http://127.0.0.1:8787`.
+- No bridge or tunnel is needed.
+- The setup commands in this guide are unchanged.
+
+### Remote Main Agent + Local Worker Mode
+
+Use this only when the main Agent runs remotely or in the cloud.
+
+- The service still runs on your own computer.
+- Your computer acts as the local worker.
+- The remote main Agent must not assume its own `127.0.0.1` is your computer.
+- The remote main Agent needs a configured `service_base_url`, usually from
+  `BROWSER_BACKED_SERVICE_BASE_URL` or its Agent config.
+- That URL should point to a controlled bridge/tunnel that reaches your local
+  worker.
+- The bridge/tunnel is not implemented by this release; it is a deployment
+  requirement.
+
+Do not expose the service directly to the public internet. Do not upload or copy
+your profile, refresh state, cookies, tokens, sessions, request headers, browser
+storage, or `.env` files to the remote Agent.
+
+### Temporary Profile Bootstrap Mode
+
+This is only for a same-user debugging or transition case where the machine that
+will run `refresh:once`, `start:live`, and actions has no GUI and cannot run
+`npm run open:profile` directly.
+
+- Temporarily use a GUI Mac to complete first-time `open:profile`, SSO,
+  two-factor steps, or Archives/account confirmation.
+- Use it only for profile activation or required human confirmation.
+- Do not use the Mac service as a long-term action forwarding service.
+- After activation, run `refresh:once`, `start:live`, and actions on the main
+  Agent's local machine only if that same user's usable profile is available
+  there.
+- Do not share a profile across users.
+- Do not upload cookies, tokens, sessions, request headers, profile contents,
+  localStorage, browser storage, or Playwright storageState.
+- Do not let the Agent read profile files.
+
+This is not the default team deployment. Local Agent Mode is the default local
+path. Remote Main Agent + Local Worker Mode is the team's formal remote-Agent
+shape.
 
 ## First-Time Setup
 
@@ -122,7 +179,7 @@ BROWSER_BACKED_REFRESH_INTERVAL_MS=14400000 npm run refresh:daemon
 npm run start:live
 ```
 
-The service listens only on:
+The service listens locally on:
 
 ```txt
 127.0.0.1:8787
@@ -130,13 +187,22 @@ The service listens only on:
 
 ### 7. Let Agent or Skill call fixed local actions
 
-Agent or Skill calls local endpoints such as:
+Agent or Skill calls endpoints under `service_base_url`.
+
+Local examples:
 
 ```txt
 POST http://127.0.0.1:8787/actions/login_logs_search
 POST http://127.0.0.1:8787/actions/weapon_inventory
 POST http://127.0.0.1:8787/actions/track_analysis_summary
 POST http://127.0.0.1:8787/actions/rcp_snapshot
+```
+
+Remote main Agent examples use the configured bridge/tunnel value instead:
+
+```txt
+POST {service_base_url}/actions/login_logs_search
+POST {service_base_url}/actions/weapon_inventory
 ```
 
 Callers provide typed params only, such as `user_id`, `device_id`, safe time
@@ -146,7 +212,8 @@ sessions, headers, or raw request bodies.
 You can list the 19 fixed actions with:
 
 ```sh
-curl http://127.0.0.1:8787/actions
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+curl "$SERVICE_BASE_URL/actions"
 ```
 
 Some actions are passthrough-only. For those, call with
@@ -201,6 +268,7 @@ the envelope summary:
 | `BROWSER_BACKED_PROFILE_DIR` | Override the local Playwright/Chrome profile directory. |
 | `BROWSER_BACKED_STATE_FILE` | Override the refresh-state file path. |
 | `BROWSER_BACKED_REFRESH_INTERVAL_MS` | Override refresh-daemon interval. Default is 4 hours. |
+| `BROWSER_BACKED_SERVICE_BASE_URL` | Agent-side service URL override. Local users normally do not need this; remote main Agents use it to point at a controlled local-worker bridge/tunnel. |
 | `ENABLED_PLATFORMS` | Optional comma-separated origin scope for live mode. |
 | `RCP_ORIGIN`, `WEAPON_ORIGIN`, `LOGIN_LOGS_ORIGIN`, `TRACK_ANALYSIS_ORIGIN`, `ARCHIVES_ORIGIN` | Optional origin overrides. Most teammates should use defaults. |
 
@@ -209,7 +277,8 @@ the envelope summary:
 After starting live mode:
 
 ```sh
-curl http://127.0.0.1:8787/health
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+curl "$SERVICE_BASE_URL/health"
 ```
 
 Useful fields:

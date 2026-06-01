@@ -5,7 +5,12 @@
 This skill uses the **Browser-backed Risk Platform Access Service** as a local
 controlled transport service for risk-platform reads.
 
-- Service URL: `http://127.0.0.1:8787`
+- Service base URL: `service_base_url`
+- Default local value: `http://127.0.0.1:8787`
+- Remote/cloud main Agents must not assume `127.0.0.1` is the teammate's
+  computer. In Remote Main Agent + Local Worker Mode, resolve
+  `service_base_url` from `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's
+  equivalent config.
 - Each teammate uses their own Chrome profile and platform permissions.
 - Agent calls only allowlisted fixed actions.
 - Agent sends only typed params.
@@ -21,16 +26,89 @@ owns parsing, observations, evidence cards, output policy, and final reasoning.
 
 ## Calling Principles
 
-1. Choose an allowlisted action from `ACTION_REGISTRY.md`.
-2. Send only typed params accepted by that action.
-3. Use `response_mode=passthrough` or omit it; passthrough is the default.
-4. Never send `url`, `path`, `header`, `headers`, `cookie`, `token`, `session`,
+1. Resolve `service_base_url`.
+   - Local Agent Mode default: `http://127.0.0.1:8787`.
+   - Remote Main Agent + Local Worker Mode: use
+     `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's configured bridge/tunnel
+     URL.
+2. Call `{service_base_url}/health` first.
+3. Call `{service_base_url}/actions` and confirm `action_count=19`.
+4. Choose an allowlisted action from `ACTION_REGISTRY.md`.
+5. Send only typed params accepted by that action.
+6. Use `response_mode=passthrough` or omit it; passthrough is the default.
+7. Never send `url`, `path`, `header`, `headers`, `cookie`, `token`, `session`,
    `authorization`, `raw_body`, `raw_query`, or `secret`.
-5. Never ask the service to create business summaries, observations, evidence
+8. Never ask the service to create business summaries, observations, evidence
    cards, source scoring, no-data interpretation, risk judgment, or next-step
    recommendations.
-6. If the service is not running, ask the user to start it with
+9. If the service is not running, ask the user to start it with
    `npm run start:live` after completing `TEAM_LOCAL_SETUP.md`.
+
+Agent call format:
+
+```txt
+GET  {service_base_url}/health
+GET  {service_base_url}/actions
+POST {service_base_url}/actions/<action_name>
+```
+
+For local use, `{service_base_url}` is normally `http://127.0.0.1:8787`. For a
+remote main Agent, it is a controlled local-worker bridge/tunnel URL.
+
+## Deployment Modes
+
+### Local Agent Mode
+
+- Agent and browser-backed service run on the same computer.
+- Use the default `service_base_url=http://127.0.0.1:8787`.
+- No bridge or tunnel is required.
+- Teammate setup remains `npm install`, `npm run open:profile`,
+  `npm run refresh:once`, and `npm run start:live`.
+
+### Remote Main Agent + Local Worker Mode
+
+- Main Agent runs remotely or in the cloud.
+- Browser-backed service runs on the teammate's computer.
+- The teammate's computer is the local worker.
+- Main Agent calls the configured `service_base_url`, which points to a
+  controlled bridge/tunnel for that local worker.
+- The bridge/tunnel is deployment infrastructure; this service release does not
+  implement it.
+- Profile, refresh state, cookies, tokens, sessions, and browser storage remain
+  on the teammate's computer.
+
+Bridge/tunnel safety boundary:
+
+- Forward only `/health`, `/actions`, `/actions/<allowlisted_action>`,
+  `/actions/batch`, and `/actions/multi_source_plan`.
+- Do not expose arbitrary URL fetch or arbitrary platform paths.
+- Do not expose Chrome profile files, cookies, tokens, sessions, authorization
+  values, request headers, localStorage, or Playwright storageState.
+- Require access control such as a temporary token, internal ACL, user
+  confirmation, or equivalent deployment guard.
+- Do not expose the local service directly to the public internet.
+
+### Temporary Profile Bootstrap Mode
+
+This is a temporary debugging/transition mode for a same-user environment where
+the machine that will run the service has no GUI and cannot complete
+`npm run open:profile`.
+
+- A GUI Mac may be used temporarily by the same user to complete first-time
+  profile activation, periodic Archives/account confirmation, SSO, or required
+  human verification.
+- After activation, `refresh:once`, `start:live`, and action calls still run on
+  the main Agent's local machine only if that same user's usable profile is
+  available there.
+- Do not treat the Mac service as a long-term central service.
+- Do not share profiles across users.
+- Do not upload cookies, tokens, sessions, request headers, browser storage,
+  storageState, or profile contents.
+- Do not let the Agent inspect profile files.
+
+This is not the default team deployment. Local Agent Mode remains the default
+local path. Remote Main Agent + Local Worker Mode is the formal remote-Agent
+shape.
 
 ## Response Contract
 

@@ -2,9 +2,31 @@
 
 Browser-backed Risk Platform Access Service / 风控统一受控透传服务.
 
-This local service runs only on `127.0.0.1`. It gives Agent, Skill, and local
-scripts a controlled way to call fixed risk-platform actions with typed params
-through the teammate's own Chrome profile and platform permissions.
+This service runs on a teammate's own computer and listens on `127.0.0.1` by
+default. It gives Agent, Skill, and local scripts a controlled way to call fixed
+risk-platform actions with typed params through the teammate's own Chrome
+profile and platform permissions.
+
+Agents should call the service through a configured `service_base_url`.
+
+- Default local value: `http://127.0.0.1:8787`
+- Local Agent Mode: Agent, script, or curl runs on the same computer as the
+  service, so the default value works.
+- Remote Main Agent + Local Worker Mode: the main Agent runs in a remote/cloud
+  environment, so `127.0.0.1` points to the remote Agent machine, not the
+  teammate's computer. In that mode, set `BROWSER_BACKED_SERVICE_BASE_URL` or
+  the Agent's equivalent config to a controlled local-worker bridge/tunnel URL.
+- Temporary Profile Bootstrap Mode: if the machine that will run the service has
+  no GUI and cannot run `npm run open:profile`, the same user may temporarily
+  use a GUI Mac to complete profile activation or periodic account confirmation.
+  This is a bootstrap/debugging mode only, not a long-term action forwarding
+  mode.
+
+The bridge/tunnel is a deployment-layer requirement, not part of this service
+release. It must forward only `/health`, `/actions`, and
+`/actions/<allowlisted_action>` to the teammate's local worker; it must not
+expose arbitrary URL fetch, Chrome profile files, cookies, tokens, sessions, or
+request headers.
 
 The service only does:
 
@@ -154,6 +176,54 @@ One source failure does not block unrelated sources. Batch still does not
 produce business observations, evidence cards, source quality, or final risk
 judgment.
 
+## Deployment Modes
+
+### Local Agent Mode
+
+Use this when the Agent, local script, or curl command runs on the same computer
+as the browser-backed service.
+
+- `service_base_url=http://127.0.0.1:8787`
+- No bridge or tunnel is required.
+- The profile and refresh state stay on the teammate's own computer.
+- The normal `npm run open:profile`, `npm run refresh:once`, and
+  `npm run start:live` flow is unchanged.
+
+### Remote Main Agent + Local Worker Mode
+
+Use this when the main Agent runs remotely or in a cloud environment.
+
+- Do not assume the remote Agent can reach the teammate's
+  `http://127.0.0.1:8787`; that address refers to the remote Agent's own
+  machine.
+- Run the browser-backed service on the teammate's computer as the local worker.
+- Configure `BROWSER_BACKED_SERVICE_BASE_URL`, or the Agent's equivalent
+  setting, to a controlled bridge/tunnel URL that reaches that local worker.
+- Keep Chrome profile, refresh state, cookies, tokens, sessions, and browser
+  storage on the teammate's computer.
+- Do not expose the service directly to the public internet.
+
+See `LOCAL_WORKER_BRIDGE_PLAN.md` for bridge/tunnel deployment requirements.
+
+### Temporary Profile Bootstrap Mode
+
+Use this only when the machine that will run `refresh:once`, `start:live`, and
+actions has no GUI and cannot complete `npm run open:profile` directly.
+
+- A GUI Mac may be used temporarily by the same user to complete first-time SSO,
+  required two-factor steps, or periodic Archives/account confirmation.
+- After profile activation, `refresh:once`, `start:live`, and action calls can
+  run on the main Agent's local machine only if that same user's usable profile
+  is available there.
+- Do not use the Mac service as a long-term central service.
+- Do not share the profile across users.
+- Do not upload cookies, tokens, sessions, request headers, browser storage, or
+  profile contents to the Agent.
+- Do not let the Agent read profile files.
+
+This mode is a temporary profile activation path. It does not replace Local
+Agent Mode, and it is not the team's formal remote-Agent deployment shape.
+
 ## Local Setup
 
 Install dependencies:
@@ -197,10 +267,12 @@ npm run start:mock
 Examples:
 
 ```sh
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/actions
-curl -X POST http://127.0.0.1:8787/prewarm
-curl -X POST http://127.0.0.1:8787/actions/login_logs_search \
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+
+curl "$SERVICE_BASE_URL/health"
+curl "$SERVICE_BASE_URL/actions"
+curl -X POST "$SERVICE_BASE_URL/prewarm"
+curl -X POST "$SERVICE_BASE_URL/actions/login_logs_search" \
   -H 'content-type: application/json' \
   -d '{"user_id":"2871834924"}'
 ```
@@ -232,3 +304,4 @@ or captcha values. If manual factors appear, run `npm run open:profile`.
 - `BROWSER_BACKED_AGENT_SKILL.md`
 - `TEAM_LOCAL_SETUP.md`
 - `TROUBLESHOOTING.md`
+- `LOCAL_WORKER_BRIDGE_PLAN.md`

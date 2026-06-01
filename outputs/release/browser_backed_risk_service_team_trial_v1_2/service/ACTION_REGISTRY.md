@@ -19,6 +19,12 @@ another Agent interprets returned transport status or any platform data.
 - transport-only passthrough envelope
 - raw upstream body suppressed
 
+Callers should address the service through `service_base_url`:
+
+- default local value: `http://127.0.0.1:8787`
+- remote main Agent value: controlled local-worker bridge/tunnel URL from
+  `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent Agent configuration
+
 The service must not accept or output caller-provided URLs, paths, request
 headers, cookies, tokens, sessions, authorization strings, raw request bodies,
 raw queries, Chrome profile files, browser storage dumps, or Playwright storage

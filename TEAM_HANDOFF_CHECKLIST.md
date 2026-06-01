@@ -26,19 +26,23 @@ local internal testing.
 7. Check health:
 
 ```sh
-curl http://127.0.0.1:8787/health
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+curl "$SERVICE_BASE_URL/health"
 ```
 
 8. List actions:
 
 ```sh
-curl http://127.0.0.1:8787/actions
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+curl "$SERVICE_BASE_URL/actions"
 ```
 
 9. Call only fixed allowlisted actions:
 
 ```sh
-curl -X POST http://127.0.0.1:8787/actions/track_analysis_summary \
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+
+curl -X POST "$SERVICE_BASE_URL/actions/track_analysis_summary" \
   -H 'content-type: application/json' \
   -d '{"response_mode":"passthrough","sub_interface":"profile","user_id":"<replace_with_test_user_id>","appName":"KUAISHOU"}'
 ```
@@ -79,34 +83,84 @@ Rules:
 - `auth_state=ready`, or the specific origin needed by the action is ready.
 - `action_count=19`.
 - No credential material is output.
-- The service is listening only on `127.0.0.1`.
+- In Local Agent Mode, the service is listening on `127.0.0.1`.
+- In Remote Main Agent + Local Worker Mode, the Agent uses a configured
+  `service_base_url` for a controlled bridge/tunnel to the teammate's local
+  worker.
+
+## Deployment Mode Check
+
+Local Agent Mode:
+
+- Agent/script/curl and browser-backed service run on the same computer.
+- `service_base_url=http://127.0.0.1:8787`.
+- No bridge/tunnel is required.
+
+Remote Main Agent + Local Worker Mode:
+
+- Main Agent runs remotely or in the cloud.
+- Browser-backed service runs on the teammate's computer.
+- The remote Agent must not assume `127.0.0.1` points to the teammate's
+  computer.
+- Configure `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent Agent config to a
+  controlled local-worker bridge/tunnel URL.
+- The bridge/tunnel must forward only service routes and must not expose
+  arbitrary URL fetch, Chrome profile files, cookies, tokens, sessions, request
+  headers, localStorage, or storageState.
+
+Temporary Profile Bootstrap Mode:
+
+- Use only when the main Agent's local machine has no GUI and cannot run
+  `npm run open:profile`.
+- A GUI Mac may be used temporarily by the same user for first-time
+  `open:profile`, periodic Archives/account confirmation, SSO, or required
+  human verification.
+- This mode is only for profile activation or confirmation; it is not for
+  long-term action forwarding.
+- After activation, `refresh:once`, `start:live`, and action calls still run on
+  the main Agent's local machine if that same user's usable profile is present
+  there.
+- Do not share profile directories across users.
+- Do not upload cookies, tokens, sessions, request headers, browser storage, or
+  profile contents.
+- Do not treat the GUI Mac service as a central team service.
+
+Deployment priority:
+
+- Local Agent Mode is the default local mode.
+- Remote Main Agent + Local Worker Mode is the formal team remote-Agent shape.
+- Temporary Profile Bootstrap Mode is a debugging/transition profile activation
+  path only.
 
 ## Internal Test Scope
 
-Dual-mode actions:
+All callable actions are passthrough-only at the service layer. Legacy
+compat/summary modes are rejected.
+
+Default-open actions:
 
 - `track_analysis_summary`
 - `login_logs_search`
 - `weapon_inventory`
 - `rcp_snapshot`
+
+Explicit actions:
+
 - `archives_user_profile`
 - `archives_user_analysis`
 - `archives_photo_search`
 - `archives_related_users`
-- `rcp_event_detail`
-- `rcp_event_feature_list`
-- `rcp_policy_tree_lookup`
-- `track_analysis_check_data_ready`
-
-Passthrough-only actions:
-
 - `archives_private_message_search`
 - `archives_past_four_items`
+- `rcp_event_detail`
+- `rcp_event_feature_list`
 - `rcp_policy_version_lookup`
 - `rcp_policy_detail_lookup`
 - `rcp_policy_release_record_lookup`
+- `rcp_policy_tree_lookup`
 - `rcp_node_policy_attribution`
 - `rcp_node_bind_policy_attribution`
+- `track_analysis_check_data_ready`
 
 Excluded-noise categories are never open:
 

@@ -5,7 +5,15 @@ risk platform access service.
 
 Do not debug by reading Chrome cookie DBs, dumping localStorage, copying
 profiles, or printing cookies/tokens/sessions/headers. The service is designed
-to expose readiness and source-quality metadata without credential material.
+to expose readiness and transport metadata without credential material.
+
+Use `service_base_url` when calling the service:
+
+- Local Agent Mode default: `http://127.0.0.1:8787`
+- Remote Main Agent + Local Worker Mode: a configured controlled bridge/tunnel
+  URL, usually from `BROWSER_BACKED_SERVICE_BASE_URL`
+
+Local users normally do not need to set `BROWSER_BACKED_SERVICE_BASE_URL`.
 
 ## Port 8787 Is Already In Use
 
@@ -27,6 +35,68 @@ Fix:
   use that port.
 
 The normal service host is `127.0.0.1`.
+
+If your main Agent is remote/cloud-hosted, `127.0.0.1` is the remote Agent's
+machine, not the teammate's computer. Configure the Agent's `service_base_url`
+to a controlled local-worker bridge/tunnel URL instead of assuming direct
+localhost access.
+
+## Remote Main Agent Cannot Reach The Local Worker
+
+Symptom:
+
+- Local `curl http://127.0.0.1:8787/health` works on the teammate's computer.
+- The remote/cloud Agent cannot reach `http://127.0.0.1:8787/health`.
+
+Meaning:
+
+- The remote Agent is calling its own localhost, not the teammate's computer.
+
+Fix:
+
+- Keep the browser-backed service running on the teammate's computer.
+- Configure `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's equivalent setting
+  to a controlled bridge/tunnel URL for that local worker.
+- The bridge/tunnel should forward only `/health`, `/actions`,
+  `/actions/<allowlisted_action>`, `/actions/batch`, and
+  `/actions/multi_source_plan`.
+- Do not expose the service directly to the public internet.
+- Do not forward or upload profile files, cookies, tokens, sessions, request
+  headers, localStorage, or Playwright storageState.
+
+## Main Agent Machine Has No GUI For open:profile
+
+Symptom:
+
+- The machine that should run `refresh:once`, `start:live`, and actions cannot
+  open a visible browser.
+- `npm run open:profile` is not usable on that machine.
+
+Allowed temporary workaround:
+
+- Use Temporary Profile Bootstrap Mode.
+- The same user may temporarily use a GUI Mac to complete first-time
+  `open:profile`, Archives/account confirmation, SSO, or required human
+  verification.
+- Use this only for profile activation or periodic account confirmation.
+- After activation, run `refresh:once`, `start:live`, and action calls on the
+  main Agent's local machine only if that same user's usable profile is
+  available there.
+
+Not allowed:
+
+- Do not use the Mac service as a long-term central service.
+- Do not share profiles across users.
+- Do not upload cookies, tokens, sessions, request headers, browser storage,
+  storageState, or profile contents.
+- Do not let the Agent read profile files.
+
+Mode positioning:
+
+- Local Agent Mode is the default local path.
+- Remote Main Agent + Local Worker Mode is the formal team remote-Agent shape.
+- Temporary Profile Bootstrap Mode is a debugging/transition profile activation
+  path only.
 
 ## Profile Does Not Exist
 
@@ -181,7 +251,8 @@ Do not delete the profile. Do not copy another teammate's profile.
 Symptom:
 
 ```sh
-curl http://127.0.0.1:8787/health
+SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
+curl "$SERVICE_BASE_URL/health"
 ```
 
 returns connection refused.
@@ -317,12 +388,11 @@ Expected boundaries:
 - No raw browser storage dumps.
 
 The service reports only sanitized metadata such as readiness, origin status,
-latency, error type, legacy shape summaries, or passthrough upstream business
-bodies. `sensitive_output=false` or
+latency, error type, transport status, or body-presence metadata.
+`sensitive_output=false` or
 `safety.credential_material_output=false` means no credential secret or raw
-browser/profile material was returned; it does not mean risk entity fields such
-as `user_id`, `deviceId`, IP, `eventId`, `sourceId`, or policy codes are hidden
-inside upstream business responses.
+browser/profile material was returned; it does not make a risk conclusion about
+the requested entity.
 
 If any response appears to contain cookie, token, session, authorization,
 password, request header, localStorage, or profile-storage content, stop using
