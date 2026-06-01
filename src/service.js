@@ -343,6 +343,142 @@ export class BrowserBackedApiService {
     }
   }
 
+  async executeBatch(input = {}) {
+    const startedAt = Date.now();
+    const plan = buildBatchPlan(input);
+    const sourceResults = {};
+    const groupResults = [];
+
+    for (const group of plan.groups) {
+      const groupStartedAt = Date.now();
+      const sources = isParallelExecution(group.execution)
+        ? await Promise.all(group.sources.map((source) => this.executeBatchSource(source, plan)))
+        : await executeSerial(group.sources, (source) => this.executeBatchSource(source, plan));
+
+      for (const sourceResult of sources) {
+        sourceResults[sourceResult.source_id] = sourceResult;
+      }
+
+      groupResults.push({
+        group_id: group.group_id,
+        execution: group.execution,
+        dependency_group_ids: group.depends_on,
+        source_ids: group.sources.map((source) => source.source_id),
+        latency_ms: Date.now() - groupStartedAt,
+        completed_at: new Date().toISOString()
+      });
+    }
+
+    const sourceQualityMatrix = buildSourceQualityMatrix(sourceResults);
+    const classifications = buildBatchClassifications(sourceQualityMatrix);
+    const missingEvidence = buildMissingEvidence(sourceQualityMatrix);
+
+    return {
+      ok: true,
+      request_id: plan.request_id,
+      response_mode: "controlled_batch_passthrough",
+      batch_status: batchStatus(classifications, sourceQualityMatrix),
+      service_mode: this.config.mode,
+      execution_started_at: plan.started_at,
+      latency_ms: Date.now() - startedAt,
+      scheduler: {
+        execution_model: "controlled_parallel",
+        group_count: plan.groups.length,
+        source_count: plan.source_count,
+        default_source_timeout_ms: plan.default_timeout_ms,
+        max_source_timeout_ms: MAX_BATCH_SOURCE_TIMEOUT_MS,
+        raw_body_output: false
+      },
+      execution_groups: groupResults,
+      source_results: sourceResults,
+      source_quality_matrix: sourceQualityMatrix,
+      classifications,
+      evidence_card_inputs: {
+        generated_by: "browser_backed_batch_executor",
+        final_risk_judgement: false,
+        raw_body_suppressed: true,
+        source_statuses: Object.values(sourceQualityMatrix).map((quality) => ({
+          source_id: quality.source_id,
+          action: quality.action,
+          category: quality.category,
+          source_status: quality.source_status,
+          error_type: quality.error_type
+        })),
+        missing_evidence: missingEvidence
+      },
+      missing_evidence: missingEvidence,
+      safety: batchSafety()
+    };
+  }
+
+  async executeBatchSource(source, plan) {
+    const startedAt = Date.now();
+    if (source.validation_error) {
+      return buildBatchSourceResult({
+        source,
+        plan,
+        category: "blocked",
+        sourceStatus: "parameter_error",
+        errorType: source.validation_error.error_type,
+        latencyMs: Date.now() - startedAt,
+        response: null,
+        validationError: source.validation_error
+      });
+    }
+
+    if (plan.dry_run) {
+      return buildBatchSourceResult({
+        source,
+        plan,
+        category: "planned",
+        sourceStatus: "planned",
+        errorType: null,
+        latencyMs: Date.now() - startedAt,
+        response: null
+      });
+    }
+
+    try {
+      const response = await withSourceTimeout(
+        () => this.executeAction(source.action, source.params),
+        source.timeout_ms
+      );
+      if (response?.timed_out) {
+        return buildBatchSourceResult({
+          source,
+          plan,
+          category: "timeout",
+          sourceStatus: "timeout",
+          errorType: "timeout",
+          latencyMs: Date.now() - startedAt,
+          response: null,
+          timedOut: true
+        });
+      }
+
+      return buildBatchSourceResult({
+        source,
+        plan,
+        category: classifyBatchSourceResult(response),
+        sourceStatus: sourceStatusFromBatchResponse(response),
+        errorType: errorTypeFromBatchResponse(response),
+        latencyMs: Date.now() - startedAt,
+        response
+      });
+    } catch (error) {
+      return buildBatchSourceResult({
+        source,
+        plan,
+        category: "blocked",
+        sourceStatus: "blocked",
+        errorType: classifyError(error),
+        latencyMs: Date.now() - startedAt,
+        response: null,
+        exceptionMessage: sanitizeErrorMessage(error)
+      });
+    }
+  }
+
   warmedOrigins() {
     return Object.values(this.config.domains).map((domain) => {
       const state = this.warmState.get(domain.key) || defaultWarmState(domain, this.config);
@@ -386,6 +522,481 @@ export class BrowserBackedApiService {
     }
     this.refreshState = saveRefreshState(this.refreshState, this.config.stateFile);
   }
+}
+
+const BATCH_EXECUTION_MODES = Object.freeze([
+  "independent_parallel",
+  "dependency_serial",
+  "large_response_serial",
+  "auth_sensitive_serial"
+]);
+const DEFAULT_BATCH_SOURCE_TIMEOUT_MS = 30_000;
+const MAX_BATCH_SOURCE_TIMEOUT_MS = 120_000;
+const MAX_BATCH_GROUPS = 12;
+const MAX_BATCH_SOURCES = 30;
+const SAFE_BATCH_ID_PATTERN = /^[A-Za-z0-9_:-]{1,96}$/;
+
+function buildBatchPlan(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw publicError(400, "invalid_batch_request", "Batch request body must be an object");
+  }
+  validateActionInput(input);
+
+  const groupsInput = Array.isArray(input.execution_groups)
+    ? input.execution_groups
+    : Array.isArray(input.sources)
+      ? [{ group_id: "default_parallel", execution: "independent_parallel", sources: input.sources }]
+      : null;
+  if (!groupsInput || groupsInput.length === 0) {
+    throw publicError(400, "invalid_batch_request", "Batch request must include execution_groups or sources");
+  }
+  if (groupsInput.length > MAX_BATCH_GROUPS) {
+    throw publicError(400, "invalid_batch_request", `Batch can include at most ${MAX_BATCH_GROUPS} groups`);
+  }
+
+  const requestId = safeBatchId(input.request_id, batchRequestId());
+  const defaultTimeoutMs = boundedTimeout(input.default_timeout_ms, DEFAULT_BATCH_SOURCE_TIMEOUT_MS);
+  const groupIds = new Set();
+  const sourceIds = new Set();
+  let sourceCount = 0;
+
+  const groups = groupsInput.map((groupInput, groupIndex) => {
+    if (!groupInput || typeof groupInput !== "object" || Array.isArray(groupInput)) {
+      throw publicError(400, "invalid_batch_request", "Each execution group must be an object");
+    }
+    const groupId = safeBatchId(groupInput.group_id, `group_${groupIndex + 1}`);
+    if (groupIds.has(groupId)) {
+      throw publicError(400, "invalid_batch_request", `Duplicate group_id: ${groupId}`);
+    }
+    groupIds.add(groupId);
+
+    const execution = groupInput.execution || "independent_parallel";
+    if (!BATCH_EXECUTION_MODES.includes(execution)) {
+      throw publicError(400, "invalid_batch_request", `Unsupported execution mode: ${execution}`);
+    }
+    const sourcesInput = groupInput.sources;
+    if (!Array.isArray(sourcesInput) || sourcesInput.length === 0) {
+      throw publicError(400, "invalid_batch_request", `Group ${groupId} must include sources`);
+    }
+
+    const sources = sourcesInput.map((sourceInput, sourceIndex) => {
+      const source = normalizeBatchSource(sourceInput, {
+        groupId,
+        groupIndex,
+        sourceIndex,
+        defaultTimeoutMs
+      });
+      if (sourceIds.has(source.source_id)) {
+        throw publicError(400, "invalid_batch_request", `Duplicate source_id: ${source.source_id}`);
+      }
+      sourceIds.add(source.source_id);
+      return source;
+    });
+
+    sourceCount += sources.length;
+    if (sourceCount > MAX_BATCH_SOURCES) {
+      throw publicError(400, "invalid_batch_request", `Batch can include at most ${MAX_BATCH_SOURCES} sources`);
+    }
+
+    return {
+      group_id: groupId,
+      execution,
+      depends_on: normalizeDependsOn(groupInput.depends_on),
+      sources
+    };
+  });
+
+  const groupIndexById = new Map(groups.map((group, index) => [group.group_id, index]));
+  for (const [groupIndex, group] of groups.entries()) {
+    for (const dependency of group.depends_on) {
+      if (!groupIds.has(dependency)) {
+        throw publicError(400, "invalid_batch_request", `Unknown dependency group_id: ${dependency}`);
+      }
+      if ((groupIndexById.get(dependency) ?? Number.POSITIVE_INFINITY) >= groupIndex) {
+        throw publicError(
+          400,
+          "invalid_batch_request",
+          `Dependency group_id must appear before dependent group: ${dependency}`
+        );
+      }
+    }
+  }
+
+  return {
+    request_id: requestId,
+    dry_run: input.dry_run === true,
+    started_at: new Date().toISOString(),
+    default_timeout_ms: defaultTimeoutMs,
+    source_count: sourceCount,
+    groups
+  };
+}
+
+function normalizeBatchSource(sourceInput, { groupId, sourceIndex, defaultTimeoutMs }) {
+  if (!sourceInput || typeof sourceInput !== "object" || Array.isArray(sourceInput)) {
+    throw publicError(400, "invalid_batch_request", `Source ${groupId}/${sourceIndex + 1} must be an object`);
+  }
+  validateActionInput(sourceInput);
+
+  const actionName = sourceInput.action || sourceInput.action_name;
+  if (typeof actionName !== "string" || !SAFE_BATCH_ID_PATTERN.test(actionName)) {
+    throw publicError(400, "invalid_batch_request", "Each source must include an allowlisted action");
+  }
+  const action = getAction(actionName);
+  if (!action) {
+    throw publicError(400, "unknown_action", `Unknown action in batch: ${actionName}`);
+  }
+
+  const rawParams = sourceInput.params && typeof sourceInput.params === "object" && !Array.isArray(sourceInput.params)
+    ? sourceInput.params
+    : {};
+  validateActionInput(rawParams);
+
+  const params = {
+    ...rawParams,
+    response_mode: "passthrough"
+  };
+  const sourceId = safeBatchId(sourceInput.source_id, `${actionName}_${sourceIndex + 1}`);
+  const timeoutMs = boundedTimeout(sourceInput.timeout_ms, defaultTimeoutMs);
+  const validationError = rawParams.response_mode && rawParams.response_mode !== "passthrough"
+    ? {
+        error_type: "invalid_parameter",
+        message: "Batch sources must use response_mode=passthrough"
+      }
+    : null;
+
+  return {
+    source_id: sourceId,
+    action: action.name,
+    origin_key: action.domainKey,
+    params,
+    timeout_ms: timeoutMs,
+    validation_error: validationError
+  };
+}
+
+function normalizeDependsOn(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => safeBatchId(item, null)).filter(Boolean);
+}
+
+function safeBatchId(value, fallback) {
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!SAFE_BATCH_ID_PATTERN.test(trimmed)) {
+    throw publicError(400, "invalid_batch_request", "Batch ids must contain only letters, numbers, underscore, colon, or hyphen");
+  }
+  return trimmed;
+}
+
+function boundedTimeout(value, fallback) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw publicError(400, "invalid_batch_request", "timeout_ms must be a positive number");
+  }
+  return Math.min(Math.max(Math.trunc(number), 100), MAX_BATCH_SOURCE_TIMEOUT_MS);
+}
+
+function isParallelExecution(execution) {
+  return execution === "independent_parallel";
+}
+
+async function executeSerial(sources, runner) {
+  const results = [];
+  for (const source of sources) {
+    results.push(await runner(source));
+  }
+  return results;
+}
+
+function withSourceTimeout(runner, timeoutMs) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve().then(runner),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ timed_out: true }), timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+function buildBatchSourceResult({
+  source,
+  category,
+  sourceStatus,
+  errorType,
+  latencyMs,
+  response,
+  timedOut = false,
+  validationError = null,
+  exceptionMessage = null
+}) {
+  const upstream = summarizeBatchUpstream(response);
+  return {
+    source_id: source.source_id,
+    action: source.action,
+    origin: source.origin_key,
+    response_mode: "passthrough",
+    category,
+    source_status: sourceStatus,
+    error_type: errorType,
+    ok: category === "completed" || category === "no_data" || category === "partial" || category === "planned",
+    timed_out: timedOut,
+    timeout_ms: source.timeout_ms,
+    latency_ms: latencyMs,
+    upstream,
+    normalized_observation: buildBatchObservation(source, response, category, sourceStatus, errorType, upstream),
+    evidence_card_inputs: {
+      action: source.action,
+      origin: source.origin_key,
+      category,
+      source_status: sourceStatus,
+      error_type: errorType,
+      raw_body_suppressed: true
+    },
+    raw_body_suppressed: true,
+    source_quality: buildBatchSourceQuality({
+      source,
+      category,
+      sourceStatus,
+      errorType,
+      latencyMs,
+      upstream,
+      timedOut
+    }),
+    ...(validationError ? { validation_error: validationError } : {}),
+    ...(exceptionMessage ? { error_message_sanitized: exceptionMessage } : {})
+  };
+}
+
+function summarizeBatchUpstream(response) {
+  const upstream = response?.upstream || null;
+  if (upstream) {
+    return {
+      status: upstream.status ?? null,
+      content_type: upstream.content_type ?? null,
+      body_present: upstream.body !== undefined && upstream.body !== null,
+      body_omitted: Boolean(upstream.body_omitted),
+      response_too_large: Boolean(upstream.response_too_large),
+      error_type: upstream.error_type || null,
+      raw_body_suppressed: true
+    };
+  }
+  const data = response?.data || null;
+  return {
+    status: data?.http_status ?? null,
+    content_type: null,
+    body_present: Boolean(data?.response_summary),
+    body_omitted: Boolean(data?.body_truncated),
+    response_too_large: Boolean(data?.body_truncated),
+    error_type: response?.error_type || null,
+    raw_body_suppressed: true
+  };
+}
+
+function buildBatchObservation(source, response, category, sourceStatus, errorType, upstream) {
+  return {
+    action: source.action,
+    origin: source.origin_key,
+    category,
+    source_status: sourceStatus,
+    error_type: errorType,
+    upstream_status: upstream.status,
+    upstream_content_type: upstream.content_type,
+    upstream_body_present: upstream.body_present,
+    upstream_body_omitted: upstream.body_omitted,
+    raw_body_suppressed: true,
+    source_quality_available: true,
+    final_risk_judgement: false,
+    output_contains_credential_material: false,
+    safety: response?.safety || batchSafety()
+  };
+}
+
+function buildBatchSourceQuality({ source, category, sourceStatus, errorType, latencyMs, upstream, timedOut }) {
+  return {
+    source_id: source.source_id,
+    action: source.action,
+    origin: source.origin_key,
+    category,
+    source_status: sourceStatus,
+    error_type: errorType,
+    upstream_status: upstream.status,
+    latency_ms: latencyMs,
+    timeout_ms: source.timeout_ms,
+    timed_out: Boolean(timedOut),
+    completed: category === "completed",
+    no_data: category === "no_data",
+    partial: category === "partial",
+    auth_failed: category === "auth_failed",
+    blocked: category === "blocked",
+    parse_error: category === "parse_error",
+    raw_body_suppressed: true
+  };
+}
+
+function classifyBatchSourceResult(response) {
+  const errorType = errorTypeFromBatchResponse(response);
+  const status = sourceStatusFromBatchResponse(response);
+  if (errorType) {
+    return categoryFromErrorType(errorType);
+  }
+  if (/no[_-]?data|no[_-]?hit|completed_no_data/i.test(status)) {
+    return "no_data";
+  }
+  if (/partial/i.test(status)) {
+    return "partial";
+  }
+  if (/auth/i.test(status)) {
+    return "auth_failed";
+  }
+  if (/blocked|denied|disabled|parameter/i.test(status)) {
+    return "blocked";
+  }
+  if (/timeout/i.test(status)) {
+    return "timeout";
+  }
+  if (/parse/i.test(status)) {
+    return "parse_error";
+  }
+  if (response?.upstream) {
+    if (response.upstream.body_omitted || response.upstream.response_too_large) {
+      return "partial";
+    }
+    if (response.ok === true && response.upstream.body === null) {
+      return "no_data";
+    }
+    if (response.ok === true) {
+      return "completed";
+    }
+  }
+  return response?.ok === false ? "blocked" : "completed";
+}
+
+function categoryFromErrorType(errorType) {
+  if (/timeout|navigation_timeout/i.test(errorType)) {
+    return "timeout";
+  }
+  if (/auth|landing|login/i.test(errorType)) {
+    return "auth_failed";
+  }
+  if (/parse/i.test(errorType)) {
+    return "parse_error";
+  }
+  if (/response_too_large|truncated/i.test(errorType)) {
+    return "partial";
+  }
+  if (/blocked|denied|disabled|parameter|origin_mismatch|credential_material/i.test(errorType)) {
+    return "blocked";
+  }
+  return "blocked";
+}
+
+function sourceStatusFromBatchResponse(response) {
+  if (!response) {
+    return "not_available";
+  }
+  return response.source_status || response.status || (response.ok === true ? "completed" : "failed");
+}
+
+function errorTypeFromBatchResponse(response) {
+  return response?.error_type || response?.upstream?.error_type || null;
+}
+
+function buildSourceQualityMatrix(sourceResults) {
+  return Object.fromEntries(
+    Object.values(sourceResults).map((sourceResult) => [sourceResult.source_id, sourceResult.source_quality])
+  );
+}
+
+function buildBatchClassifications(sourceQualityMatrix) {
+  const classifications = {
+    completed: [],
+    no_data: [],
+    partial: [],
+    auth_failed: [],
+    blocked: [],
+    timeout: [],
+    parse_error: [],
+    planned: []
+  };
+  for (const quality of Object.values(sourceQualityMatrix)) {
+    if (!classifications[quality.category]) {
+      classifications[quality.category] = [];
+    }
+    classifications[quality.category].push(quality.source_id);
+  }
+  return classifications;
+}
+
+function buildMissingEvidence(sourceQualityMatrix) {
+  return Object.values(sourceQualityMatrix)
+    .filter((quality) => quality.category !== "completed" && quality.category !== "planned")
+    .map((quality) => ({
+      source_id: quality.source_id,
+      action: quality.action,
+      category: quality.category,
+      error_type: quality.error_type,
+      reason: missingEvidenceReason(quality)
+    }));
+}
+
+function missingEvidenceReason(quality) {
+  if (quality.category === "no_data") {
+    return "source_returned_no_data";
+  }
+  if (quality.category === "partial") {
+    return "source_partial_or_response_limited";
+  }
+  if (quality.category === "auth_failed") {
+    return "auth_or_permission_flow_blocked";
+  }
+  if (quality.category === "timeout") {
+    return "source_timed_out";
+  }
+  if (quality.category === "parse_error") {
+    return "source_response_parse_error";
+  }
+  return "source_not_completed";
+}
+
+function batchStatus(classifications, sourceQualityMatrix) {
+  const total = Object.keys(sourceQualityMatrix).length;
+  if (classifications.planned.length === total) {
+    return "planned";
+  }
+  if (classifications.completed.length === total) {
+    return "completed";
+  }
+  if (classifications.completed.length > 0 || classifications.no_data.length > 0 || classifications.partial.length > 0) {
+    return "partial";
+  }
+  return "failed";
+}
+
+function batchSafety() {
+  return {
+    credential_material_output: false,
+    request_headers_output: false,
+    browser_profile_material_output: false,
+    raw_upstream_body_output: false,
+    arbitrary_url_fetch: false
+  };
+}
+
+function batchRequestId() {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `batch_${Date.now().toString(36)}_${random}`;
 }
 
 function defaultWarmState(domain, config) {

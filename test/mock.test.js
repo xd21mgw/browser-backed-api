@@ -887,6 +887,386 @@ test("recovered passthrough actions return passthrough envelope by default in mo
   }
 });
 
+test("batch executes ATO independent sources with controlled parallel groups", async () => {
+  const service = createService();
+  await service.prewarm();
+
+  const response = await service.executeBatch({
+    request_id: "batch_ato_mock",
+    execution_groups: [
+      {
+        group_id: "ato_independent",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "login_logs",
+            action: "login_logs_search",
+            params: MOCK_ACTION_INPUTS.login_logs_search,
+            timeout_ms: 1000
+          },
+          {
+            source_id: "archives_profile",
+            action: "archives_user_profile",
+            params: MOCK_ACTION_INPUTS.archives_user_profile,
+            timeout_ms: 1000
+          },
+          {
+            source_id: "track_ready",
+            action: "track_analysis_check_data_ready",
+            params: MOCK_ACTION_INPUTS.track_analysis_check_data_ready,
+            timeout_ms: 1000
+          }
+        ]
+      },
+      {
+        group_id: "archives_followup",
+        execution: "dependency_serial",
+        depends_on: ["ato_independent"],
+        sources: [
+          {
+            source_id: "archives_analysis",
+            action: "archives_user_analysis",
+            params: MOCK_ACTION_INPUTS.archives_user_analysis,
+            timeout_ms: 1000
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.response_mode, "controlled_batch_passthrough");
+  assert.equal(response.scheduler.execution_model, "controlled_parallel");
+  assert.equal(response.scheduler.source_count, 4);
+  assert.deepEqual(response.classifications.completed.sort(), [
+    "archives_analysis",
+    "archives_profile",
+    "login_logs",
+    "track_ready"
+  ]);
+  assert.equal(response.execution_groups[0].execution, "independent_parallel");
+  assert.equal(response.execution_groups[1].execution, "dependency_serial");
+  assert.deepEqual(response.execution_groups[1].dependency_group_ids, ["ato_independent"]);
+  assert.equal(response.source_results.login_logs.upstream.body_present, true);
+  assert.equal(Object.hasOwn(response.source_results.login_logs.upstream, "body"), false);
+  assert.equal(response.source_results.login_logs.raw_body_suppressed, true);
+  assert.equal(response.source_quality_matrix.login_logs.completed, true);
+  assert.equal(response.evidence_card_inputs.final_risk_judgement, false);
+  assert.equal(response.evidence_card_inputs.raw_body_suppressed, true);
+  assert.equal(response.safety.credential_material_output, false);
+  assertNoCredentialMaterial(response);
+});
+
+test("batch runs RCP event detail to feature list dependency serially", async () => {
+  const service = createService();
+  const calls = [];
+  service.executeAction = async (actionName) => {
+    calls.push(actionName);
+    return {
+      ok: true,
+      action: actionName,
+      response_mode: "passthrough",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body: { actionName }
+      },
+      meta: { origin: "rcp", latency_ms: 1, fetched_at: "2026-05-31T00:00:00.000Z" },
+      safety: {
+        credential_material_output: false,
+        request_headers_output: false,
+        browser_profile_material_output: false
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "rcp_detail_chain",
+        execution: "dependency_serial",
+        sources: [
+          {
+            source_id: "event_detail",
+            action: "rcp_event_detail",
+            params: MOCK_ACTION_INPUTS.rcp_event_detail
+          },
+          {
+            source_id: "feature_list",
+            action: "rcp_event_feature_list",
+            params: MOCK_ACTION_INPUTS.rcp_event_feature_list
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.deepEqual(calls, ["rcp_event_detail", "rcp_event_feature_list"]);
+  assert.equal(response.execution_groups[0].execution, "dependency_serial");
+  assert.deepEqual(response.classifications.completed, ["event_detail", "feature_list"]);
+  assert.equal(response.source_quality_matrix.event_detail.completed, true);
+  assert.equal(response.source_quality_matrix.feature_list.completed, true);
+  assert.equal(Object.hasOwn(response.source_results.feature_list.upstream, "body"), false);
+});
+
+test("batch dry run accepts large response and auth sensitive serial groups", async () => {
+  const service = createService();
+
+  const response = await service.executeBatch({
+    dry_run: true,
+    execution_groups: [
+      {
+        group_id: "large_sources",
+        execution: "large_response_serial",
+        sources: [
+          {
+            source_id: "feature_list",
+            action: "rcp_event_feature_list",
+            params: MOCK_ACTION_INPUTS.rcp_event_feature_list
+          }
+        ]
+      },
+      {
+        group_id: "auth_sensitive_archives",
+        execution: "auth_sensitive_serial",
+        depends_on: ["large_sources"],
+        sources: [
+          {
+            source_id: "archives_analysis",
+            action: "archives_user_analysis",
+            params: MOCK_ACTION_INPUTS.archives_user_analysis
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "planned");
+  assert.deepEqual(response.classifications.planned, ["feature_list", "archives_analysis"]);
+  assert.equal(response.execution_groups[0].execution, "large_response_serial");
+  assert.equal(response.execution_groups[1].execution, "auth_sensitive_serial");
+  assert.deepEqual(response.execution_groups[1].dependency_group_ids, ["large_sources"]);
+});
+
+test("batch rejects unsupported execution modes and forward dependencies", async () => {
+  const service = createService();
+
+  await assert.rejects(
+    () => service.executeBatch({
+      execution_groups: [
+        {
+          group_id: "unsafe_parallel_typo",
+          execution: "parallel",
+          sources: [
+            {
+              source_id: "login_logs",
+              action: "login_logs_search",
+              params: MOCK_ACTION_INPUTS.login_logs_search
+            }
+          ]
+        }
+      ]
+    }),
+    /Unsupported execution mode/
+  );
+
+  await assert.rejects(
+    () => service.executeBatch({
+      execution_groups: [
+        {
+          group_id: "dependent",
+          execution: "dependency_serial",
+          depends_on: ["later_group"],
+          sources: [
+            {
+              source_id: "archives_analysis",
+              action: "archives_user_analysis",
+              params: MOCK_ACTION_INPUTS.archives_user_analysis
+            }
+          ]
+        },
+        {
+          group_id: "later_group",
+          execution: "independent_parallel",
+          sources: [
+            {
+              source_id: "archives_profile",
+              action: "archives_user_profile",
+              params: MOCK_ACTION_INPUTS.archives_user_profile
+            }
+          ]
+        }
+      ]
+    }),
+    /must appear before dependent group/
+  );
+});
+
+test("batch source auth failure does not block other sources", async () => {
+  const service = createService();
+  service.executeAction = async (actionName) => {
+    if (actionName === "login_logs_search") {
+      return {
+        ok: false,
+        action: actionName,
+        response_mode: "passthrough",
+        error_type: "auth_failed",
+        upstream: {
+          status: null,
+          content_type: null,
+          body: null
+        },
+        meta: { origin: "login_logs", latency_ms: 1, fetched_at: "2026-05-31T00:00:00.000Z" },
+        safety: {
+          credential_material_output: false,
+          request_headers_output: false,
+          browser_profile_material_output: false
+        }
+      };
+    }
+    return {
+      ok: true,
+      action: actionName,
+      response_mode: "passthrough",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body: { ok: true }
+      },
+      meta: { origin: "archives", latency_ms: 1, fetched_at: "2026-05-31T00:00:00.000Z" },
+      safety: {
+        credential_material_output: false,
+        request_headers_output: false,
+        browser_profile_material_output: false
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "failure_isolation",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "login_logs",
+            action: "login_logs_search",
+            params: MOCK_ACTION_INPUTS.login_logs_search
+          },
+          {
+            source_id: "archives_profile",
+            action: "archives_user_profile",
+            params: MOCK_ACTION_INPUTS.archives_user_profile
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "partial");
+  assert.deepEqual(response.classifications.auth_failed, ["login_logs"]);
+  assert.deepEqual(response.classifications.completed, ["archives_profile"]);
+  assert.equal(response.source_quality_matrix.login_logs.auth_failed, true);
+  assert.equal(response.source_quality_matrix.archives_profile.completed, true);
+  assert.equal(response.missing_evidence[0].reason, "auth_or_permission_flow_blocked");
+});
+
+test("batch source timeout does not block completed sources", async () => {
+  const service = createService();
+  service.executeAction = async (actionName) => {
+    if (actionName === "login_logs_search") {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return {
+      ok: true,
+      action: actionName,
+      response_mode: "passthrough",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body: { ok: true }
+      },
+      meta: { origin: "mock", latency_ms: 1, fetched_at: "2026-05-31T00:00:00.000Z" },
+      safety: {
+        credential_material_output: false,
+        request_headers_output: false,
+        browser_profile_material_output: false
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "timeout_isolation",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "login_logs",
+            action: "login_logs_search",
+            params: MOCK_ACTION_INPUTS.login_logs_search,
+            timeout_ms: 100
+          },
+          {
+            source_id: "archives_profile",
+            action: "archives_user_profile",
+            params: MOCK_ACTION_INPUTS.archives_user_profile,
+            timeout_ms: 1000
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.deepEqual(response.classifications.timeout, ["login_logs"]);
+  assert.deepEqual(response.classifications.completed, ["archives_profile"]);
+  assert.equal(response.source_quality_matrix.login_logs.timed_out, true);
+  assert.equal(response.source_quality_matrix.archives_profile.completed, true);
+});
+
+test("batch rejects forbidden source inputs and does not permit compat_summary", async () => {
+  const service = createService();
+
+  await assert.rejects(
+    () => service.executeBatch({
+      sources: [
+        {
+          action: "login_logs_search",
+          params: {
+            ...MOCK_ACTION_INPUTS.login_logs_search,
+            headers: { authorization: "blocked" }
+          }
+        }
+      ]
+    }),
+    /Forbidden action input/
+  );
+
+  const response = await service.executeBatch({
+    sources: [
+      {
+        source_id: "legacy_mode",
+        action: "login_logs_search",
+        params: {
+          ...MOCK_ACTION_INPUTS.login_logs_search,
+          response_mode: "compat_summary"
+        }
+      },
+      {
+        source_id: "archives_profile",
+        action: "archives_user_profile",
+        params: MOCK_ACTION_INPUTS.archives_user_profile
+      }
+    ]
+  });
+
+  assert.deepEqual(response.classifications.blocked, ["legacy_mode"]);
+  assert.deepEqual(response.classifications.completed, ["archives_profile"]);
+  assert.equal(response.source_results.legacy_mode.error_type, "invalid_parameter");
+  assert.equal(response.source_results.archives_profile.response_mode, "passthrough");
+  assert.equal(Object.hasOwn(response.source_results.archives_profile.upstream, "body"), false);
+});
+
 test("recovered passthrough actions build fixed service-side requests", () => {
   for (const actionName of RECOVERED_PASSTHROUGH_ACTIONS) {
     const action = ACTIONS[actionName];

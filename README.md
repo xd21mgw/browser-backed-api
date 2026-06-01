@@ -394,6 +394,62 @@ response fields, including risk entities, but it must not forward browser auth
 material, request headers, cookies, tokens, sessions, profile storage, or
 Playwright storage state.
 
+### `POST /actions/batch`
+
+Runs multiple existing fixed actions through a controlled batch scheduler. This
+is not arbitrary HTTP concurrency and does not add any platform interface. Every
+source still names one allowlisted action and provides only that action's typed
+params.
+
+Request shape:
+
+```json
+{
+  "request_id": "ato_example",
+  "execution_groups": [
+    {
+      "group_id": "ato_independent",
+      "execution": "independent_parallel",
+      "sources": [
+        {
+          "source_id": "login_logs",
+          "action": "login_logs_search",
+          "params": {
+            "user_id": "2871834924"
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Supported group execution modes:
+
+- `independent_parallel`: sources in the group may run concurrently.
+- `dependency_serial`: sources run in the listed order.
+- `large_response_serial`: large-response sources run one at a time.
+- `auth_sensitive_serial`: shared browser-auth-context sources run one at a
+  time.
+
+Unknown execution modes are rejected instead of falling back to parallel
+execution. `depends_on` may only reference an earlier group in the same request,
+so dependency groups run after their prerequisites.
+
+Batch source params are forced to `response_mode=passthrough`; callers cannot
+request `compat_summary` through batch. Batch output suppresses
+`upstream.body` and records only `body_present`, `body_omitted`, upstream
+status/content type, per-source timeout, source status, `source_quality_matrix`,
+`normalized_observation`, `evidence_card_inputs`, and `missing_evidence`.
+
+One source returning `no_data`, `auth_failed`, `blocked`, `timeout`, or
+`parse_error` does not stop other sources from running. The batch executor does
+not produce a final risk judgment.
+
+`POST /actions/multi_source_plan` is an alias for the same controlled batch
+executor.
+
 `rcp_snapshot` uses the fixed RCP eventList source:
 
 - fixed path: `POST /v2/rest/event/eventList`

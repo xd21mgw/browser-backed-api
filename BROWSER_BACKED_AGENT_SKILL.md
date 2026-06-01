@@ -42,6 +42,28 @@ deciding how to present evidence.
    passthrough safety checks, mock tests, live smoke, and registry updates before
    they can enter the allowlist.
 
+## Controlled Multi-Source Calls
+
+When a review needs several sources, Agent may call `POST /actions/batch` with
+execution groups instead of firing unrelated HTTP requests manually.
+
+Batch rules:
+
+- Each source must name one allowlisted fixed action.
+- Each source must pass only that action's typed params.
+- Batch forces `response_mode=passthrough`.
+- Supported group modes are `independent_parallel`, `dependency_serial`,
+  `large_response_serial`, and `auth_sensitive_serial`.
+- Unknown group modes are rejected; `depends_on` must reference an earlier group
+  in the same request.
+- Batch suppresses every `upstream.body` and returns source status,
+  `source_quality_matrix`, `normalized_observation`, `evidence_card_inputs`, and
+  `missing_evidence`.
+- One source failure must not be treated as a whole-batch failure unless all
+  evidence is missing.
+- Agent still owns parsing, evidence cards, and final reasoning outside the
+  service.
+
 ## Dual-Mode Actions
 
 These actions support `compat_summary` and `passthrough`. The default remains

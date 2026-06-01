@@ -175,6 +175,45 @@ Forbidden:
 
 The service listens only on `127.0.0.1`.
 
+## Controlled Batch Execution
+
+The service may expose a batch entry point for existing fixed actions:
+
+- `POST /actions/batch`
+- `POST /actions/multi_source_plan`
+
+Batch execution is a scheduler over the fixed action registry. It is not a
+generic HTTP client and does not allow caller-provided platform URLs, paths,
+headers, cookies, tokens, sessions, raw bodies, or raw queries.
+
+Each batch source must contain:
+
+- `source_id`
+- allowlisted `action`
+- typed `params`
+- optional `timeout_ms`
+
+Each batch group must choose one execution mode:
+
+- `independent_parallel`
+- `dependency_serial`
+- `large_response_serial`
+- `auth_sensitive_serial`
+
+Unknown execution modes must be rejected. `depends_on` may only point to a
+group that appears earlier in the request, so callers cannot accidentally run a
+dependent group before its prerequisite.
+
+Batch sources are forced to `response_mode=passthrough`; `compat_summary` is not
+available through the batch path. The batch result suppresses `upstream.body`
+and returns only source status, upstream status/content type, body presence,
+body omission, timeout/error metadata, `normalized_observation`,
+`source_quality_matrix`, `evidence_card_inputs`, and `missing_evidence`.
+
+Source failures are isolated. A source with `no_data`, `auth_failed`, `blocked`,
+`timeout`, or `parse_error` must not prevent unrelated sources from completing.
+The batch result must not produce a final risk judgment.
+
 ## Compatibility Strategy
 
 Compatibility rules:
