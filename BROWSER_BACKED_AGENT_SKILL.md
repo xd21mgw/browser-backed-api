@@ -3,127 +3,124 @@
 ## Positioning
 
 This skill uses the **Browser-backed Risk Platform Access Service** as a local
-controlled passthrough service for risk-platform reads.
+controlled transport service for risk-platform reads.
 
-- The service runs locally on `127.0.0.1`.
-- Each teammate uses their own Chrome profile and their own platform
-  permissions.
-- Agent calls only allowlisted fixed actions exposed by the local service.
-- Agent sends typed params only.
-- Agent does not read cookies, tokens, sessions, request headers, Chrome cookie
+- Service URL: `http://127.0.0.1:8787`
+- Each teammate uses their own Chrome profile and platform permissions.
+- Agent calls only allowlisted fixed actions.
+- Agent sends only typed params.
+- Agent must not read cookies, tokens, sessions, request headers, Chrome cookie
   DBs, browser storage, or profile files.
-- Agent does not compose arbitrary platform URLs or call platform endpoints
+- Agent must not compose arbitrary platform URLs or call platform endpoints
   directly.
-- This is not Dennis-specific and not account-security-specific. It is a common
-  browser-backed risk platform access layer.
+- The service returns a transport envelope only; raw upstream body is
+  suppressed.
 
-The service is not an evidence-writing or risk-judgment engine. In passthrough
-mode, it returns the upstream response envelope. Agent or another upper layer is
-responsible for parsing `upstream.body`, building normalized observations, and
-deciding how to present evidence.
+The service is not a business reasoning engine. Dennis or the upper-layer Agent
+owns parsing, observations, evidence cards, output policy, and final reasoning.
 
-## Agent Calling Principles
+## Calling Principles
 
-1. Identify the platform/action needed, then choose an allowlisted action from
-   `ACTION_REGISTRY.md`.
-2. Prefer the 12 dual-mode actions for existing compatibility flows.
-3. Use the 7 passthrough-only actions only when the user or plan explicitly asks
-   for that upstream action.
-4. For passthrough calls, expect only the passthrough envelope:
-   `ok`, `action`, `request_id`, `response_mode`, `upstream`, `meta`, and
-   `safety`.
-5. Never call `excluded_noise` capabilities.
-6. Never send `url`, `path`, `header`, `headers`, `cookie`, `token`, `session`,
+1. Choose an allowlisted action from `ACTION_REGISTRY.md`.
+2. Send only typed params accepted by that action.
+3. Use `response_mode=passthrough` or omit it; passthrough is the default.
+4. Never send `url`, `path`, `header`, `headers`, `cookie`, `token`, `session`,
    `authorization`, `raw_body`, `raw_query`, or `secret`.
-7. Never ask the service to create a summary, evidence card, `source_card`,
-   `source_quality`, no-data interpretation, risk judgment, or next-step
-   recommendation for passthrough-only actions.
-8. New actions require fixed origin/path, typed params, forbidden-input policy,
-   passthrough safety checks, mock tests, live smoke, and registry updates before
-   they can enter the allowlist.
+5. Never ask the service to create business summaries, observations, evidence
+   cards, source scoring, no-data interpretation, risk judgment, or next-step
+   recommendations.
+6. If the service is not running, ask the user to start it with
+   `npm run start:live` after completing `TEAM_LOCAL_SETUP.md`.
+
+## Response Contract
+
+Single action responses include transport fields such as:
+
+- `ok`
+- `action`
+- `action_name`
+- `request_id`
+- `request_mode=fixed_action`
+- `response_mode=passthrough`
+- `platform`
+- `http_status`
+- `content_type`
+- `body_present`
+- `body_truncated`
+- `observed_bytes`
+- `elapsed_ms`
+- `transport_error`
+- `platform_error`
+- `invalid_params`
+- `timeout`
+- `auth_redirect_detected`
+- `raw_body_handling=suppressed`
+- `upstream.status`
+- `upstream.content_type`
+- `upstream.body_present`
+- `upstream.body_omitted=true`
+- `safety.credential_material_output=false`
+
+Agent must not expect raw upstream body in the browser-backed service response.
 
 ## Controlled Multi-Source Calls
 
-When a review needs several sources, Agent may call `POST /actions/batch` with
-execution groups instead of firing unrelated HTTP requests manually.
+For multi-source work, Agent may call `POST /actions/batch` instead of firing
+uncoordinated HTTP requests.
 
-Batch rules:
+Supported group modes:
 
-- Each source must name one allowlisted fixed action.
-- Each source must pass only that action's typed params.
-- Batch forces `response_mode=passthrough`.
-- Supported group modes are `independent_parallel`, `dependency_serial`,
-  `large_response_serial`, and `auth_sensitive_serial`.
-- Unknown group modes are rejected; `depends_on` must reference an earlier group
-  in the same request.
-- Batch suppresses every `upstream.body` and returns source status,
-  `source_quality_matrix`, `normalized_observation`, `evidence_card_inputs`, and
-  `missing_evidence`.
-- One source failure must not be treated as a whole-batch failure unless all
-  evidence is missing.
-- Agent still owns parsing, evidence cards, and final reasoning outside the
-  service.
+- `independent_parallel`
+- `dependency_serial`
+- `large_response_serial`
+- `auth_sensitive_serial`
 
-## Dual-Mode Actions
+Batch output includes:
 
-These actions support `compat_summary` and `passthrough`. The default remains
-`compat_summary` for old callers.
+- `source_results`
+- `transport_status_matrix`
+- `classifications`
+- `missing_or_failed_sources`
+- `execution_groups`
+- `safety`
 
-| action_name | origin_key | Notes |
-| --- | --- | --- |
-| `track_analysis_summary` | `track_analysis` | Track Analysis fixed sub-interfaces. |
-| `login_logs_search` | `login_logs` | Login log fixed search endpoint. |
-| `weapon_inventory` | `weapon` | Weapon graphData with service-owned riskData chaining. |
-| `rcp_snapshot` | `rcp` | RCP eventList entry action. |
-| `archives_user_profile` | `archives` | Archives user profile endpoint. |
-| `archives_user_analysis` | `archives` | Archives core log timeline endpoint. |
-| `archives_photo_search` | `archives` | Archives photo report search endpoint. |
-| `archives_related_users` | `archives` | Archives related-user same-device endpoint. |
-| `rcp_event_detail` | `rcp` | RCP event detail endpoint. |
-| `rcp_event_feature_list` | `rcp` | RCP event feature list endpoint. |
-| `rcp_policy_tree_lookup` | `rcp` | RCP policy tree lookup endpoint. |
-| `track_analysis_check_data_ready` | `track_analysis` | Track Analysis data-readiness endpoint. |
+One source failure must not be treated as a whole-batch failure unless all
+required sources failed or the caller's own plan decides it cannot proceed.
 
-## Passthrough-Only Actions
+## Fixed Actions
 
-These actions support only `response_mode=passthrough`. They reject
-`compat_summary` and do not return `source_card` or `source_quality`.
-
-| action_name | origin_key | Notes |
-| --- | --- | --- |
-| `archives_private_message_search` | `archives` | Private-message search by typed user/direction/page params. |
-| `archives_past_four_items` | `archives` | Past four profile-item change log by typed user/filter params. |
-| `rcp_policy_version_lookup` | `rcp` | RCP policy version lookup by typed event/policy identity. |
-| `rcp_policy_detail_lookup` | `rcp` | RCP policy detail lookup by typed policy code/version. |
-| `rcp_policy_release_record_lookup` | `rcp` | RCP policy release-record fixed pipeline lookup. |
-| `rcp_node_policy_attribution` | `rcp` | RCP node policy attribution by typed event/policy identity. |
-| `rcp_node_bind_policy_attribution` | `rcp` | RCP node-binding attribution by typed event/tree-node identity. |
+| action_name | origin_key |
+| --- | --- |
+| `track_analysis_summary` | `track_analysis` |
+| `login_logs_search` | `login_logs` |
+| `weapon_inventory` | `weapon` |
+| `rcp_snapshot` | `rcp` |
+| `archives_user_profile` | `archives` |
+| `archives_user_analysis` | `archives` |
+| `archives_photo_search` | `archives` |
+| `archives_related_users` | `archives` |
+| `archives_private_message_search` | `archives` |
+| `archives_past_four_items` | `archives` |
+| `rcp_event_detail` | `rcp` |
+| `rcp_event_feature_list` | `rcp` |
+| `rcp_policy_version_lookup` | `rcp` |
+| `rcp_policy_detail_lookup` | `rcp` |
+| `rcp_policy_release_record_lookup` | `rcp` |
+| `rcp_policy_tree_lookup` | `rcp` |
+| `rcp_node_policy_attribution` | `rcp` |
+| `rcp_node_bind_policy_attribution` | `rcp` |
+| `track_analysis_check_data_ready` | `track_analysis` |
 
 ## Scenario Mapping
 
 | User question | Agent action plan |
 | --- | --- |
-| "看这个用户近期登录和设备风险" | Call `login_logs_search`, `weapon_inventory`, and optionally `track_analysis_summary`. Interpret returned bodies outside the service. |
-| "看这个设备关联和风险标签" | Call `weapon_inventory` with typed `device_id`. |
+| "看这个用户近期登录和设备风险" | Call `login_logs_search`, `weapon_inventory`, and optionally `track_analysis_summary`; parse outside the service. |
+| "看这个设备关联" | Call `weapon_inventory` with typed `device_id`. |
 | "看策略事件入口" | Call `rcp_snapshot` with typed event/time filters. |
 | "看用户活跃画像和设备列表" | Call `track_analysis_summary` with the relevant fixed `sub_interface`. |
-| "看私信/档案中心明细" | Use an explicit Archives action from `ACTION_REGISTRY.md`; passthrough-only actions require explicit intent. |
-| "看某个 eventId 的详情/特征/策略树/归因" | Use explicit RCP downstream actions only when the event/policy/tree typed params are available. |
-
-## Output Rules
-
-- `compat_summary` is a legacy compatibility mode for existing callers.
-- `passthrough` returns upstream business response data in the envelope.
-- `safety.credential_material_output=false` means no authentication material was
-  output; it does not mean risk entity fields were removed from upstream
-  business data.
-- Upstream business fields such as `user_id`, `deviceId`, IP, `eventId`,
-  `sourceId`, and policy codes are not authentication material by themselves.
-- `no_data`, empty body, or empty arrays are interpreted by Agent or a human
-  reviewer, not by the service.
-- Agent must suppress raw upstream bodies in user-facing summaries unless the
-  workflow explicitly requires controlled internal inspection.
-- External sharing must apply its own masking/redaction policy.
+| "看私信/档案中心明细" | Use an explicit Archives fixed action with typed params. |
+| "看某个 eventId 的详情/特征/策略树/归因" | Use explicit RCP downstream actions only when typed event/policy/tree params are available. |
 
 ## Forbidden Actions
 
@@ -133,30 +130,30 @@ Agent must not:
 - Bypass or escalate platform permissions.
 - Read or export cookies, tokens, sessions, request headers, browser storage, or
   Chrome cookie DB data.
-- Call arbitrary URLs, platform paths, raw query strings, raw bodies, or
+- Call arbitrary URLs, platform paths, raw query strings, raw request bodies, or
   caller-provided endpoints.
 - Automatically call DataAgent or Hive.
-- Ask passthrough-only actions to return `source_card`, `source_quality`,
-  evidence cards, no-data interpretations, or risk conclusions.
+- Ask the service to interpret no-data, produce business observations, create
+  evidence cards, score source quality, or provide risk conclusions.
 - Call excluded-noise capabilities such as telemetry, static assets,
   fingerprinting, radar/misc/log collection, log-sdk traffic, mobile-device-info
-  traffic, or menu/config probes without direct evidence value.
+  traffic, or menu/config probes without direct service value.
 
 ## Adding A New Callable Action
 
 Before a new service action can become callable, it must have:
 
-- Fixed `origin_key`.
-- Fixed method and same-origin relative path.
-- Typed params and validation.
-- Forbidden-input rejection for URL/path/header/cookie/token/session/raw body/raw
-  query.
-- Passthrough response safety policy for credential-material keys and response
-  size.
-- Mock tests for success, parameter errors, forbidden inputs, upstream errors,
-  too-large responses, and credential-material protection.
-- Live smoke evidence showing no credential material output.
-- `ACTION_REGISTRY.md` status update.
+- fixed `origin_key`
+- fixed method and same-origin relative path
+- typed params and validation
+- forbidden-input rejection for URL/path/header/cookie/token/session/raw body/raw
+  query
+- transport-only response envelope
+- raw body suppression
+- credential-material protection
+- mock tests for success, parameter errors, forbidden inputs, upstream errors,
+  too-large responses, and credential-material protection
+- live smoke evidence showing no authentication material output
+- `ACTION_REGISTRY.md` status update
 
-Until then, keep it `inventory_pending`, `contract_ready`, or blocked in a local
-contract-recovery report.
+Until then, keep it out of the allowlist.

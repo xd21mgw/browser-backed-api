@@ -1,24 +1,17 @@
 import {
   ACTIONS,
   buildActionBody,
-  buildActionDisabledByPlatformScopeResponse,
-  buildActionParameterErrorResponse,
-  buildLoginLogsFallbackInput,
-  buildLiveActionFailureResponse,
   buildLiveActionResponse,
-  buildPassthroughActionResponse,
   buildPassthroughFailureResponse,
   getAction,
   getActionParameterError,
   listActions,
-  loginLogsFallbackReason,
-  actionResponseMode,
   runMockAction,
   validateActionInput
 } from "./actions.js";
 import { computeAuthState, loadRefreshState, saveRefreshState, updateOriginWarmState } from "./authState.js";
 import { BrowserBackedClient } from "./browser.js";
-import { isAuthRedirectTarget, sanitizeErrorMessage, sourceStatusFromErrorType } from "./diagnostics.js";
+import { isAuthRedirectTarget, sanitizeErrorMessage } from "./diagnostics.js";
 
 export class BrowserBackedApiService {
   constructor(config, browserClient = null) {
@@ -191,40 +184,22 @@ export class BrowserBackedApiService {
     }
 
     validateActionInput(input);
-    const responseMode = actionResponseMode(input || {}, action);
-    // @deprecated The non-passthrough branch is a legacy migration fallback for
-    // old compat_summary consumers. Do not add new summary/source_card/
-    // source_quality behavior here; new actions must be passthrough-only. This
-    // branch is scheduled for removal after passthrough-only cutover.
-    const passthrough = responseMode === "passthrough";
 
     const startedAt = Date.now();
     if (this.config.mode === "live" && !isPlatformEnabled(this.config, action.domainKey)) {
-      if (passthrough) {
-        return buildPassthroughFailureResponse(action, input, {
-          latencyMs: Date.now() - startedAt,
-          errorType: "platform_not_enabled"
-        });
-      }
-      return buildActionDisabledByPlatformScopeResponse(action, this.config, {
+      return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
-        outputScope: input?.output_scope
+        errorType: "platform_not_enabled",
+        platformError: "platform_not_enabled"
       });
     }
 
     const parameterError = getActionParameterError(action, input);
     if (parameterError) {
-      const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
-      if (passthrough) {
-        return buildPassthroughFailureResponse(action, input, {
-          latencyMs: Date.now() - startedAt,
-          errorType: parameterError.errorType || "parameter_error"
-        });
-      }
-      return buildActionParameterErrorResponse(action, this.config, {
+      return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
-        originWarmed,
-        outputScope: input?.output_scope,
+        errorType: parameterError.errorType || "parameter_error",
+        invalidParams: true,
         parameterError
       });
     }
@@ -264,80 +239,26 @@ export class BrowserBackedApiService {
 
     if (!actionDiagnostics.origin_match || !actionDiagnostics.page_ready) {
       const errorType = this.warmState.get(action.domainKey)?.error_type || "origin_mismatch";
-      if (passthrough) {
-        return buildPassthroughFailureResponse(action, input, {
-          latencyMs: Date.now() - startedAt,
-          errorType
-        });
-      }
-      return buildLiveActionFailureResponse(action, input, this.config, {
+      return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
-        originWarmed,
-        actionDiagnostics,
         errorType,
-        sourceStatus: sourceStatusFromErrorType(errorType),
-        requestPath: actionRequest.displayPath || actionRequest.path,
-        requestMethod: actionRequest.method,
+        authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
         ...lazyMeta
       });
     }
 
     try {
       const fetchResult = await this.browserClient.runAction(action, actionRequest);
-      if (passthrough) {
-        return buildPassthroughActionResponse(action, input, fetchResult, {
-          latencyMs: Date.now() - startedAt
-        });
-      }
-      const fallbackReason = loginLogsFallbackReason(action, input, fetchResult);
-      if (fallbackReason) {
-        const firstAttemptResponse = buildLiveActionResponse(action, input, this.config, fetchResult, {
-          latencyMs: Date.now() - startedAt,
-          originWarmed,
-          actionDiagnostics,
-          requestPath: actionRequest.displayPath || actionRequest.path,
-          requestMethod: actionRequest.method,
-          ...lazyMeta
-        });
-        const fallbackInput = buildLoginLogsFallbackInput(input);
-        const fallbackRequest = buildActionBody(action, fallbackInput);
-        const fallbackFetchResult = await this.browserClient.runAction(action, fallbackRequest);
-        return buildLiveActionResponse(action, fallbackInput, this.config, fallbackFetchResult, {
-          latencyMs: Date.now() - startedAt,
-          originWarmed,
-          actionDiagnostics,
-          requestPath: fallbackRequest.displayPath || fallbackRequest.path,
-          requestMethod: fallbackRequest.method,
-          loginLogsFallbackAttempted: true,
-          loginLogsFallbackReason: fallbackReason,
-          loginLogsInitialDiagnostics: firstAttemptResponse.data?.response_summary?.login_logs?.diagnostics || null,
-          ...lazyMeta
-        });
-      }
       return buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
-        originWarmed,
-        actionDiagnostics,
-        requestPath: actionRequest.displayPath || actionRequest.path,
-        requestMethod: actionRequest.method,
+        authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
         ...lazyMeta
       });
     } catch (error) {
       const errorType = classifyError(error);
-      if (passthrough) {
-        return buildPassthroughFailureResponse(action, input, {
-          latencyMs: Date.now() - startedAt,
-          errorType
-        });
-      }
-      return buildLiveActionFailureResponse(action, input, this.config, {
+      return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
-        originWarmed,
-        actionDiagnostics: this.browserClient.actionDiagnostics(action, originWarmed),
         errorType,
-        sourceStatus: sourceStatusFromErrorType(errorType),
-        requestPath: actionRequest.displayPath || actionRequest.path,
-        requestMethod: actionRequest.method,
         ...lazyMeta
       });
     }
@@ -369,15 +290,15 @@ export class BrowserBackedApiService {
       });
     }
 
-    const sourceQualityMatrix = buildSourceQualityMatrix(sourceResults);
-    const classifications = buildBatchClassifications(sourceQualityMatrix);
-    const missingEvidence = buildMissingEvidence(sourceQualityMatrix);
+    const transportStatusMatrix = buildTransportStatusMatrix(sourceResults);
+    const classifications = buildBatchClassifications(transportStatusMatrix);
+    const missingOrFailedSources = buildMissingOrFailedSources(transportStatusMatrix);
 
     return {
       ok: true,
       request_id: plan.request_id,
       response_mode: "controlled_batch_passthrough",
-      batch_status: batchStatus(classifications, sourceQualityMatrix),
+      batch_status: batchStatus(classifications, transportStatusMatrix),
       service_mode: this.config.mode,
       execution_started_at: plan.started_at,
       latency_ms: Date.now() - startedAt,
@@ -391,22 +312,9 @@ export class BrowserBackedApiService {
       },
       execution_groups: groupResults,
       source_results: sourceResults,
-      source_quality_matrix: sourceQualityMatrix,
+      transport_status_matrix: transportStatusMatrix,
       classifications,
-      evidence_card_inputs: {
-        generated_by: "browser_backed_batch_executor",
-        final_risk_judgement: false,
-        raw_body_suppressed: true,
-        source_statuses: Object.values(sourceQualityMatrix).map((quality) => ({
-          source_id: quality.source_id,
-          action: quality.action,
-          category: quality.category,
-          source_status: quality.source_status,
-          error_type: quality.error_type
-        })),
-        missing_evidence: missingEvidence
-      },
-      missing_evidence: missingEvidence,
+      missing_or_failed_sources: missingOrFailedSources,
       safety: batchSafety()
     };
   }
@@ -749,7 +657,10 @@ function buildBatchSourceResult({
   return {
     source_id: source.source_id,
     action: source.action,
+    action_name: source.action,
     origin: source.origin_key,
+    platform: source.origin_key,
+    request_mode: "fixed_action",
     response_mode: "passthrough",
     category,
     source_status: sourceStatus,
@@ -758,26 +669,20 @@ function buildBatchSourceResult({
     timed_out: timedOut,
     timeout_ms: source.timeout_ms,
     latency_ms: latencyMs,
+    http_status: upstream.status,
+    content_type: upstream.content_type,
+    body_present: upstream.body_present,
+    body_truncated: upstream.body_truncated,
+    observed_bytes: upstream.observed_bytes,
+    elapsed_ms: latencyMs,
+    transport_error: timedOut ? "timeout" : null,
+    platform_error: upstream.platform_error || null,
+    invalid_params: Boolean(validationError || response?.invalid_params),
+    timeout: timedOut,
+    auth_redirect_detected: false,
+    raw_body_handling: "suppressed",
     upstream,
-    normalized_observation: buildBatchObservation(source, response, category, sourceStatus, errorType, upstream),
-    evidence_card_inputs: {
-      action: source.action,
-      origin: source.origin_key,
-      category,
-      source_status: sourceStatus,
-      error_type: errorType,
-      raw_body_suppressed: true
-    },
     raw_body_suppressed: true,
-    source_quality: buildBatchSourceQuality({
-      source,
-      category,
-      sourceStatus,
-      errorType,
-      latencyMs,
-      upstream,
-      timedOut
-    }),
     ...(validationError ? { validation_error: validationError } : {}),
     ...(exceptionMessage ? { error_message_sanitized: exceptionMessage } : {})
   };
@@ -789,62 +694,26 @@ function summarizeBatchUpstream(response) {
     return {
       status: upstream.status ?? null,
       content_type: upstream.content_type ?? null,
-      body_present: upstream.body !== undefined && upstream.body !== null,
+      body_present: Boolean(upstream.body_present),
       body_omitted: Boolean(upstream.body_omitted),
+      body_truncated: Boolean(upstream.body_truncated),
       response_too_large: Boolean(upstream.response_too_large),
+      observed_bytes: upstream.observed_bytes ?? null,
+      platform_error: response?.platform_error || null,
       error_type: upstream.error_type || null,
       raw_body_suppressed: true
     };
   }
-  const data = response?.data || null;
   return {
-    status: data?.http_status ?? null,
+    status: response?.http_status ?? null,
     content_type: null,
-    body_present: Boolean(data?.response_summary),
-    body_omitted: Boolean(data?.body_truncated),
-    response_too_large: Boolean(data?.body_truncated),
+    body_present: Boolean(response?.body_present),
+    body_omitted: true,
+    body_truncated: Boolean(response?.body_truncated),
+    response_too_large: Boolean(response?.body_truncated),
+    observed_bytes: response?.observed_bytes ?? null,
+    platform_error: response?.platform_error || null,
     error_type: response?.error_type || null,
-    raw_body_suppressed: true
-  };
-}
-
-function buildBatchObservation(source, response, category, sourceStatus, errorType, upstream) {
-  return {
-    action: source.action,
-    origin: source.origin_key,
-    category,
-    source_status: sourceStatus,
-    error_type: errorType,
-    upstream_status: upstream.status,
-    upstream_content_type: upstream.content_type,
-    upstream_body_present: upstream.body_present,
-    upstream_body_omitted: upstream.body_omitted,
-    raw_body_suppressed: true,
-    source_quality_available: true,
-    final_risk_judgement: false,
-    output_contains_credential_material: false,
-    safety: response?.safety || batchSafety()
-  };
-}
-
-function buildBatchSourceQuality({ source, category, sourceStatus, errorType, latencyMs, upstream, timedOut }) {
-  return {
-    source_id: source.source_id,
-    action: source.action,
-    origin: source.origin_key,
-    category,
-    source_status: sourceStatus,
-    error_type: errorType,
-    upstream_status: upstream.status,
-    latency_ms: latencyMs,
-    timeout_ms: source.timeout_ms,
-    timed_out: Boolean(timedOut),
-    completed: category === "completed",
-    no_data: category === "no_data",
-    partial: category === "partial",
-    auth_failed: category === "auth_failed",
-    blocked: category === "blocked",
-    parse_error: category === "parse_error",
     raw_body_suppressed: true
   };
 }
@@ -874,11 +743,11 @@ function classifyBatchSourceResult(response) {
     return "parse_error";
   }
   if (response?.upstream) {
-    if (response.upstream.body_omitted || response.upstream.response_too_large) {
-      return "partial";
-    }
-    if (response.ok === true && response.upstream.body === null) {
+    if (response.ok === true && response.upstream.body_present === false) {
       return "no_data";
+    }
+    if (response.upstream.response_too_large) {
+      return "partial";
     }
     if (response.ok === true) {
       return "completed";
@@ -917,13 +786,36 @@ function errorTypeFromBatchResponse(response) {
   return response?.error_type || response?.upstream?.error_type || null;
 }
 
-function buildSourceQualityMatrix(sourceResults) {
+function buildTransportStatusMatrix(sourceResults) {
   return Object.fromEntries(
-    Object.values(sourceResults).map((sourceResult) => [sourceResult.source_id, sourceResult.source_quality])
+    Object.values(sourceResults).map((sourceResult) => [
+      sourceResult.source_id,
+      {
+        source_id: sourceResult.source_id,
+        action: sourceResult.action,
+        origin: sourceResult.origin,
+        platform: sourceResult.platform,
+        category: sourceResult.category,
+        source_status: sourceResult.source_status,
+        error_type: sourceResult.error_type,
+        http_status: sourceResult.http_status,
+        content_type: sourceResult.content_type,
+        body_present: sourceResult.body_present,
+        body_truncated: sourceResult.body_truncated,
+        observed_bytes: sourceResult.observed_bytes,
+        elapsed_ms: sourceResult.elapsed_ms,
+        timeout_ms: sourceResult.timeout_ms,
+        timed_out: Boolean(sourceResult.timed_out),
+        transport_error: sourceResult.transport_error,
+        platform_error: sourceResult.platform_error,
+        invalid_params: sourceResult.invalid_params,
+        raw_body_handling: sourceResult.raw_body_handling
+      }
+    ])
   );
 }
 
-function buildBatchClassifications(sourceQualityMatrix) {
+function buildBatchClassifications(transportStatusMatrix) {
   const classifications = {
     completed: [],
     no_data: [],
@@ -934,48 +826,48 @@ function buildBatchClassifications(sourceQualityMatrix) {
     parse_error: [],
     planned: []
   };
-  for (const quality of Object.values(sourceQualityMatrix)) {
-    if (!classifications[quality.category]) {
-      classifications[quality.category] = [];
+  for (const status of Object.values(transportStatusMatrix)) {
+    if (!classifications[status.category]) {
+      classifications[status.category] = [];
     }
-    classifications[quality.category].push(quality.source_id);
+    classifications[status.category].push(status.source_id);
   }
   return classifications;
 }
 
-function buildMissingEvidence(sourceQualityMatrix) {
-  return Object.values(sourceQualityMatrix)
-    .filter((quality) => quality.category !== "completed" && quality.category !== "planned")
-    .map((quality) => ({
-      source_id: quality.source_id,
-      action: quality.action,
-      category: quality.category,
-      error_type: quality.error_type,
-      reason: missingEvidenceReason(quality)
+function buildMissingOrFailedSources(transportStatusMatrix) {
+  return Object.values(transportStatusMatrix)
+    .filter((status) => status.category !== "completed" && status.category !== "planned")
+    .map((status) => ({
+      source_id: status.source_id,
+      action: status.action,
+      category: status.category,
+      error_type: status.error_type,
+      reason: missingOrFailedReason(status)
     }));
 }
 
-function missingEvidenceReason(quality) {
-  if (quality.category === "no_data") {
+function missingOrFailedReason(status) {
+  if (status.category === "no_data") {
     return "source_returned_no_data";
   }
-  if (quality.category === "partial") {
-    return "source_partial_or_response_limited";
+  if (status.category === "partial") {
+    return "source_response_limited";
   }
-  if (quality.category === "auth_failed") {
+  if (status.category === "auth_failed") {
     return "auth_or_permission_flow_blocked";
   }
-  if (quality.category === "timeout") {
+  if (status.category === "timeout") {
     return "source_timed_out";
   }
-  if (quality.category === "parse_error") {
+  if (status.category === "parse_error") {
     return "source_response_parse_error";
   }
   return "source_not_completed";
 }
 
-function batchStatus(classifications, sourceQualityMatrix) {
-  const total = Object.keys(sourceQualityMatrix).length;
+function batchStatus(classifications, transportStatusMatrix) {
+  const total = Object.keys(transportStatusMatrix).length;
   if (classifications.planned.length === total) {
     return "planned";
   }

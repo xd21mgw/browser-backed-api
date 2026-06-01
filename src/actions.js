@@ -1,6 +1,5 @@
 import { normalizeRelativePath } from "./config.js";
-import { classifyHttpStatus, sourceStatusFromErrorType } from "./diagnostics.js";
-import { buildSourceCard, buildSourceQuality, summarizeJsonShape } from "./quality.js";
+import { classifyHttpStatus } from "./diagnostics.js";
 
 export const ACTION_ALLOWLIST = Object.freeze([
   "rcp_snapshot",
@@ -90,8 +89,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "targetPolicyCode",
   "statusCode",
   "size",
-  "region",
-  "output_scope"
+  "region"
 ]);
 
 const RCP_EVENT_LIST_PATH = "/v2/rest/event/eventList";
@@ -139,58 +137,12 @@ const WEAPON_MAX_DEVICE_IDS = 20;
 const LOGIN_LOGS_SEARCH_PATH = "/rest/unified/log/search";
 const LOGIN_LOGS_DEFAULT_RECALL_SOURCE = "2,0,1,3";
 const LOGIN_LOGS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const LOGIN_LOGS_FALLBACK_WINDOW_MS = 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
-const DEFAULT_OUTPUT_SCOPE = "internal_risk_review";
-const OUTPUT_SCOPES = Object.freeze(["internal_risk_review", "external_share"]);
-// @deprecated legacy migration fallback. `compat_summary`, `source_card`,
-// `source_quality`, and service-side summary construction are retained only for
-// old callers during passthrough migration. Do not add new summary logic; new
-// actions must be passthrough-only. Scheduled for removal after passthrough-only
-// cutover and consumer reference scans pass.
-const DEFAULT_RESPONSE_MODE = "compat_summary";
-const RESPONSE_MODES = Object.freeze(["compat_summary", "passthrough"]);
+const DEFAULT_RESPONSE_MODE = "passthrough";
+const RESPONSE_MODES = Object.freeze(["passthrough"]);
 const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
-const FIELD_CLASSIFICATION = Object.freeze({
-  credential_secret: Object.freeze([
-    "cookie",
-    "token",
-    "session",
-    "header",
-    "authorization",
-    "password",
-    "raw_response_full_body",
-    "raw_login_records_full_dump",
-    "raw_labelInfo_full_dump",
-    "raw_originalLog_full_dump"
-  ]),
-  pii_strict: Object.freeze(["phone_number", "id_card", "real_name"]),
-  risk_entity_identifier: Object.freeze([
-    "user_id",
-    "uid",
-    "device_id",
-    "did",
-    "ip",
-    "eventId",
-    "sourceId",
-    "hitFusePolicyCode",
-    "strategy_code",
-    "logSource",
-    "method",
-    "timestamp"
-  ]),
-  source_summary_metric: Object.freeze([
-    "records_count",
-    "event_count",
-    "related_device_count",
-    "related_user_count",
-    "duration",
-    "date_range",
-    "field_presence"
-  ])
-});
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -328,7 +280,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateRcpSnapshotInput,
     buildRequest: buildRcpSnapshotRequest,
-    summarizeLiveResponse: summarizeRcpSnapshotResponse,
     mockData: mockRcpSnapshotData
   }),
   weapon_inventory: freezeAction({
@@ -348,7 +299,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateWeaponInventoryInput,
     buildRequest: buildWeaponInventoryRequest,
-    summarizeLiveResponse: summarizeWeaponInventoryResponse,
     mockData: mockWeaponInventoryData
   }),
   login_logs_search: freezeAction({
@@ -367,9 +317,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateLoginLogsInput,
     buildRequest: buildLoginLogsRequest,
-    summarizeLiveResponse: summarizeLoginLogsResponse,
-    summarizeParseFailureResponse: summarizeLoginLogsParseFailureResponse,
-    summarizeFailureResponse: summarizeLoginLogsFailureResponse,
     mockData: mockLoginLogsData
   }),
   track_analysis_summary: freezeAction({
@@ -387,7 +334,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateTrackAnalysisInput,
     buildRequest: buildTrackAnalysisRequest,
-    summarizeLiveResponse: summarizeTrackAnalysisResponse,
     mockData: (input) => ({
       sub_interface: trackAnalysisSubInterface(input),
       entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
@@ -417,8 +363,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesUserAnalysisInput,
     buildRequest: buildArchivesUserAnalysisRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_user_analysis"),
-    summarizeParseFailureResponse: summarizeArchivesUserAnalysisParseFailureResponse,
     mockData: mockArchivesUserAnalysisData
   }),
   archives_user_profile: freezeAction({
@@ -433,7 +377,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesUserProfileInput,
     buildRequest: buildArchivesUserProfileRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_user_profile"),
     mockData: mockArchivesUserProfileData
   }),
   archives_photo_search: freezeAction({
@@ -454,7 +397,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPhotoSearchInput,
     buildRequest: buildArchivesPhotoSearchRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_photo_search"),
     mockData: mockArchivesPhotoSearchData
   }),
   archives_related_users: freezeAction({
@@ -470,7 +412,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesRelatedUsersInput,
     buildRequest: buildArchivesRelatedUsersRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("archives_related_users"),
     mockData: mockArchivesRelatedUsersData
   }),
   archives_private_message_search: freezeAction({
@@ -532,7 +473,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateRcpEventIdentityInput,
     buildRequest: buildRcpEventDetailRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_event_detail"),
     mockData: mockRcpEventDetailData
   }),
   rcp_event_feature_list: freezeAction({
@@ -550,8 +490,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateRcpEventFeatureListInput,
     buildRequest: buildRcpEventFeatureListRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_event_feature_list"),
-    summarizeParseFailureResponse: summarizeRcpEventFeatureListParseFailureResponse,
     mockData: mockRcpEventFeatureListData
   }),
   rcp_policy_version_lookup: freezeAction({
@@ -627,7 +565,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateRcpPolicyTreeLookupInput,
     buildRequest: buildRcpPolicyTreeLookupRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("rcp_policy_tree_lookup"),
     mockData: mockRcpPolicyTreeLookupData
   }),
   rcp_node_policy_attribution: freezeAction({
@@ -696,7 +633,6 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateTrackAnalysisCheckDataReadyInput,
     buildRequest: buildTrackAnalysisCheckDataReadyRequest,
-    summarizeLiveResponse: summarizeFixedShapeActionResponse("track_analysis_check_data_ready"),
     mockData: mockTrackAnalysisCheckDataReadyData
   })
 });
@@ -708,7 +644,6 @@ export function listActions(config) {
     const domain = config.domains[action.domainKey];
     const responseModes = actionResponseModes(action);
     const defaultResponseMode = actionDefaultResponseMode(action);
-    const includesCompatSummary = responseModes.includes("compat_summary");
     return {
       name: action.name,
       description: action.description,
@@ -725,13 +660,9 @@ export function listActions(config) {
         response_mode: responseModeContractText(responseModes, defaultResponseMode)
       },
       response_policy: {
-        includes_source_card: includesCompatSummary,
-        includes_source_quality: includesCompatSummary,
-        compat_summary_includes_source_card: includesCompatSummary,
-        compat_summary_includes_source_quality: includesCompatSummary,
-        passthrough_includes_source_card: false,
-        passthrough_includes_source_quality: false,
-        raw_response_full_body: false,
+        raw_upstream_body_returned: false,
+        upstream_body_suppressed: true,
+        transport_status_only: true,
         reads_cookie_token_session_header_plaintext: false
       }
     };
@@ -776,202 +707,100 @@ export function runMockAction(action, input, config, meta = {}) {
   const safeInput = sanitizeInput(input);
   const parameterError = getActionParameterError(action, safeInput);
   if (parameterError) {
-    return buildActionParameterErrorResponse(action, config, {
+    return buildPassthroughFailureResponse(action, safeInput, {
       ...meta,
+      errorType: parameterError.errorType || "parameter_error",
+      invalidParams: true,
       parameterError
     });
   }
   const data = action.mockData(safeInput);
-  const responseMode = actionResponseMode(safeInput, action);
-  const sourceRequest = typeof action.buildRequest === "function"
-    ? action.buildRequest(safeInput)
-    : { path: action.apiPath, method: action.method };
-  const enrichedMeta = {
-    ...meta,
-    outputScope: outputScope(safeInput)
-  };
   const fetchMeta = {
     ok: true,
     status: 200,
     bodyTruncated: false,
-    observedBytes: JSON.stringify(data).length
+    observedBytes: JSON.stringify(data).length,
+    contentType: "application/json",
+    bodyText: JSON.stringify(data)
   };
 
-  if (responseMode === "passthrough") {
-    return buildPassthroughActionResponse(
-      action,
-      safeInput,
-      {
-        ...fetchMeta,
-        completed: true,
-        contentType: "application/json",
-        bodyText: JSON.stringify(data)
-      },
-      {
-        ...enrichedMeta,
-        fetchedAt: new Date().toISOString()
-      }
-    );
-  }
-
-  return {
-    action: action.name,
-    mode: "mock",
-    latency_ms: meta.latencyMs ?? 0,
-    origin_warmed: Boolean(meta.originWarmed),
-    output_scope: enrichedMeta.outputScope,
-    field_classification: fieldClassificationSummary(),
-    sensitive_output: false,
-    data,
-    source_card: buildSourceCard({
-      action,
-      config,
-      fetchMeta,
-      mock: true,
-      meta: {
-        ...enrichedMeta,
-        requestPath: sourceRequest.displayPath || sourceRequest.path,
-        requestMethod: sourceRequest.method || action.method
-      }
-    }),
-    source_quality: buildSourceQuality({ action, fetchMeta, mock: true, meta: enrichedMeta })
-  };
+  return buildPassthroughActionResponse(action, safeInput, fetchMeta, {
+    ...meta,
+    fetchedAt: new Date().toISOString()
+  });
 }
 
-// @deprecated legacy compat_summary response builder. The target service path is
-// passthrough-only; summary/source_card/source_quality construction stays only
-// as migration fallback and must not be extended for new actions.
 export function buildLiveActionResponse(action, input, config, fetchResult, meta = {}) {
-  validateActionInput(input);
-  const safeInput = sanitizeInput(input);
-  const enrichedMeta = {
-    ...meta,
-    outputScope: outputScope(safeInput)
-  };
-  const parsed = parseJson(fetchResult.bodyText);
-  const httpErrorType = classifyHttpStatus(fetchResult.status);
-  const parseErrorType = parsed.ok ? null : classifyUnparseableBody(fetchResult.bodyText);
-  const responseFormat = parsed.ok ? "json" : "non_json_or_unparseable";
-  const parseErrorDetailSanitized = parsed.ok ? null : parseErrorDetail(fetchResult, parseErrorType);
-  const summaryMeta = {
-    ...enrichedMeta,
-    config,
-    fetchResult,
-    responseFormat,
-    httpErrorType,
-    parseErrorType,
-    parseErrorDetailSanitized
-  };
-  const actionSummary = parsed.ok && typeof action.summarizeLiveResponse === "function"
-    ? action.summarizeLiveResponse(parsed.value, safeInput, summaryMeta)
-    : !parsed.ok && typeof action.summarizeParseFailureResponse === "function"
-      ? action.summarizeParseFailureResponse(fetchResult.bodyText, safeInput, summaryMeta)
-    : {};
-  const parseFailureHandled = Boolean(actionSummary.partialObservationAvailable) && parseErrorType === "parse_error" && !httpErrorType;
-  const transportErrorType = httpErrorType || (parseFailureHandled ? null : parseErrorType);
-  const errorType = transportErrorType || actionSummary.errorType || null;
-  const sourceStatus = transportErrorType
-    ? sourceStatusFromErrorType(transportErrorType)
-    : actionSummary.sourceStatus || (errorType ? sourceStatusFromErrorType(errorType) : "ok");
-  const responseMeta = {
-    ...enrichedMeta,
-    sourceStatus,
-    errorType,
-    largeResponseLimited: Boolean(actionSummary.largeResponseLimited || fetchResult.bodyTruncated),
-    partialObservationAvailable: Boolean(actionSummary.partialObservationAvailable)
-  };
-  const data = {
-    http_status: fetchResult.status,
-    ok: fetchResult.ok,
-    body_truncated: fetchResult.bodyTruncated,
-    observed_bytes: fetchResult.observedBytes,
-    response_summary: parsed.ok
-      ? {
-          format: responseFormat,
-          shape: summarizeJsonShape(parsed.value),
-          ...(actionSummary.summary || {})
-        }
-      : {
-          format: responseFormat,
-          shape: null,
-          ...(actionSummary.summary || {})
-        }
-  };
-
-  return {
-    action: action.name,
-    mode: "live",
-    status: sourceStatus,
-    source_status: sourceStatus,
-    error_type: errorType,
-    latency_ms: meta.latencyMs ?? null,
-    origin_warmed: Boolean(meta.originWarmed),
-    output_scope: enrichedMeta.outputScope,
-    field_classification: fieldClassificationSummary(),
-    sensitive_output: false,
-    lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
-    lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
-    page_ready_before_fetch: meta.pageReadyBeforeFetch ?? null,
-    bound_page_origin_before_rewarm: meta.boundPageOriginBeforeRewarm || null,
-    bound_page_origin_after_rewarm: meta.boundPageOriginAfterRewarm || null,
-    action_diagnostics: meta.actionDiagnostics || null,
-    data,
-    source_card: buildSourceCard({
-      action,
-      config,
-      fetchMeta: fetchResult,
-      mock: false,
-      meta: responseMeta
-    }),
-    source_quality: buildSourceQuality({
-      action,
-      fetchMeta: fetchResult,
-      mock: false,
-      meta: responseMeta
-    })
-  };
+  return buildPassthroughActionResponse(action, input, fetchResult, meta);
 }
 
 export function buildPassthroughActionResponse(action, input, fetchResult, meta = {}) {
   validateActionInput(input);
   const fetchedAt = meta.fetchedAt || new Date().toISOString();
   const contentType = contentTypeFromFetchResult(fetchResult);
+  const bodyText = typeof fetchResult?.bodyText === "string" ? fetchResult.bodyText : "";
+  const bodyPresent = bodyText.length > 0;
+  const observedBytes = typeof fetchResult?.observedBytes === "number"
+    ? fetchResult.observedBytes
+    : Buffer.byteLength(bodyText, "utf8");
+  const httpStatus = typeof fetchResult?.status === "number" ? fetchResult.status : null;
   const upstream = {
-    status: typeof fetchResult?.status === "number" ? fetchResult.status : null,
+    status: httpStatus,
     content_type: contentType,
-    body: null
+    body_present: bodyPresent,
+    body_omitted: true,
+    body_truncated: Boolean(fetchResult?.bodyTruncated),
+    response_too_large: Boolean(fetchResult?.bodyTruncated),
+    observed_bytes: observedBytes,
+    raw_body_handling: "suppressed"
   };
   let ok = Boolean(fetchResult?.ok);
-  let errorType = null;
+  let errorType = classifyHttpStatus(httpStatus) || null;
+  let platformError = errorType;
+  let transportError = null;
+  const bodyResult = bodyPresent ? passthroughBody(bodyText) : { failClosed: false, credentialMaterialRemoved: false };
 
   if (fetchResult?.bodyTruncated) {
     ok = false;
     errorType = "response_too_large";
+    platformError = null;
     upstream.body_omitted = true;
     upstream.response_too_large = true;
     upstream.error_type = errorType;
-    upstream.observed_bytes = fetchResult.observedBytes ?? null;
-  } else {
-    const bodyResult = passthroughBody(fetchResult?.bodyText);
-    if (bodyResult.failClosed) {
-      ok = false;
-      errorType = "credential_material_detected";
-      upstream.body = null;
-      upstream.body_omitted = true;
-      upstream.error_type = errorType;
-    } else {
-      upstream.body = bodyResult.body;
-      if (bodyResult.credentialMaterialRemoved) {
-        upstream.credential_fields_removed = true;
-      }
-    }
+  } else if (bodyResult.failClosed) {
+    ok = false;
+    errorType = "credential_material_detected";
+    platformError = null;
+    upstream.error_type = errorType;
+  } else if (bodyResult.credentialMaterialRemoved) {
+    upstream.credential_fields_removed = true;
+  }
+
+  if (!ok && !errorType) {
+    errorType = "upstream_not_ok";
+    platformError = platformError || errorType;
   }
 
   return {
     ok,
     action: action.name,
+    action_name: action.name,
     request_id: meta.requestId || localRequestId(),
+    request_mode: "fixed_action",
     response_mode: "passthrough",
+    platform: action.domainKey,
+    http_status: upstream.status,
+    content_type: upstream.content_type,
+    body_present: upstream.body_present,
+    body_truncated: upstream.body_truncated,
+    observed_bytes: upstream.observed_bytes,
+    elapsed_ms: meta.latencyMs ?? null,
+    transport_error: transportError,
+    platform_error: platformError,
+    invalid_params: false,
+    timeout: false,
+    auth_redirect_detected: Boolean(meta.authRedirectDetected),
+    raw_body_handling: upstream.raw_body_handling,
     upstream,
     ...(errorType ? { error_type: errorType } : {}),
     meta: {
@@ -986,17 +815,49 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
 export function buildPassthroughFailureResponse(action, input, meta = {}) {
   validateActionInput(input);
   const errorType = meta.errorType || "fetch_failed";
+  const httpStatus = typeof meta.httpStatus === "number" ? meta.httpStatus : null;
+  const invalidParams = Boolean(meta.invalidParams || /parameter/i.test(errorType));
+  const timedOut = Boolean(meta.timedOut || /timeout/i.test(errorType));
   return {
     ok: false,
     action: action.name,
+    action_name: action.name,
     request_id: meta.requestId || localRequestId(),
+    request_mode: "fixed_action",
     response_mode: "passthrough",
+    platform: action.domainKey,
     error_type: errorType,
+    http_status: httpStatus,
+    content_type: null,
+    body_present: false,
+    body_truncated: false,
+    observed_bytes: 0,
+    elapsed_ms: meta.latencyMs ?? null,
+    transport_error: timedOut ? "timeout" : meta.transportError || null,
+    platform_error: meta.platformError || null,
+    invalid_params: invalidParams,
+    timeout: timedOut,
+    auth_redirect_detected: Boolean(meta.authRedirectDetected),
+    raw_body_handling: "suppressed",
     upstream: {
-      status: null,
+      status: httpStatus,
       content_type: null,
-      body: null
+      body_present: false,
+      body_omitted: true,
+      body_truncated: false,
+      response_too_large: false,
+      observed_bytes: 0,
+      raw_body_handling: "suppressed",
+      error_type: errorType
     },
+    ...(meta.parameterError
+      ? {
+          parameter_error: {
+            message: meta.parameterError.message || "Missing or invalid action parameters",
+            required: meta.parameterError.required || []
+          }
+        }
+      : {}),
     meta: {
       origin: action.domainKey,
       latency_ms: meta.latencyMs ?? null,
@@ -1006,201 +867,24 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   };
 }
 
-// @deprecated legacy compat_summary failure builder. Keep behavior stable until
-// explicit fallback consumers are removed; new failure paths should use the
-// passthrough envelope.
 export function buildLiveActionFailureResponse(action, input, config, meta = {}) {
-  validateActionInput(input);
-  const safeInput = sanitizeInput(input);
-  const enrichedMeta = {
-    ...meta,
-    outputScope: outputScope(safeInput)
-  };
-  const errorType = meta.errorType || "page_load_error";
-  const sourceStatus = meta.sourceStatus || sourceStatusFromErrorType(errorType);
-  const fetchMeta = {
-    completed: false,
-    ok: false,
-    status: null,
-    bodyTruncated: false,
-    observedBytes: 0
-  };
-  const actionSummary = typeof action.summarizeFailureResponse === "function"
-    ? action.summarizeFailureResponse(safeInput, {
-        ...enrichedMeta,
-        fetchResult: fetchMeta,
-        responseFormat: "not_available",
-        sourceStatus,
-        errorType
-      })
-    : null;
-
-  return {
-    action: action.name,
-    mode: "live",
-    status: sourceStatus,
-    source_status: sourceStatus,
-    error_type: errorType,
-    latency_ms: meta.latencyMs ?? null,
-    origin_warmed: Boolean(meta.originWarmed),
-    output_scope: enrichedMeta.outputScope,
-    field_classification: fieldClassificationSummary(),
-    sensitive_output: false,
-    lazy_rewarm_attempted: Boolean(meta.lazyRewarmAttempted),
-    lazy_rewarm_status: meta.lazyRewarmStatus || "not_attempted",
-    page_ready_before_fetch: meta.pageReadyBeforeFetch ?? null,
-    bound_page_origin_before_rewarm: meta.boundPageOriginBeforeRewarm || null,
-    bound_page_origin_after_rewarm: meta.boundPageOriginAfterRewarm || null,
-    action_diagnostics: meta.actionDiagnostics || null,
-    data: {
-      http_status: null,
-      ok: false,
-      body_truncated: false,
-      observed_bytes: 0,
-      response_summary: actionSummary?.summary
-        ? {
-            format: "not_available",
-            shape: null,
-            ...actionSummary.summary
-          }
-        : null
-    },
-    source_card: buildSourceCard({ action, config, fetchMeta, mock: false, meta: { ...enrichedMeta, sourceStatus, errorType } }),
-    source_quality: buildSourceQuality({ action, fetchMeta, mock: false, meta: { ...enrichedMeta, sourceStatus, errorType } })
-  };
+  return buildPassthroughFailureResponse(action, input, meta);
 }
 
-// @deprecated legacy compat_summary parameter-error shape with source_card and
-// source_quality. New actions must be passthrough-only and use passthrough
-// failure envelopes.
 export function buildActionParameterErrorResponse(action, config, meta = {}) {
-  const errorType = meta.parameterError?.errorType || "parameter_error";
-  const sourceStatus = meta.parameterError?.sourceStatus || "parameter_error";
-  const fetchMeta = {
-    completed: false,
-    ok: false,
-    status: null,
-    bodyTruncated: false,
-    observedBytes: 0
-  };
-
-  return {
-    action: action.name,
-    mode: config.mode,
-    status: sourceStatus,
-    source_status: sourceStatus,
-    error_type: errorType,
-    latency_ms: meta.latencyMs ?? null,
-    origin_warmed: Boolean(meta.originWarmed),
-    output_scope: meta.outputScope || DEFAULT_OUTPUT_SCOPE,
-    field_classification: fieldClassificationSummary(),
-    sensitive_output: false,
-    data: {
-      http_status: null,
-      ok: false,
-      body_truncated: false,
-      observed_bytes: 0,
-      response_summary: null,
-      parameter_error: {
-        message: meta.parameterError?.message || "Missing or invalid action parameters",
-        required: meta.parameterError?.required || []
-      }
-    },
-    source_card: buildSourceCard({
-      action,
-      config,
-      fetchMeta,
-      mock: config.mode === "mock",
-      meta: { ...meta, sourceStatus, errorType }
-    }),
-    source_quality: buildSourceQuality({
-      action,
-      fetchMeta,
-      mock: config.mode === "mock",
-      meta: { ...meta, sourceStatus, errorType }
-    })
-  };
+  return buildPassthroughFailureResponse(action, {}, {
+    ...meta,
+    errorType: meta.parameterError?.errorType || "parameter_error",
+    invalidParams: true
+  });
 }
 
-// @deprecated legacy compat_summary platform-scope response with source_card and
-// source_quality. Retained only as migration fallback.
 export function buildActionDisabledByPlatformScopeResponse(action, config, meta = {}) {
-  const errorType = "platform_not_enabled";
-  const sourceStatus = "blocked";
-  const fetchMeta = {
-    completed: false,
-    ok: false,
-    status: null,
-    bodyTruncated: false,
-    observedBytes: 0
-  };
-  const enabledPlatforms = Array.isArray(config.enabledPlatforms) ? config.enabledPlatforms : [];
-
-  return {
-    action: action.name,
-    mode: config.mode,
-    status: sourceStatus,
-    source_status: sourceStatus,
-    error_type: errorType,
-    failure_reason: "action_disabled_by_platform_scope",
-    latency_ms: meta.latencyMs ?? null,
-    origin_warmed: false,
-    output_scope: meta.outputScope || DEFAULT_OUTPUT_SCOPE,
-    field_classification: fieldClassificationSummary(),
-    sensitive_output: false,
-    data: {
-      http_status: null,
-      ok: false,
-      body_truncated: false,
-      observed_bytes: 0,
-      response_summary: null,
-      platform_scope: {
-        action_platform: action.domainKey,
-        enabled_platforms: enabledPlatforms,
-        action_disabled_by_platform_scope: true
-      }
-    },
-    source_card: buildSourceCard({
-      action,
-      config,
-      fetchMeta,
-      mock: false,
-      meta: { ...meta, sourceStatus, errorType }
-    }),
-    source_quality: buildSourceQuality({
-      action,
-      fetchMeta,
-      mock: false,
-      meta: { ...meta, sourceStatus, errorType }
-    })
-  };
-}
-
-export function loginLogsFallbackReason(action, input, fetchResult) {
-  if (action?.name !== "login_logs_search" || !usesDefaultLoginLogsWindow(input || {})) {
-    return null;
-  }
-  if (classifyHttpStatus(fetchResult?.status)) {
-    return null;
-  }
-  if (fetchResult?.bodyTruncated) {
-    return "response_too_large";
-  }
-  const parsed = parseJson(fetchResult?.bodyText);
-  if (!parsed.ok && classifyUnparseableBody(fetchResult?.bodyText) === "parse_error") {
-    return "parse_error";
-  }
-  return null;
-}
-
-export function buildLoginLogsFallbackInput(input) {
-  const safeInput = sanitizeInput(input);
-  const window = loginLogsTimeWindow(safeInput);
-  return {
-    ...safeInput,
-    from_timestamp: window.to - LOGIN_LOGS_FALLBACK_WINDOW_MS,
-    to_timestamp: window.to
-  };
+  return buildPassthroughFailureResponse(action, {}, {
+    ...meta,
+    errorType: "platform_not_enabled",
+    platformError: "platform_not_enabled"
+  });
 }
 
 export function validateActionInput(input) {
@@ -1224,13 +908,6 @@ export function getActionParameterError(action, input) {
     return {
       message: `response_mode must be ${responseModes.join(" or ")}`,
       required: [`response_mode=${responseModes.join("|")}`],
-      errorType: "invalid_parameter"
-    };
-  }
-  if (input && Object.hasOwn(input, "output_scope") && !OUTPUT_SCOPES.includes(input.output_scope)) {
-    return {
-      message: "output_scope must be internal_risk_review or external_share",
-      required: ["output_scope=internal_risk_review|external_share"],
       errorType: "invalid_parameter"
     };
   }
@@ -2016,10 +1693,6 @@ function safeLabelList(value, defaultValue) {
   return value.filter(safeLabel).map((item) => item.trim()).slice(0, 50);
 }
 
-function outputScope(input) {
-  return OUTPUT_SCOPES.includes(input?.output_scope) ? input.output_scope : DEFAULT_OUTPUT_SCOPE;
-}
-
 export function actionResponseMode(input, action = null) {
   const responseModes = actionResponseModes(action);
   if (responseModes.includes(input?.response_mode)) {
@@ -2042,15 +1715,6 @@ function responseModeContractText(responseModes, defaultResponseMode) {
   return `optional enum ${responseModes.join("|")}; default ${defaultResponseMode}`;
 }
 
-function fieldClassificationSummary() {
-  return {
-    credential_secret: [...FIELD_CLASSIFICATION.credential_secret],
-    pii_strict: [...FIELD_CLASSIFICATION.pii_strict],
-    risk_entity_identifier: [...FIELD_CLASSIFICATION.risk_entity_identifier],
-    source_summary_metric: [...FIELD_CLASSIFICATION.source_summary_metric]
-  };
-}
-
 function freezeAction(action) {
   normalizeRelativePath(action.apiPath, `${action.name}.apiPath`);
   return Object.freeze(action);
@@ -2070,9 +1734,6 @@ function sanitizeInput(input) {
 
   if (typeof safe.limit === "number") {
     safe.limit = Math.min(Math.max(Math.trunc(safe.limit), 1), 100);
-  }
-  if (!OUTPUT_SCOPES.includes(safe.output_scope)) {
-    delete safe.output_scope;
   }
   if (!RESPONSE_MODES.includes(safe.response_mode)) {
     delete safe.response_mode;
@@ -2259,460 +1920,6 @@ function parseJson(text) {
   }
 }
 
-function classifyUnparseableBody(text) {
-  const sample = String(text || "").slice(0, 4096).toLowerCase();
-  if (/<html|<!doctype/.test(sample) && /(sso|login|signin|sign-in|passport|auth)/i.test(sample)) {
-    return "auth_failed";
-  }
-  return "parse_error";
-}
-
-function parseErrorDetail(fetchResult, parseErrorType) {
-  if (fetchResult?.bodyTruncated) {
-    return "response_body_truncated_at_max_live_body_bytes";
-  }
-  if (parseErrorType === "auth_failed") {
-    return "html_auth_or_login_response";
-  }
-  return "invalid_or_unparseable_json";
-}
-
-// @deprecated All service-side `summarize*` helpers below belong to the legacy
-// compat_summary fallback path. Do not add new service summary/evidence logic
-// here; Dennis or another upper layer owns parser, normalized_observation,
-// source_quality, evidence cards, and risk reasoning. These helpers are
-// scheduled for removal after passthrough-only cutover.
-function summarizeRcpEventFeatureListParseFailureResponse(bodyText, input, meta = {}) {
-  const fetchResult = meta.fetchResult || {};
-  if (!fetchResult.bodyTruncated || meta.parseErrorType !== "parse_error") {
-    const sourceStatus = sourceStatusFromErrorType(meta.parseErrorType || "parse_error");
-    return {
-      sourceStatus,
-      errorType: meta.parseErrorType || "parse_error",
-      summary: {
-        rcp_event_feature_list: {
-          source_status: sourceStatus,
-          upstream_http_status: fetchResult.status ?? null,
-          body_truncated: Boolean(fetchResult.bodyTruncated),
-          observed_bytes: fetchResult.observedBytes ?? null,
-          response_format: meta.responseFormat || "non_json_or_unparseable",
-          parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json",
-          raw_full_body_suppressed: true,
-          no_data: false,
-          no_data_not_risk_exclusion: true
-        }
-      }
-    };
-  }
-
-  const topLevelKeys = partialJsonTopLevelKeys(bodyText);
-  const featureGroupSummary = partialFeatureGroupSummary(bodyText);
-  const featureCountEstimate = partialFeatureCountEstimate(bodyText, featureGroupSummary);
-
-  return {
-    sourceStatus: "partial_observation_available",
-    errorType: "response_too_large",
-    largeResponseLimited: true,
-    partialObservationAvailable: true,
-    summary: {
-      rcp_event_feature_list: {
-        source_status: "partial_observation_available",
-        upstream_http_status: fetchResult.status ?? null,
-        body_truncated: true,
-        observed_bytes: fetchResult.observedBytes ?? null,
-        response_too_large: true,
-        response_format: meta.responseFormat || "non_json_or_unparseable",
-        parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "response_body_truncated_at_max_live_body_bytes",
-        top_level_keys: topLevelKeys,
-        feature_count_estimate: featureCountEstimate.count,
-        feature_count_estimate_method: featureCountEstimate.method,
-        feature_group_summary: featureGroupSummary,
-        key_entities: {
-          event_id: displayRiskEntity("eventId", input.eventId, input),
-          event_type: displayRiskEntity("eventType", input.eventType, input),
-          query_time: input.queryTime !== undefined && input.queryTime !== null ? String(input.queryTime).slice(0, 64) : null
-        },
-        partial_json_summary_only: true,
-        response_shape_summary_only: true,
-        raw_full_body_suppressed: true,
-        raw_records_full_dump_suppressed: true,
-        no_data: false,
-        no_data_not_risk_exclusion: true,
-        next_action: "Use this partial observation for evidence context; add a narrower platform query or action-specific bounded feature extraction if exact feature counts are required."
-      }
-    }
-  };
-}
-
-function summarizeArchivesUserAnalysisParseFailureResponse(bodyText, input, meta = {}) {
-  const fetchResult = meta.fetchResult || {};
-  if (!fetchResult.bodyTruncated || meta.parseErrorType !== "parse_error") {
-    const sourceStatus = sourceStatusFromErrorType(meta.parseErrorType || "parse_error");
-    return {
-      sourceStatus,
-      errorType: meta.parseErrorType || "parse_error",
-      summary: {
-        archives_user_analysis: {
-          source_status: sourceStatus,
-          upstream_http_status: fetchResult.status ?? null,
-          body_truncated: Boolean(fetchResult.bodyTruncated),
-          observed_bytes: fetchResult.observedBytes ?? null,
-          response_format: meta.responseFormat || "non_json_or_unparseable",
-          parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json",
-          raw_full_body_suppressed: true,
-          no_data: false,
-          no_data_not_risk_exclusion: true
-        }
-      }
-    };
-  }
-
-  const pageInfoPartial = partialArchivesPageInfo(bodyText);
-  const operationTypeSummary = partialArchivesOperationTypeSummary(bodyText);
-  const timeRangeSummary = partialArchivesTimeRangeSummary(bodyText);
-  const countEstimate = partialArchivesLogCountEstimate(bodyText, operationTypeSummary, timeRangeSummary, pageInfoPartial);
-
-  return {
-    sourceStatus: "partial_observation_available",
-    errorType: "response_too_large",
-    largeResponseLimited: true,
-    partialObservationAvailable: true,
-    summary: {
-      archives_user_analysis: {
-        source_status: "partial_observation_available",
-        upstream_http_status: fetchResult.status ?? null,
-        body_truncated: true,
-        observed_bytes: fetchResult.observedBytes ?? null,
-        response_too_large: true,
-        response_format: meta.responseFormat || "non_json_or_unparseable",
-        parse_error_detail_sanitized: meta.parseErrorDetailSanitized || "response_body_truncated_at_max_live_body_bytes",
-        top_level_keys: partialJsonTopLevelKeys(bodyText),
-        log_count_estimate: countEstimate.count,
-        event_count_estimate: countEstimate.count,
-        count_estimate_method: countEstimate.method,
-        operation_type_summary: operationTypeSummary,
-        action_type_summary: operationTypeSummary,
-        time_range_summary: timeRangeSummary,
-        earliest_event_time: timeRangeSummary.earliest_time_observed,
-        latest_event_time: timeRangeSummary.latest_time_observed,
-        operation_filters_matched: partialArchivesOperationFiltersMatched(bodyText),
-        risk_event_scan: partialArchivesRiskEventScan(bodyText),
-        page_info_partial: pageInfoPartial,
-        key_entities: {
-          user_id: displayRiskEntity("user_id", input.user_id, input)
-        },
-        partial_json_summary_only: true,
-        response_shape_summary_only: true,
-        raw_full_body_suppressed: true,
-        raw_records_full_dump_suppressed: true,
-        no_data: false,
-        no_data_not_risk_exclusion: true,
-        next_action: "Use this partial observation for evidence context; reduce pageSize, narrow the time window, or paginate with smaller pages when exact records are required."
-      }
-    }
-  };
-}
-
-function partialArchivesOperationTypeSummary(text) {
-  const operationKeys = [
-    "operationType",
-    "operation_type",
-    "actionType",
-    "action_type",
-    "logType",
-    "log_type",
-    "eventType",
-    "event_type",
-    "method"
-  ];
-  const counts = new Map();
-  const fieldsObserved = [];
-  for (const key of operationKeys) {
-    const values = partialJsonPrimitiveValuesForKey(text, key);
-    if (values.length > 0) {
-      fieldsObserved.push(key);
-    }
-    for (const value of values) {
-      const safeValue = sanitizePartialCategoryValue(value);
-      if (!safeValue) {
-        continue;
-      }
-      counts.set(safeValue, (counts.get(safeValue) || 0) + 1);
-    }
-  }
-  const operationTypes = [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 20)
-    .map(([operation_type, observed_count]) => ({ operation_type, observed_count }));
-  return {
-    operation_types_observed_count: counts.size,
-    operation_type_fields_observed: [...new Set(fieldsObserved)],
-    operation_types: operationTypes
-  };
-}
-
-function partialArchivesTimeRangeSummary(text) {
-  const timeKeys = [
-    "eventTime",
-    "event_time",
-    "operateTime",
-    "operate_time",
-    "operationTime",
-    "operation_time",
-    "logTime",
-    "log_time",
-    "createTime",
-    "create_time",
-    "timestamp"
-  ];
-  const fieldsObserved = [];
-  const numericValues = [];
-  const stringValues = [];
-  for (const key of timeKeys) {
-    const values = partialJsonPrimitiveValuesForKey(text, key);
-    if (values.length > 0) {
-      fieldsObserved.push(key);
-    }
-    for (const value of values) {
-      const textValue = String(value).trim();
-      if (/^\d{10,16}$/.test(textValue)) {
-        numericValues.push(Number(textValue));
-      } else if (textValue) {
-        stringValues.push(sanitizePartialCategoryValue(textValue));
-      }
-    }
-  }
-  const uniqueStrings = [...new Set(stringValues.filter(Boolean))].sort();
-  const earliestNumeric = numericValues.length > 0 ? String(Math.min(...numericValues)) : null;
-  const latestNumeric = numericValues.length > 0 ? String(Math.max(...numericValues)) : null;
-  return {
-    time_fields_observed: [...new Set(fieldsObserved)],
-    time_values_observed_count: numericValues.length + uniqueStrings.length,
-    earliest_time_observed: earliestNumeric || uniqueStrings[0] || null,
-    latest_time_observed: latestNumeric || uniqueStrings[uniqueStrings.length - 1] || null,
-    time_value_format: numericValues.length > 0 ? "epoch_like" : uniqueStrings.length > 0 ? "string" : "not_observed"
-  };
-}
-
-function partialArchivesLogCountEstimate(text, operationTypeSummary, timeRangeSummary, pageInfoPartial) {
-  const totalCount = Number(pageInfoPartial?.fields?.totalCount);
-  if (Number.isSafeInteger(totalCount) && totalCount >= 0) {
-    return { count: totalCount, method: "totalCount_from_capped_prefix" };
-  }
-  const keyCounts = [
-    ["operationType", countJsonKeyOccurrences(text, "operationType")],
-    ["actionType", countJsonKeyOccurrences(text, "actionType")],
-    ["logType", countJsonKeyOccurrences(text, "logType")],
-    ["eventTime", countJsonKeyOccurrences(text, "eventTime")],
-    ["operateTime", countJsonKeyOccurrences(text, "operateTime")],
-    ["operationTime", countJsonKeyOccurrences(text, "operationTime")],
-    ["logTime", countJsonKeyOccurrences(text, "logTime")]
-  ].filter(([, count]) => count > 0);
-  if (keyCounts.length > 0) {
-    const [method, count] = keyCounts.sort((left, right) => right[1] - left[1])[0];
-    return { count, method: `${method}_occurrence_count_capped` };
-  }
-  const operationCount = operationTypeSummary.operation_types.reduce((sum, item) => sum + item.observed_count, 0);
-  if (operationCount > 0) {
-    return { count: operationCount, method: "operation_type_occurrence_count_capped" };
-  }
-  if (timeRangeSummary.time_values_observed_count > 0) {
-    return { count: timeRangeSummary.time_values_observed_count, method: "time_value_occurrence_count_capped" };
-  }
-  return { count: 0, method: "not_observed_in_capped_prefix" };
-}
-
-function partialArchivesOperationFiltersMatched(text) {
-  const source = String(text || "").slice(0, 65536);
-  return ARCHIVES_USER_ANALYSIS_FILTER_FIELDS
-    .filter((field) => new RegExp(`"${escapeRegExp(field)}"|\\b${escapeRegExp(field)}\\b`, "i").test(source))
-    .slice(0, 50);
-}
-
-function partialArchivesRiskEventScan(text) {
-  const source = String(text || "").slice(0, 65536);
-  const matched = partialArchivesOperationFiltersMatched(source);
-  return {
-    login_start_present: matched.includes("loginStart") || /loginStart/i.test(source),
-    register_bind_present: matched.includes("registerBind") || /registerBind/i.test(source),
-    reset_pass_present: matched.includes("resetPass") || /resetPass/i.test(source),
-    protect_account_present: matched.includes("protectAccount") || /protectAccount/i.test(source),
-    live_stream_present: matched.includes("liveStream") || /liveStream/i.test(source),
-    frozen_present: matched.includes("frozen") || /frozen/i.test(source),
-    matched_filter_count: matched.length
-  };
-}
-
-function partialArchivesPageInfo(text) {
-  const fields = {};
-  for (const key of ["pageIndex", "page", "pageSize", "count", "totalCount", "total", "totalPage", "pages"]) {
-    const values = partialJsonPrimitiveValuesForKey(text, key);
-    if (values.length > 0) {
-      fields[safeFieldName(key)] = String(values[0]).slice(0, 64);
-    }
-  }
-  return {
-    fields_observed: Object.keys(fields),
-    fields
-  };
-}
-
-function sanitizePartialCategoryValue(value) {
-  return sanitizeSummaryText(value)
-    ?.replace(/\b1[3-9]\d{9}\b/g, "[phone_number_present]")
-    .replace(/\b\d{17}[\dXx]\b/g, "[id_card_present]")
-    .slice(0, 160) || null;
-}
-
-function partialJsonTopLevelKeys(text) {
-  const source = String(text || "").slice(0, 65536);
-  const keys = [];
-  let depth = 0;
-  let index = 0;
-  while (index < source.length && keys.length < 50) {
-    const char = source[index];
-    if (char === "\"") {
-      const token = readJsonStringToken(source, index);
-      if (token && depth === 1 && nextNonWhitespace(source, token.end + 1) === ":") {
-        keys.push(safeFieldName(token.value));
-      }
-      index = token ? token.end + 1 : index + 1;
-      continue;
-    }
-    if (char === "{" || char === "[") {
-      depth += 1;
-    } else if (char === "}" || char === "]") {
-      depth = Math.max(depth - 1, 0);
-    }
-    index += 1;
-  }
-  return [...new Set(keys)];
-}
-
-function readJsonStringToken(source, start) {
-  let value = "";
-  for (let index = start + 1; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "\\") {
-      const next = source[index + 1];
-      if (next === undefined) {
-        return null;
-      }
-      value += next;
-      index += 1;
-      continue;
-    }
-    if (char === "\"") {
-      return { value: value.slice(0, 160), end: index };
-    }
-    value += char;
-    if (value.length > 512) {
-      return null;
-    }
-  }
-  return null;
-}
-
-function nextNonWhitespace(source, start) {
-  for (let index = start; index < source.length; index += 1) {
-    const char = source[index];
-    if (!/\s/.test(char)) {
-      return char;
-    }
-  }
-  return null;
-}
-
-function partialFeatureGroupSummary(text) {
-  const groupKeys = ["featureGroup", "feature_group", "featureGroupName", "feature_group_name", "groupName", "group"];
-  const counts = new Map();
-  const fieldsObserved = [];
-  for (const key of groupKeys) {
-    const values = partialJsonStringValuesForKey(text, key);
-    if (values.length > 0) {
-      fieldsObserved.push(key);
-    }
-    for (const value of values) {
-      const safeValue = sanitizeSummaryText(value);
-      if (!safeValue) {
-        continue;
-      }
-      counts.set(safeValue, (counts.get(safeValue) || 0) + 1);
-    }
-  }
-  const groups = [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 12)
-    .map(([group, observed_count]) => ({ group, observed_count }));
-  return {
-    groups_observed_count: counts.size,
-    group_fields_observed: [...new Set(fieldsObserved)],
-    groups
-  };
-}
-
-function partialJsonStringValuesForKey(text, key) {
-  const source = String(text || "").slice(0, 65536);
-  const escapedKey = escapeRegExp(key);
-  const pattern = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:\\\\.|[^"\\\\]){0,160})"`, "g");
-  const values = [];
-  let match;
-  while ((match = pattern.exec(source)) && values.length < 200) {
-    values.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
-  }
-  return values;
-}
-
-function partialJsonPrimitiveValuesForKey(text, key) {
-  const source = String(text || "").slice(0, 65536);
-  const escapedKey = escapeRegExp(key);
-  const pattern = new RegExp(`"${escapedKey}"\\s*:\\s*(?:"((?:\\\\.|[^"\\\\]){0,160})"|(-?\\d+(?:\\.\\d+)?)|(true|false|null))`, "g");
-  const values = [];
-  let match;
-  while ((match = pattern.exec(source)) && values.length < 300) {
-    if (match[1] !== undefined) {
-      values.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
-    } else if (match[2] !== undefined) {
-      values.push(match[2]);
-    } else if (match[3] !== undefined) {
-      values.push(match[3]);
-    }
-  }
-  return values;
-}
-
-function partialFeatureCountEstimate(text, featureGroupSummary) {
-  const keyCounts = [
-    ["featureName", countJsonKeyOccurrences(text, "featureName")],
-    ["feature_name", countJsonKeyOccurrences(text, "feature_name")],
-    ["featureCode", countJsonKeyOccurrences(text, "featureCode")],
-    ["feature_code", countJsonKeyOccurrences(text, "feature_code")],
-    ["featureId", countJsonKeyOccurrences(text, "featureId")],
-    ["feature_id", countJsonKeyOccurrences(text, "feature_id")],
-    ["key", countJsonKeyOccurrences(text, "key")]
-  ].filter(([, count]) => count > 0);
-  if (keyCounts.length > 0) {
-    const [method, count] = keyCounts.sort((left, right) => right[1] - left[1])[0];
-    return { count, method: `${method}_occurrence_count_capped` };
-  }
-  const groupedCount = featureGroupSummary.groups.reduce((sum, item) => sum + item.observed_count, 0);
-  if (groupedCount > 0) {
-    return { count: groupedCount, method: "feature_group_occurrence_count_capped" };
-  }
-  return { count: 0, method: "not_observed_in_capped_prefix" };
-}
-
-function countJsonKeyOccurrences(text, key) {
-  const source = String(text || "").slice(0, 65536);
-  const pattern = new RegExp(`"${escapeRegExp(key)}"\\s*:`, "g");
-  const matches = source.match(pattern);
-  return matches ? matches.length : 0;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function validateWeaponInventoryInput(input) {
   const hasUserId = isNonEmptyString(input.user_id);
   const hasDeviceId = isNonEmptyString(input.device_id);
@@ -2807,130 +2014,6 @@ function buildWeaponInventoryRequest(input) {
   };
 }
 
-function summarizeWeaponInventoryResponse(value, input) {
-  const graphValue = value && typeof value === "object" && Object.hasOwn(value, "graphData") ? value.graphData : value;
-  const graphErrorType = classifyWeaponGraphError(graphValue);
-  if (graphErrorType) {
-    return {
-      sourceStatus: "blocked",
-      errorType: graphErrorType,
-      summary: {
-        weapon_inventory: {
-          ...buildWeaponGraphSummary(graphValue, input),
-          riskData_status: "not_executed_graph_failed",
-          risk_item_count: 0,
-          risk_label_summary: emptyRiskLabelSummary(),
-          risk_label_count: 0,
-          risk_group_names_observed: [],
-          readable_label_sample: [],
-          originalLog_key_summary: emptyOriginalLogKeySummary(),
-          userLevel_observed: [],
-          no_data_not_risk_exclusion: true
-        }
-      }
-    };
-  }
-
-  const graphSummary = buildWeaponGraphSummary(graphValue, input);
-  const riskSummary = buildWeaponRiskSummary(value, graphSummary, input);
-  const graphNoData = graphSummary.pointInfoMap_count === 0 && graphSummary.relationEdgeList_count === 0;
-  const riskPartial = riskSummary.riskData_status === "risk_partial_failed";
-
-  return {
-    sourceStatus: graphNoData ? "completed_no_data" : "completed",
-    errorType: riskPartial ? "risk_partial_failed" : null,
-    summary: {
-      weapon_inventory: {
-        ...graphSummary,
-        ...riskSummary,
-        no_data_not_risk_exclusion: true
-      }
-    }
-  };
-}
-
-function buildWeaponGraphSummary(value, input = {}) {
-  const payload = weaponPayload(value);
-  const pointInfoMap = payload && isPlainObject(payload.pointInfoMap) ? payload.pointInfoMap : null;
-  const relationEdgeList = Array.isArray(payload?.relationEdgeList) ? payload.relationEdgeList : [];
-  const deviceIds = collectWeaponDeviceIds(pointInfoMap);
-  const userIds = collectWeaponUserIds(pointInfoMap);
-  const graphNoData = Object.keys(pointInfoMap || {}).length === 0 && relationEdgeList.length === 0;
-
-  return {
-    graph_status: graphNoData ? "completed_no_data" : "completed",
-    graph_api_code: readApiCode(value),
-    graph_api_msg: sanitizeSummaryText(readApiMessage(value)),
-    pointInfoMap_present: Boolean(pointInfoMap),
-    pointInfoMap_count: Object.keys(pointInfoMap || {}).length,
-    relationEdgeList_present: Array.isArray(payload?.relationEdgeList),
-    relationEdgeList_count: relationEdgeList.length,
-    related_device_count: deviceIds.length,
-    related_user_count: userIds.length,
-    related_device_id_sample: deviceIds.length > 0 ? displayRiskEntity("deviceId", deviceIds[0], input) : null,
-    related_user_id_sample: userIds.length > 0 ? displayRiskEntity("user_id", userIds[0], input) : null,
-    masked_device_id_sample: deviceIds.length > 0 ? maskDeviceId(deviceIds[0]) : null,
-    raw_device_ids_for_internal_chaining_count: deviceIds.length,
-    graph_no_data: graphNoData,
-    no_data: graphNoData,
-    no_data_not_risk_exclusion: true
-  };
-}
-
-function buildWeaponRiskSummary(value, graphSummary, input) {
-  const chain = value && typeof value === "object" ? value.weapon_chain || {} : {};
-  const riskResults = weaponRiskResults(value);
-  if (weaponIncludeRiskData(input) === false) {
-    return emptyRiskSummary("not_requested");
-  }
-  if (graphSummary.raw_device_ids_for_internal_chaining_count === 0) {
-    return emptyRiskSummary("not_executed_missing_device_id");
-  }
-  if (riskResults.length === 0) {
-    return emptyRiskSummary(chain.riskData_status || "not_executed_missing_device_id");
-  }
-
-  const riskItems = [];
-  let riskFailure = false;
-  for (const result of riskResults) {
-    if (!result || result.ok === false || result.parse_error || result.error_type || result.status >= 400) {
-      riskFailure = true;
-      continue;
-    }
-    if (classifyWeaponRiskError(result.body)) {
-      riskFailure = true;
-      continue;
-    }
-    riskItems.push(...extractWeaponRiskItems(result.body));
-  }
-
-  const labelSummary = buildRiskLabelSummary(riskItems);
-  const originalLogSummary = buildOriginalLogKeySummary(riskItems);
-  const originalLogEventId = firstOriginalLogField(riskItems, "eventId");
-  return {
-    riskData_status: riskFailure ? "risk_partial_failed" : riskItems.length > 0 ? "completed" : "no_data",
-    risk_item_count: riskItems.length,
-    risk_label_summary: labelSummary.summary,
-    risk_label_count: labelSummary.count,
-    risk_group_names_observed: labelSummary.groupNames,
-    readable_label_sample: labelSummary.readableSample,
-    originalLog_key_summary: originalLogSummary,
-    originalLog_eventId_sample: originalLogEventId ? displayRiskEntity("eventId", originalLogEventId, input) : null,
-    userLevel_observed: userLevelsObserved(riskItems),
-    no_data_not_risk_exclusion: true
-  };
-}
-
-function firstOriginalLogField(items, fieldName) {
-  for (const item of items) {
-    const log = item && typeof item === "object" && !Array.isArray(item) ? item.originalLog : null;
-    if (log && typeof log === "object" && !Array.isArray(log) && log[fieldName] !== undefined && log[fieldName] !== null) {
-      return String(log[fieldName]);
-    }
-  }
-  return null;
-}
-
 function weaponEntityScope(input) {
   if (isNonEmptyString(input.device_id)) {
     return {
@@ -2966,423 +2049,6 @@ function weaponIncludeRiskData(input) {
 
 function weaponMaxDeviceIds(input) {
   return Object.hasOwn(input, "max_device_ids") ? Math.trunc(input.max_device_ids) : WEAPON_DEFAULT_MAX_DEVICE_IDS;
-}
-
-function classifyWeaponGraphError(value) {
-  if (!value || typeof value !== "object") {
-    return "parse_error";
-  }
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
-    return "platform_error";
-  }
-  if (value.success === false || value.result === false) {
-    return "platform_error";
-  }
-  return null;
-}
-
-function classifyWeaponRiskError(value) {
-  if (!value || typeof value !== "object") {
-    return "parse_error";
-  }
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
-    return "platform_error";
-  }
-  if (value.success === false || value.result === false) {
-    return "platform_error";
-  }
-  return null;
-}
-
-function weaponPayload(value) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  if (isPlainObject(value.data)) {
-    return value.data;
-  }
-  return value;
-}
-
-function weaponRiskResults(value) {
-  if (!value || typeof value !== "object") {
-    return [];
-  }
-  if (Array.isArray(value.riskDataResults)) {
-    return value.riskDataResults;
-  }
-  if (Object.hasOwn(value, "riskData")) {
-    return [
-      {
-        ok: true,
-        status: 200,
-        body: value.riskData
-      }
-    ];
-  }
-  return [];
-}
-
-function collectWeaponDeviceIds(pointInfoMap) {
-  if (!isPlainObject(pointInfoMap)) {
-    return [];
-  }
-  const values = [];
-  for (const [key, node] of Object.entries(pointInfoMap)) {
-    if (isWeaponDeviceId(key)) {
-      values.push(key);
-    }
-    collectWeaponStrings(node, values, 0);
-  }
-  return [...new Set(values.filter(isWeaponDeviceId))];
-}
-
-function collectWeaponUserIds(pointInfoMap) {
-  if (!isPlainObject(pointInfoMap)) {
-    return [];
-  }
-  const values = [];
-  for (const [key, node] of Object.entries(pointInfoMap)) {
-    if (isProbableUserId(key)) {
-      values.push(key);
-    }
-    const strings = [];
-    collectWeaponStrings(node, strings, 0);
-    values.push(...strings.filter(isProbableUserId));
-  }
-  return [...new Set(values)];
-}
-
-function collectWeaponStrings(value, output, depth) {
-  if (depth > 4 || value === null || value === undefined) {
-    return;
-  }
-  if (typeof value === "string" || typeof value === "number") {
-    output.push(String(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 100)) {
-      collectWeaponStrings(item, output, depth + 1);
-    }
-    return;
-  }
-  if (typeof value === "object") {
-    for (const [key, child] of Object.entries(value).slice(0, 100)) {
-      output.push(String(key));
-      collectWeaponStrings(child, output, depth + 1);
-    }
-  }
-}
-
-function isWeaponDeviceId(value) {
-  return /^(ANDROID|IOS)_[A-Za-z0-9_.:-]+$/.test(String(value || ""));
-}
-
-function isProbableUserId(value) {
-  return /^\d{5,}$/.test(String(value || ""));
-}
-
-function extractWeaponRiskItems(value) {
-  const data = value && typeof value === "object" ? value.data : null;
-  if (Array.isArray(data)) {
-    return data.filter(isPlainObject);
-  }
-  if (isPlainObject(data)) {
-    for (const key of ["list", "rows", "records", "items", "data"]) {
-      if (Array.isArray(data[key])) {
-        return data[key].filter(isPlainObject);
-      }
-    }
-    return [data];
-  }
-  if (Array.isArray(value)) {
-    return value.filter(isPlainObject);
-  }
-  return [];
-}
-
-function buildRiskLabelSummary(items) {
-  const labelInfoValues = items
-    .map((item) => item.labelInfo)
-    .filter((item) => item !== null && item !== undefined);
-  const groupNames = [];
-  const readableSample = [];
-  let count = 0;
-
-  for (const labelInfo of labelInfoValues) {
-    const result = scanLabelInfo(labelInfo, 0);
-    count += result.count;
-    groupNames.push(...result.groupNames);
-    readableSample.push(...result.readableSample);
-  }
-
-  const uniqueGroupNames = uniqueSanitized(groupNames).slice(0, 20);
-  const uniqueReadableSample = uniqueSanitized(readableSample).slice(0, 5);
-  return {
-    count,
-    groupNames: uniqueGroupNames,
-    readableSample: uniqueReadableSample,
-    summary: {
-      labelInfo_present: labelInfoValues.length > 0,
-      labelInfo_items_observed: count,
-      group_names_count: uniqueGroupNames.length,
-      readable_label_sample_count: uniqueReadableSample.length
-    }
-  };
-}
-
-function scanLabelInfo(value, depth) {
-  if (depth > 5 || value === null || value === undefined) {
-    return { count: 0, groupNames: [], readableSample: [] };
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return {
-      count: 1,
-      groupNames: [],
-      readableSample: []
-    };
-  }
-  if (Array.isArray(value)) {
-    return mergeLabelScans(value.slice(0, 100).map((item) => scanLabelInfo(item, depth + 1)));
-  }
-  if (!isPlainObject(value)) {
-    return { count: 0, groupNames: [], readableSample: [] };
-  }
-
-  const groupNames = [];
-  const readableSample = [];
-  let count = 1;
-  for (const [key, child] of Object.entries(value).slice(0, 100)) {
-    const isGroupKey = /(group|groupName|category|分类|分组)/i.test(key);
-    if (isGroupKey) {
-      if (typeof child === "string" || typeof child === "number") {
-        groupNames.push(sanitizeSummaryText(child));
-      } else {
-        groupNames.push(sanitizeSummaryText(key));
-      }
-    }
-    if (!isGroupKey && /(label|labelName|name|title|tag|risk|desc|名称|标签)/i.test(key) && ["string", "number"].includes(typeof child)) {
-      readableSample.push(sanitizeSummaryText(child));
-    }
-    const childScan = scanLabelInfo(child, depth + 1);
-    count += childScan.count;
-    groupNames.push(...childScan.groupNames);
-    readableSample.push(...childScan.readableSample);
-  }
-  return { count, groupNames, readableSample };
-}
-
-function mergeLabelScans(scans) {
-  return scans.reduce(
-    (merged, scan) => ({
-      count: merged.count + scan.count,
-      groupNames: [...merged.groupNames, ...scan.groupNames],
-      readableSample: [...merged.readableSample, ...scan.readableSample]
-    }),
-    { count: 0, groupNames: [], readableSample: [] }
-  );
-}
-
-function buildOriginalLogKeySummary(items) {
-  const logs = items.map((item) => item.originalLog).filter(isPlainObject);
-  const topLevelKeys = [];
-  let nestedKeyCount = 0;
-  for (const log of logs) {
-    const keys = observedKeys(log);
-    topLevelKeys.push(...keys);
-    nestedKeyCount += countNestedKeys(log, 1);
-  }
-  return {
-    originalLog_present: logs.length > 0,
-    originalLog_items_observed: logs.length,
-    top_level_keys_observed: [...new Set(topLevelKeys)].slice(0, 50),
-    nested_key_count: nestedKeyCount
-  };
-}
-
-function countNestedKeys(value, depth) {
-  if (depth > 5 || !value || typeof value !== "object") {
-    return 0;
-  }
-  if (Array.isArray(value)) {
-    return value.slice(0, 20).reduce((sum, item) => sum + countNestedKeys(item, depth + 1), 0);
-  }
-  let count = 0;
-  for (const child of Object.values(value).slice(0, 100)) {
-    if (child && typeof child === "object") {
-      count += Object.keys(child).length;
-      count += countNestedKeys(child, depth + 1);
-    }
-  }
-  return count;
-}
-
-function userLevelsObserved(items) {
-  return uniqueSanitized(
-    items
-      .map((item) => item.userLevel)
-      .filter((item) => item !== null && item !== undefined)
-  ).slice(0, 20);
-}
-
-function emptyRiskSummary(status) {
-  return {
-    riskData_status: status,
-    risk_item_count: 0,
-    risk_label_summary: emptyRiskLabelSummary(),
-    risk_label_count: 0,
-    risk_group_names_observed: [],
-    readable_label_sample: [],
-    originalLog_key_summary: emptyOriginalLogKeySummary(),
-    userLevel_observed: [],
-    no_data_not_risk_exclusion: true
-  };
-}
-
-function emptyRiskLabelSummary() {
-  return {
-    labelInfo_present: false,
-    labelInfo_items_observed: 0,
-    group_names_count: 0,
-    readable_label_sample_count: 0
-  };
-}
-
-function emptyOriginalLogKeySummary() {
-  return {
-    originalLog_present: false,
-    originalLog_items_observed: 0,
-    top_level_keys_observed: [],
-    nested_key_count: 0
-  };
-}
-
-function uniqueSanitized(values) {
-  return [...new Set(values.map(sanitizeSummaryText).filter(Boolean))];
-}
-
-function sanitizeSummaryText(value) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  return String(value)
-    .replace(/(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)\s*[:=]\s*\S+/gi, "$1=[credential_present_redacted]")
-    .replace(/\bhttps?:\/\/\S+/gi, "[redacted_url]")
-    .replace(/\b\d{17}[\dXx]\b/g, "[id_card_present]")
-    .replace(/\b(?:ANDROID|IOS)_[A-Za-z0-9_.:-]+/g, "[masked_device_id]")
-    .slice(0, 160);
-}
-
-function displayRiskEntity(fieldName, value, input) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const text = String(value).trim();
-  if (!text) {
-    return null;
-  }
-  if (outputScope(input) === "external_share") {
-    return maskRiskEntity(fieldName, text);
-  }
-  return text.slice(0, 160);
-}
-
-function displayPiiStrict(fieldName, value, input) {
-  const text = firstStringLike(value);
-  if (!text) {
-    return null;
-  }
-  if (isPhoneField(fieldName) && isPhoneNumber(text)) {
-    return maskPhoneNumber(text, outputScope(input));
-  }
-  if (isIdCardField(fieldName) && looksLikeIdCard(text)) {
-    return {
-      id_card_present: true,
-      birth_year_present: outputScope(input) === "internal_risk_review" ? idCardBirthYear(text) !== null : undefined
-    };
-  }
-  if (isNameField(fieldName)) {
-    return { name_present: true };
-  }
-  return null;
-}
-
-function maskRiskEntity(fieldName, value) {
-  const text = String(value);
-  if (isIpField(fieldName) || looksLikeIp(text)) {
-    return maskIp(text);
-  }
-  if (isDeviceField(fieldName) || /^(ANDROID|IOS)_/.test(text)) {
-    return maskDeviceId(text);
-  }
-  if (isUserIdField(fieldName)) {
-    return `[masked_user_id:length=${text.length}]`;
-  }
-  return `[masked_identifier:length=${text.length}]`;
-}
-
-function maskPhoneNumber(value, scope) {
-  const digits = String(value).replace(/\D/g, "");
-  if (!isPhoneNumber(digits)) {
-    return null;
-  }
-  return scope === "external_share" ? `${digits.slice(0, 3)}********` : `${digits.slice(0, 7)}****`;
-}
-
-function isPhoneNumber(value) {
-  return /^1\d{10}$/.test(String(value).replace(/\D/g, ""));
-}
-
-function looksLikeIdCard(value) {
-  return /^\d{17}[\dXx]$/.test(String(value));
-}
-
-function idCardBirthYear(value) {
-  const match = String(value).match(/^\d{6}(\d{4})\d{7}[\dXx]$/);
-  return match ? match[1] : null;
-}
-
-function isPhoneField(fieldName) {
-  return /(phone|mobile|手机号|手机|电话号码|phone_number)/i.test(String(fieldName));
-}
-
-function isIdCardField(fieldName) {
-  return /(id.?card|identity|身份证|证件号|idNo)/i.test(String(fieldName));
-}
-
-function isNameField(fieldName) {
-  return /(^name$|real.?name|姓名|真实姓名)/i.test(String(fieldName));
-}
-
-function isIpField(fieldName) {
-  return /(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(String(fieldName));
-}
-
-function isDeviceField(fieldName) {
-  return /(deviceId|device_id|did|deviceDid|设备)/i.test(String(fieldName));
-}
-
-function isUserIdField(fieldName) {
-  return /(^user_id$|^userId$|^uid$|userIds|用户id)/i.test(String(fieldName));
-}
-
-function looksLikeIp(value) {
-  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(String(value)) || String(value).includes(":");
-}
-
-function readApiMessage(value) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  for (const key of ["message", "msg", "error", "errorMsg", "error_message"]) {
-    if (typeof value[key] === "string") {
-      return value[key];
-    }
-  }
-  return null;
 }
 
 function validateLoginLogsInput(input) {
@@ -3469,92 +2135,6 @@ function buildLoginLogsRequest(input) {
   };
 }
 
-function summarizeLoginLogsResponse(value, input, meta = {}) {
-  const diagnosticsBase = buildLoginLogsDiagnostics({
-    value,
-    input,
-    fetchResult: meta.fetchResult,
-    responseFormat: meta.responseFormat || "json",
-    parseErrorDetailSanitized: null
-  });
-  const diagnostics = withLoginLogsFallbackDiagnostics(diagnosticsBase, meta);
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
-    return {
-      sourceStatus: "blocked",
-      errorType: "platform_error",
-      summary: {
-        login_logs: {
-          source_status: "blocked",
-          api_code: apiCode,
-          records_count: 0,
-          no_data: false,
-          no_data_not_risk_exclusion: true,
-          diagnostics
-        }
-      }
-    };
-  }
-
-  const detectedRecords = detectLoginLogRecords(value);
-  const records = detectedRecords.records.slice(0, loginLogsLimit(input));
-  const noData = records.length === 0;
-  const summary = buildLoginLogsSummary(records, input, noData, diagnostics);
-  return {
-    sourceStatus: noData ? "no_data" : "completed",
-    errorType: null,
-    summary: {
-      login_logs: summary
-    }
-  };
-}
-
-function summarizeLoginLogsParseFailureResponse(_bodyText, input, meta = {}) {
-  const errorType = meta.httpErrorType || meta.parseErrorType || "parse_error";
-  const sourceStatus = sourceStatusFromErrorType(errorType);
-  const diagnosticsBase = buildLoginLogsDiagnostics({
-    value: null,
-    input,
-    fetchResult: meta.fetchResult,
-    responseFormat: meta.responseFormat || "non_json_or_unparseable",
-    parseErrorDetailSanitized: meta.parseErrorDetailSanitized || "invalid_or_unparseable_json"
-  });
-  return {
-    sourceStatus,
-    errorType,
-    summary: {
-      login_logs: {
-        source_status: sourceStatus,
-        records_count: 0,
-        no_data: false,
-        no_data_not_risk_exclusion: true,
-        diagnostics: withLoginLogsFallbackDiagnostics(diagnosticsBase, meta)
-      }
-    }
-  };
-}
-
-function summarizeLoginLogsFailureResponse(input, meta = {}) {
-  const diagnosticsBase = buildLoginLogsDiagnostics({
-    value: null,
-    input,
-    fetchResult: meta.fetchResult,
-    responseFormat: meta.responseFormat || "not_available",
-    parseErrorDetailSanitized: null
-  });
-  return {
-    summary: {
-      login_logs: {
-        source_status: meta.sourceStatus || sourceStatusFromErrorType(meta.errorType || "page_load_error"),
-        records_count: 0,
-        no_data: false,
-        no_data_not_risk_exclusion: true,
-        diagnostics: withLoginLogsFallbackDiagnostics(diagnosticsBase, meta)
-      }
-    }
-  };
-}
-
 function loginLogsTimeWindow(input) {
   const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
     ? input.time_window
@@ -3597,250 +2177,8 @@ function loginLogsLimit(input) {
   return Object.hasOwn(input, "limit") ? Math.trunc(input.limit) : LOGIN_LOGS_DEFAULT_LIMIT;
 }
 
-function usesDefaultLoginLogsWindow(input) {
-  if (Object.hasOwn(input, "from_timestamp") || Object.hasOwn(input, "to_timestamp")) {
-    return false;
-  }
-  const rawWindow = input.time_window && typeof input.time_window === "object" && !Array.isArray(input.time_window)
-    ? input.time_window
-    : null;
-  if (!rawWindow) {
-    return true;
-  }
-  return !["from_timestamp", "to_timestamp", "from", "to", "startTime", "endTime"].some((key) => Object.hasOwn(rawWindow, key));
-}
-
 function validRecallSource(value) {
   return typeof value === "string" && /^\d+(,\d+)*$/.test(value.trim());
-}
-
-function detectLoginLogRecords(value) {
-  const data = value && typeof value === "object" ? value.data : value;
-  if (Array.isArray(data)) {
-    return {
-      path: Array.isArray(value?.data) ? "data[]" : "response[]",
-      records: data.filter(isPlainObject),
-      count: data.length
-    };
-  }
-  if (!isPlainObject(data)) {
-    return { path: null, records: [], count: 0 };
-  }
-
-  for (const key of ["logSearchModels", "records", "rows", "list", "items", "logs", "result", "data"]) {
-    if (Array.isArray(data[key])) {
-      return {
-        path: `data.${safeFieldName(key)}`,
-        records: data[key].filter(isPlainObject),
-        count: data[key].length
-      };
-    }
-  }
-  if (isPlainObject(data.page) && Array.isArray(data.page.list)) {
-    return {
-      path: "data.page.list",
-      records: data.page.list.filter(isPlainObject),
-      count: data.page.list.length
-    };
-  }
-  return { path: null, records: [], count: 0 };
-}
-
-function buildLoginLogsSummary(records, input, noData, diagnostics) {
-  const window = loginLogsTimeWindow(input);
-  const timeValues = records.map(loginRecordTime).filter((value) => value !== null).sort((a, b) => a - b);
-  const returnedFields = returnedLoginLogFields(records);
-  const firstIp = firstLoginIp(records);
-  const firstDeviceId = firstLoginDeviceId(records);
-  const firstUserId = firstLoginUserId(records);
-  const firstMethod = firstLoginField(records, /(^method$|loginMethod|登录方式)/i);
-  const firstLogSource = firstLoginField(records, /(^logSource$|origin|source|channel|platform|app|端|来源)/i);
-  const piiSummary = loginPiiStrictSummary(records, input);
-  return {
-    source_status: noData ? "no_data" : "completed",
-    records_count: records.length,
-    time_window_observed: {
-      from_timestamp: window.from,
-      to_timestamp: window.to
-    },
-    first_login_time_observed: timeValues.length > 0 ? timeValues[0] : null,
-    last_login_time_observed: timeValues.length > 0 ? timeValues[timeValues.length - 1] : null,
-    login_result_fields_present: fieldsPresent(returnedFields, /(result|status|success|outcome|error|失败|成功|状态)/i),
-    device_fields_present: fieldsPresent(returnedFields, /(device|did|设备|model|机型)/i),
-    ip_fields_present: fieldsPresent(returnedFields, /(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i),
-    ip_sample: firstIp ? displayRiskEntity("ip", firstIp, input) : null,
-    device_id_sample: firstDeviceId ? displayRiskEntity("deviceId", firstDeviceId, input) : null,
-    user_id_sample: firstUserId ? displayRiskEntity("user_id", firstUserId, input) : null,
-    method_sample: firstMethod ? displayRiskEntity("method", firstMethod, input) : null,
-    logSource_sample: firstLogSource ? displayRiskEntity("logSource", firstLogSource, input) : null,
-    ip_sample_masked: firstIp ? maskIp(firstIp) : null,
-    device_id_sample_masked: firstDeviceId ? maskDeviceId(firstDeviceId) : null,
-    phone_number_sample: piiSummary.phone_number_sample,
-    id_card_present: piiSummary.id_card_present,
-    birth_year_present: piiSummary.birth_year_present,
-    name_present: piiSummary.name_present,
-    origin_fields_present: fieldsPresent(returnedFields, /(origin|source|channel|platform|app|端|来源)/i),
-    returned_fields_observed: returnedFields,
-    no_data: noData,
-    no_data_not_risk_exclusion: true,
-    diagnostics
-  };
-}
-
-function buildLoginLogsDiagnostics({ value, input, fetchResult, responseFormat, parseErrorDetailSanitized }) {
-  const detectedRecords = value === null ? { path: null, records: [], count: 0 } : detectLoginLogRecords(value);
-  return {
-    upstream_http_status: typeof fetchResult?.status === "number" ? fetchResult.status : null,
-    response_format: responseFormat,
-    top_level_keys: value && typeof value === "object" && !Array.isArray(value) ? observedKeys(value) : [],
-    records_array_path_detected: detectedRecords.path,
-    records_count_before_limit: detectedRecords.count,
-    summary_limit: loginLogsLimit(input),
-    response_too_large: Boolean(fetchResult?.bodyTruncated),
-    parse_error_detail_sanitized: parseErrorDetailSanitized
-  };
-}
-
-function withLoginLogsFallbackDiagnostics(diagnostics, meta) {
-  if (!meta?.loginLogsFallbackAttempted) {
-    return diagnostics;
-  }
-  return {
-    ...diagnostics,
-    fallback_attempted: true,
-    fallback_reason: meta.loginLogsFallbackReason || null,
-    fallback_window_ms: LOGIN_LOGS_FALLBACK_WINDOW_MS,
-    initial_attempt: meta.loginLogsInitialDiagnostics || null
-  };
-}
-
-function loginRecordTime(record) {
-  if (!isPlainObject(record)) {
-    return null;
-  }
-  for (const key of Object.keys(record)) {
-    if (/(time|timestamp|loginTime|eventTime|createTime|登录时间|时间)/i.test(key)) {
-      const value = record[key];
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return Math.trunc(value);
-      }
-      if (typeof value === "string") {
-        const number = Number(value);
-        if (Number.isFinite(number)) {
-          return Math.trunc(number);
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function returnedLoginLogFields(records) {
-  const fields = [];
-  for (const record of records.slice(0, LOGIN_LOGS_DEFAULT_LIMIT)) {
-    fields.push(...observedKeys(record));
-  }
-  return [...new Set(fields)].slice(0, 80);
-}
-
-function fieldsPresent(fields, pattern) {
-  return fields.some((field) => pattern.test(String(field)));
-}
-
-function firstLoginIp(records) {
-  for (const record of records) {
-    for (const [key, value] of Object.entries(record)) {
-      if (/(^ip$|ipAddr|ip_address|clientIp|remoteIp|loginIp|登录ip|ip)/i.test(key)) {
-        const sample = firstStringLike(value);
-        if (sample) {
-          return sample;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function firstLoginDeviceId(records) {
-  for (const record of records) {
-    for (const [key, value] of Object.entries(record)) {
-      if (/(deviceId|device_id|did|deviceDid|设备)/i.test(key)) {
-        const sample = firstStringLike(value);
-        if (sample) {
-          return sample;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function firstLoginUserId(records) {
-  return firstLoginField(records, /(^user_id$|^userId$|^uid$|userIds|用户id)/i);
-}
-
-function firstLoginField(records, pattern) {
-  for (const record of records) {
-    for (const [key, value] of Object.entries(record)) {
-      if (pattern.test(key)) {
-        const sample = firstStringLike(value);
-        if (sample) {
-          return sample;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function loginPiiStrictSummary(records, input) {
-  const summary = {
-    phone_number_sample: null,
-    id_card_present: false,
-    birth_year_present: false,
-    name_present: false
-  };
-  for (const record of records) {
-    for (const [key, value] of Object.entries(record)) {
-      const piiValue = displayPiiStrict(key, value, input);
-      if (isPhoneField(key) && piiValue && !summary.phone_number_sample) {
-        summary.phone_number_sample = piiValue;
-      } else if (isIdCardField(key) && piiValue) {
-        summary.id_card_present = true;
-        summary.birth_year_present = Boolean(piiValue.birth_year_present);
-      } else if (isNameField(key) && piiValue) {
-        summary.name_present = true;
-      }
-    }
-  }
-  return summary;
-}
-
-function firstStringLike(value) {
-  if (isNonEmptyString(value) || typeof value === "number") {
-    return String(value).trim();
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 20)) {
-      const sample = firstStringLike(item);
-      if (sample) {
-        return sample;
-      }
-    }
-  }
-  return null;
-}
-
-function maskIp(value) {
-  const text = String(value);
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text)) {
-    const parts = text.split(".");
-    return `${parts[0]}.${parts[1]}.*.*`;
-  }
-  if (text.includes(":")) {
-    return "[masked_ipv6]";
-  }
-  return "[masked_ip]";
 }
 
 function validateRcpSnapshotInput(input) {
@@ -3983,95 +2321,6 @@ function buildRcpSnapshotRequest(input) {
   };
 }
 
-function summarizeRcpSnapshotResponse(value, input = {}) {
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 200].includes(apiCode)) {
-    const errorType = classifyRcpApiError(value);
-    return {
-      sourceStatus: ["wrong_request_body_shape", "wrong_time_field_format", "invalid_parameter"].includes(errorType)
-        ? "parameter_error"
-        : "blocked",
-      errorType,
-      summary: {
-        rcp_snapshot: {
-          api_code: apiCode,
-          response_wrapper_paths_present: rcpWrapperPresence(value),
-          response_error_category: errorType,
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const data = value && typeof value === "object" ? value.data : null;
-  const eventList = Array.isArray(data?.eventList) ? data.eventList.filter((item) => item && typeof item === "object") : null;
-  if (!data || eventList === null) {
-    const wrapperErrorType = classifyRcpWrapperError(value);
-    if (wrapperErrorType) {
-      return {
-        sourceStatus: "parameter_error",
-        errorType: wrapperErrorType,
-        summary: {
-          rcp_snapshot: {
-            response_wrapper_paths_present: rcpWrapperPresence(value),
-            response_error_category: wrapperErrorType,
-            no_data: false
-          }
-        }
-      };
-    }
-    return {
-      sourceStatus: "parse_error",
-      errorType: "parse_error",
-      summary: {
-        rcp_snapshot: {
-          response_wrapper_paths_present: rcpWrapperPresence(value),
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const tableHeaderColumns = rcpTableHeaderColumns(data.tableHeaderList);
-  const returnedColumns = rcpReturnedColumns(eventList);
-  const noData = eventList.length === 0;
-  return {
-    sourceStatus: noData ? "completed_no_hit_for_small_window" : "completed",
-    errorType: null,
-    summary: {
-      rcp_snapshot: {
-        response_wrapper_paths_present: rcpWrapperPresence(value),
-        event_count: eventList.length,
-        pagination_summary: rcpPaginationSummary(data.pagination),
-        table_header_columns: tableHeaderColumns,
-        returned_columns_observed: returnedColumns,
-        first_event_shape_keys: returnedColumnsFromFirstEvent(eventList),
-        dynamic_columns_observed: returnedColumns.filter((column) => !tableHeaderColumns.includes(column)),
-        first_event_entity_samples: rcpFirstEventEntitySamples(eventList, input),
-        no_data: noData,
-        no_data_not_risk_exclusion: true
-      }
-    }
-  };
-}
-
-function rcpFirstEventEntitySamples(eventList, input) {
-  const first = eventList.find((item) => item && typeof item === "object" && !Array.isArray(item));
-  if (!first) {
-    return {};
-  }
-  const fields = ["eventId", "sourceId", "deviceId", "hitFusePolicyCode", "_occurTime"];
-  const samples = {};
-  for (const field of fields) {
-    if (first[field] !== undefined && first[field] !== null) {
-      samples[field] = ["_occurTime"].includes(field)
-        ? String(first[field]).slice(0, 160)
-        : displayRiskEntity(field, first[field], input);
-    }
-  }
-  return samples;
-}
-
 function validateTrackAnalysisInput(input) {
   const hasUserId = typeof input.user_id === "string" && input.user_id.trim().length > 0;
   const hasDeviceId = typeof input.device_id === "string" && input.device_id.trim().length > 0;
@@ -4173,172 +2422,6 @@ function buildTrackAnalysisDeviceIdsRequest(input) {
   };
 }
 
-function summarizeTrackAnalysisResponse(value, input) {
-  const subInterface = trackAnalysisSubInterface(input);
-  if (subInterface === "getUseDuration") {
-    return summarizeTrackAnalysisUseDurationResponse(value, input);
-  }
-  if (subInterface === "profile") {
-    return summarizeTrackAnalysisProfileResponse(value, input);
-  }
-  if (subInterface === "getDeviceIds") {
-    return summarizeTrackAnalysisDeviceIdsResponse(value, input);
-  }
-  return summarizeTrackAnalysisLatestDateResponse(value, input);
-}
-
-function summarizeTrackAnalysisLatestDateResponse(value, input) {
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 200].includes(apiCode)) {
-    return {
-      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
-      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
-      summary: {
-        track_analysis: {
-          sub_interface: "getLastestDateTime",
-          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-          appName: input.appName,
-          api_code: apiCode,
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const data = value && typeof value === "object" ? value.data : null;
-  const noData = isEmptyPayload(data);
-  return {
-    sourceStatus: noData ? "no_data" : "completed",
-    errorType: null,
-    summary: {
-      track_analysis: {
-        sub_interface: "getLastestDateTime",
-        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-        appName: input.appName,
-        latest_datetime_present: Boolean(data && typeof data === "object" && Object.hasOwn(data, "lastestDateTime")),
-        uid_did_relation_latest_datetime_present: Boolean(
-          data && typeof data === "object" && Object.hasOwn(data, "uidDidRelLatestDateTime")
-        ),
-        output_fields_observed: observedKeys(data).map((key) => `data.${key}`),
-        no_data: noData,
-        no_data_not_risk_exclusion: true
-      }
-    }
-  };
-}
-
-function summarizeTrackAnalysisUseDurationResponse(value, input) {
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 200].includes(apiCode)) {
-    return {
-      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
-      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
-      summary: {
-        track_analysis: {
-          sub_interface: "getUseDuration",
-          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-          appName: input.appName,
-          api_code: apiCode,
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const rows = extractUseDurationRows(value);
-  const activitySummary = buildActivitySummary(rows);
-  const noData = rows.length === 0;
-  return {
-    sourceStatus: noData ? "no_data" : "completed",
-    errorType: null,
-    summary: {
-      track_analysis: {
-        sub_interface: "getUseDuration",
-        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-        appName: input.appName,
-        output_fields_observed: rows.length > 0 ? ["data.rows[].date", "data.rows[].duration"] : [],
-        no_data: noData,
-        no_data_not_risk_exclusion: true,
-        activity_summary: activitySummary
-      }
-    }
-  };
-}
-
-function summarizeTrackAnalysisProfileResponse(value, input) {
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 200].includes(apiCode)) {
-    return {
-      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
-      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
-      summary: {
-        track_analysis: {
-          sub_interface: "profile",
-          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-          appName: input.appName,
-          api_code: apiCode,
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const profileSummary = buildProfileSummary(value);
-  const noData = isProfileSummaryEmpty(profileSummary);
-  return {
-    sourceStatus: noData ? "no_data" : "completed",
-    errorType: null,
-    summary: {
-      track_analysis: {
-        sub_interface: "profile",
-        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-        appName: input.appName,
-        output_fields_observed: profileSummary.output_fields_observed,
-        no_data: noData,
-        no_data_not_risk_exclusion: true,
-        profile_summary: profileSummary
-      }
-    }
-  };
-}
-
-function summarizeTrackAnalysisDeviceIdsResponse(value, input) {
-  const apiCode = readApiCode(value);
-  if (apiCode !== null && ![0, 200].includes(apiCode)) {
-    return {
-      sourceStatus: apiCode === 603 || apiCode === 604 ? "parameter_error" : "blocked",
-      errorType: apiCode === 603 || apiCode === 604 ? "parameter_error" : "platform_error",
-      summary: {
-        track_analysis: {
-          sub_interface: "getDeviceIds",
-          entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-          appName: input.appName,
-          api_code: apiCode,
-          no_data: false
-        }
-      }
-    };
-  }
-
-  const deviceSummary = buildDeviceSummary(value, input);
-  const noData = isDeviceSummaryEmpty(deviceSummary);
-  return {
-    sourceStatus: noData ? "no_data" : "completed",
-    errorType: null,
-    summary: {
-      track_analysis: {
-        sub_interface: "getDeviceIds",
-        entity_type: Object.hasOwn(input, "device_id") ? "deviceId" : "userId",
-        appName: input.appName,
-        output_fields_observed: deviceSummary.output_fields_observed,
-        no_data: noData,
-        no_data_not_risk_exclusion: true,
-        device_summary: deviceSummary
-      }
-    }
-  };
-}
-
 function trackAnalysisSubInterface(input) {
   return typeof input.sub_interface === "string" ? input.sub_interface : "getLastestDateTime";
 }
@@ -4364,267 +2447,6 @@ function trackAnalysisTimeWindow(input) {
     startTime: end - TRACK_ANALYSIS_DEFAULT_WINDOW_MS,
     endTime: end
   };
-}
-
-function extractUseDurationRows(value) {
-  const data = value && typeof value === "object" ? value.data : null;
-  if (Array.isArray(data?.rows)) {
-    return data.rows.filter((row) => row && typeof row === "object");
-  }
-  if (Array.isArray(data)) {
-    return data.filter((row) => row && typeof row === "object");
-  }
-  return [];
-}
-
-function buildActivitySummary(rows) {
-  let totalDuration = 0;
-  let peakDuration = null;
-  let peakDate = null;
-  let nonzeroDaysCount = 0;
-  const dates = [];
-
-  for (const row of rows) {
-    const date = typeof row.date === "string" ? row.date : null;
-    const duration = typeof row.duration === "number" ? row.duration : Number(row.duration);
-    const safeDuration = Number.isFinite(duration) ? duration : 0;
-    totalDuration += safeDuration;
-    if (safeDuration > 0) {
-      nonzeroDaysCount += 1;
-    }
-    if (date) {
-      dates.push(date);
-    }
-    if (peakDuration === null || safeDuration > peakDuration) {
-      peakDuration = safeDuration;
-      peakDate = date;
-    }
-  }
-
-  dates.sort();
-  return {
-    rows_count: rows.length,
-    total_duration: totalDuration,
-    peak_duration: peakDuration ?? 0,
-    peak_date: peakDate,
-    nonzero_days_count: nonzeroDaysCount,
-    date_range_observed: {
-      from: dates[0] || null,
-      to: dates[dates.length - 1] || null
-    }
-  };
-}
-
-function buildProfileSummary(value) {
-  const data = value && typeof value === "object" ? value.data : null;
-  const profile = data && typeof data === "object" && !Array.isArray(data) ? data.profile : null;
-  const firstLevelProfile = profile && typeof profile === "object" ? profile.firstLevelProfile : null;
-  const secondLevelProfile = profile && typeof profile === "object" ? profile.secondLevelProfile : null;
-  const deviceIds = profileDeviceIds(data, profile);
-  const firstLevelKeys = observedKeys(firstLevelProfile);
-  const secondLevelKeys = secondLevelProfileKeys(secondLevelProfile);
-  const outputFields = profileOutputFields(data, firstLevelKeys, secondLevelProfile, deviceIds);
-
-  return {
-    profile_sections_observed: profileSectionsObserved(data, profile),
-    first_level_profile_keys_count: firstLevelKeys.length,
-    second_level_profile_keys_count: secondLevelKeys.length,
-    register_time_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(register|注册)/i),
-    fan_distribution_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(fan|粉丝|fans?)/i),
-    active_days_bucket_present: containsProfileSignal([...firstLevelKeys, ...secondLevelKeys], /(active.*day|active_days|活跃)/i),
-    device_ids_count: deviceIds ? deviceIds.length : null,
-    output_fields_observed: outputFields
-  };
-}
-
-function profileSectionsObserved(data, profile) {
-  const sections = [];
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    if (Object.hasOwn(data, "deviceIds")) {
-      sections.push("data.deviceIds");
-    }
-    if (Object.hasOwn(data, "latestDateTime")) {
-      sections.push("data.latestDateTime");
-    }
-    if (Object.hasOwn(data, "profile")) {
-      sections.push("data.profile");
-    }
-  }
-  if (profile && typeof profile === "object" && !Array.isArray(profile)) {
-    if (Object.hasOwn(profile, "firstLevelProfile")) {
-      sections.push("data.profile.firstLevelProfile");
-    }
-    if (Object.hasOwn(profile, "secondLevelProfile")) {
-      sections.push("data.profile.secondLevelProfile");
-    }
-  }
-  return sections;
-}
-
-function profileDeviceIds(data, profile) {
-  const candidates = [data?.deviceIds, profile?.deviceIds];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function secondLevelProfileKeys(secondLevelProfile) {
-  if (Array.isArray(secondLevelProfile)) {
-    const labels = secondLevelProfile
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        return typeof item.label === "string" ? item.label : null;
-      })
-      .filter(Boolean);
-    return labels.length > 0 ? [...new Set(labels.map(safeFieldName))] : secondLevelProfile.map((_, index) => `item_${index}`);
-  }
-  return observedKeys(secondLevelProfile);
-}
-
-function profileOutputFields(data, firstLevelKeys, secondLevelProfile, deviceIds) {
-  const outputFields = [];
-  if (deviceIds) {
-    outputFields.push("data.deviceIds");
-  }
-  for (const key of firstLevelKeys) {
-    outputFields.push(`data.profile.firstLevelProfile.${safeFieldName(key)}`);
-  }
-  if (Array.isArray(secondLevelProfile) && secondLevelProfile.length > 0) {
-    outputFields.push("data.profile.secondLevelProfile[].label");
-    outputFields.push("data.profile.secondLevelProfile[].value");
-  } else {
-    for (const key of observedKeys(secondLevelProfile)) {
-      outputFields.push(`data.profile.secondLevelProfile.${safeFieldName(key)}`);
-    }
-  }
-  if (data && typeof data === "object" && Object.hasOwn(data, "latestDateTime")) {
-    outputFields.push("data.latestDateTime");
-  }
-  return outputFields.slice(0, 80);
-}
-
-function containsProfileSignal(keys, pattern) {
-  return keys.some((key) => pattern.test(String(key)));
-}
-
-function isProfileSummaryEmpty(summary) {
-  return (
-    summary.profile_sections_observed.length === 0 ||
-    (
-      summary.first_level_profile_keys_count === 0 &&
-      summary.second_level_profile_keys_count === 0 &&
-      !summary.device_ids_count &&
-      summary.output_fields_observed.length === 0
-    )
-  );
-}
-
-function buildDeviceSummary(value, input = {}) {
-  const data = value && typeof value === "object" ? value.data : null;
-  const { entries, sourcePath } = extractDeviceEntries(data);
-  const deviceIds = entries.map(deviceIdFromEntry).filter((item) => item !== null && item !== undefined && String(item).length > 0);
-  const uniqueDeviceIds = [...new Set(deviceIds.map((item) => String(item)))];
-  const fieldKeys = deviceFieldsObserved(entries);
-  const outputFields = deviceOutputFields(sourcePath, entries, fieldKeys);
-
-  return {
-    device_ids_count: uniqueDeviceIds.length > 0 ? uniqueDeviceIds.length : entries.length,
-    device_id_sample: uniqueDeviceIds.length > 0 ? displayRiskEntity("deviceId", uniqueDeviceIds[0], input) : null,
-    device_id_sample_masked: uniqueDeviceIds.length > 0 ? maskDeviceId(uniqueDeviceIds[0]) : null,
-    device_fields_observed: fieldKeys,
-    device_model_fields_present: containsProfileSignal(fieldKeys, /(device.*model|model|机型|设备型号)/i),
-    last_active_fields_present: containsProfileSignal(fieldKeys, /(last.*active|active.*time|last.*login|latest|recent|活跃|最近|时间|日期)/i),
-    output_fields_observed: outputFields
-  };
-}
-
-function extractDeviceEntries(data) {
-  if (Array.isArray(data)) {
-    return { entries: data.filter(isDeviceEntry), sourcePath: "data[]" };
-  }
-  if (!data || typeof data !== "object") {
-    return { entries: [], sourcePath: "data" };
-  }
-
-  const arrayCandidates = [
-    ["data.deviceIds", data.deviceIds],
-    ["data.device_ids", data.device_ids],
-    ["data.devices", data.devices],
-    ["data.deviceList", data.deviceList],
-    ["data.device_list", data.device_list],
-    ["data.rows", data.rows],
-    ["data.records", data.records],
-    ["data.list", data.list],
-    ["data.data", data.data]
-  ];
-  for (const [sourcePath, candidate] of arrayCandidates) {
-    if (Array.isArray(candidate)) {
-      return { entries: candidate.filter(isDeviceEntry), sourcePath };
-    }
-  }
-
-  if (deviceIdFromEntry(data) !== null || deviceFieldsObserved([data]).length > 0) {
-    return { entries: [data], sourcePath: "data" };
-  }
-  return { entries: [], sourcePath: "data" };
-}
-
-function isDeviceEntry(value) {
-  return ["string", "number"].includes(typeof value) || Boolean(value && typeof value === "object");
-}
-
-function deviceIdFromEntry(entry) {
-  if (typeof entry === "string" || typeof entry === "number") {
-    return entry;
-  }
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    return null;
-  }
-  for (const key of Object.keys(entry)) {
-    if (/^(deviceId|device_id|did|deviceDid|device_did|deviceNo|device_no)$/i.test(key)) {
-      const value = entry[key];
-      if (typeof value === "string" || typeof value === "number") {
-        return value;
-      }
-    }
-  }
-  return null;
-}
-
-function deviceFieldsObserved(entries) {
-  const keys = [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      continue;
-    }
-    keys.push(...observedKeys(entry));
-  }
-  return [...new Set(keys)].slice(0, 50);
-}
-
-function deviceOutputFields(sourcePath, entries, fieldKeys) {
-  if (entries.length === 0) {
-    return [];
-  }
-  const normalizedBase = sourcePath && sourcePath.endsWith("[]") ? sourcePath : `${sourcePath || "data"}[]`;
-  if (fieldKeys.length === 0) {
-    return [normalizedBase];
-  }
-  return fieldKeys.map((key) => `${normalizedBase}.${safeFieldName(key)}`).slice(0, 80);
-}
-
-function maskDeviceId(value) {
-  const text = String(value);
-  return `[masked_device_id:length=${text.length}]`;
-}
-
-function isDeviceSummaryEmpty(summary) {
-  return summary.device_ids_count === 0 && summary.device_fields_observed.length === 0 && summary.output_fields_observed.length === 0;
 }
 
 function observedKeys(value) {
@@ -5033,27 +2855,7 @@ function mockWeaponInventoryData(input) {
       }
     ]
   };
-  const summary = summarizeWeaponInventoryResponse(
-    {
-      graphData: graphValue,
-      riskDataResults: [
-        {
-          ok: true,
-          status: 200,
-          body: riskValue
-        }
-      ],
-      weapon_chain: {
-        graphData_status: "completed",
-        riskData_status: "completed",
-        selected_device_count: 1
-      }
-    },
-    input
-  ).summary.weapon_inventory;
-
   return {
-    shape_summary_only: true,
     fixed_paths: {
       graphData: WEAPON_GRAPH_DATA_PATH,
       riskData: WEAPON_RISK_DATA_PATH
@@ -5072,7 +2874,14 @@ function mockWeaponInventoryData(input) {
       max_device_ids: weaponMaxDeviceIds(input),
       device_ids_exposed_raw: false
     },
-    weapon_inventory: summary,
+    graphData: graphValue,
+    riskDataResults: [
+      {
+        ok: true,
+        status: 200,
+        body: riskValue
+      }
+    ],
     generated_at: fixedMockTime()
   };
 }
@@ -5100,9 +2909,7 @@ function mockLoginLogsData(input) {
       ]
     }
   };
-  const summary = summarizeLoginLogsResponse(mockValue, input).summary.login_logs;
   return {
-    shape_summary_only: true,
     fixed_path: LOGIN_LOGS_SEARCH_PATH,
     request: {
       method: request.method,
@@ -5110,7 +2917,7 @@ function mockLoginLogsData(input) {
       recallSource: loginLogsRecallSource(input),
       limit: loginLogsLimit(input)
     },
-    login_logs: summary,
+    response: mockValue,
     generated_at: fixedMockTime()
   };
 }
@@ -5176,158 +2983,8 @@ function mockTrackAnalysisDeviceSummary(input) {
   };
 }
 
-function summarizeFixedShapeActionResponse(sectionName) {
-  return (value, input = {}) => {
-    const apiCode = readApiCode(value);
-    if (apiCode !== null && ![0, 1, 200].includes(apiCode)) {
-      const archivesAuthFlow = apiCode === 302 && sectionName.startsWith("archives_");
-      const errorType = archivesAuthFlow
-        ? "auth_flow_not_completed_in_bound_context"
-        : apiCode === 302
-          ? "auth_failed"
-          : "platform_error";
-      const sourceStatus = archivesAuthFlow ? "auth_flow_not_completed_in_bound_context" : sourceStatusFromErrorType(errorType);
-      return {
-        sourceStatus,
-        errorType,
-        summary: {
-          [sectionName]: {
-            source_status: sourceStatus,
-            api_code: apiCode,
-            top_level_keys: observedKeys(value),
-            raw_full_body_suppressed: true,
-            no_data: false,
-            no_data_not_risk_exclusion: true,
-            ...(archivesAuthFlow
-              ? {
-                  auth_flow_not_completed_in_bound_context: true,
-                  next_action: "Complete the one-time Archives account confirmation in the current visible service browser context, then reuse the same USER_DATA_DIR/browser context for subsequent Archives actions."
-                }
-              : {})
-          }
-        }
-      };
-    }
-
-    const payload = Object.hasOwn(value || {}, "data") ? value.data : value;
-    const arraySummaries = collectArraySummaries(value);
-    const noData = isEmptyPayload(payload) || (
-      arraySummaries.length > 0 && arraySummaries.every((item) => item.count === 0)
-    );
-    return {
-      sourceStatus: noData ? "no_data" : "completed",
-      errorType: null,
-      summary: {
-        [sectionName]: {
-          source_status: noData ? "no_data" : "completed",
-          api_code: apiCode,
-          top_level_keys: observedKeys(value),
-          data_keys: observedKeys(payload),
-          array_paths_observed: arraySummaries,
-          entity_samples: collectRiskEntitySamples(value, input),
-          trace_id_present: hasFieldDeep(value, /^traceId$/i),
-          query_id_present: hasFieldDeep(value, /^queryId$/i),
-          response_shape_summary_only: true,
-          raw_full_body_suppressed: true,
-          no_data: noData,
-          no_data_not_risk_exclusion: true
-        }
-      }
-    };
-  };
-}
-
-function collectArraySummaries(value, path = "response", depth = 0, output = []) {
-  if (depth > 5 || value === null || value === undefined || output.length >= 20) {
-    return output;
-  }
-  if (Array.isArray(value)) {
-    output.push({ path, count: value.length });
-    for (const item of value.slice(0, 3)) {
-      collectArraySummaries(item, `${path}[]`, depth + 1, output);
-    }
-    return output;
-  }
-  if (typeof value !== "object") {
-    return output;
-  }
-  for (const [key, child] of Object.entries(value).slice(0, 50)) {
-    collectArraySummaries(child, `${path}.${safeFieldName(key)}`, depth + 1, output);
-  }
-  return output;
-}
-
-function collectRiskEntitySamples(value, input, depth = 0, output = {}) {
-  if (depth > 5 || value === null || value === undefined || Object.keys(output).length >= 20) {
-    return output;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 20)) {
-      collectRiskEntitySamples(item, input, depth + 1, output);
-    }
-    return output;
-  }
-  if (!isPlainObject(value)) {
-    return output;
-  }
-
-  for (const [key, child] of Object.entries(value).slice(0, 80)) {
-    const normalizedKey = riskEntityFieldName(key);
-    if (normalizedKey && output[normalizedKey] === undefined && ["string", "number", "boolean"].includes(typeof child)) {
-      output[normalizedKey] = displayRiskEntity(normalizedKey, child, input);
-    }
-    if (child && typeof child === "object") {
-      collectRiskEntitySamples(child, input, depth + 1, output);
-    }
-  }
-  return output;
-}
-
-function riskEntityFieldName(key) {
-  const text = String(key);
-  if (/^(userId|user_id|uid|userIds)$/i.test(text)) {
-    return "user_id";
-  }
-  if (/^(deviceId|device_id|did|deviceDid|dids)$/i.test(text)) {
-    return "deviceId";
-  }
-  if (/^(ip|ipAddr|ip_address|clientIp|remoteIp|loginIp|userIpDesc)$/i.test(text)) {
-    return "ip";
-  }
-  if (/^(eventId|eventType|sourceId|hitFusePolicyCode|policyCode|policyTreeCode|policyTreeVersion|policyTreeNodeCode)$/i.test(text)) {
-    return text;
-  }
-  if (/^(photoId|photo_id|liveId|live_id)$/i.test(text)) {
-    return text;
-  }
-  return null;
-}
-
-function hasFieldDeep(value, pattern, depth = 0) {
-  if (depth > 5 || value === null || value === undefined) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.slice(0, 20).some((item) => hasFieldDeep(item, pattern, depth + 1));
-  }
-  if (!isPlainObject(value)) {
-    return false;
-  }
-  for (const [key, child] of Object.entries(value).slice(0, 80)) {
-    if (pattern.test(String(key))) {
-      return true;
-    }
-    if (hasFieldDeep(child, pattern, depth + 1)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function mockFixedActionData(sectionName, input, request, responseValue, extra = {}) {
-  const summary = summarizeFixedShapeActionResponse(sectionName)(responseValue, input).summary[sectionName];
   return {
-    shape_summary_only: true,
     fixed_path: String(request.path || "").split("?")[0],
     request: {
       method: request.method,
@@ -5335,10 +2992,8 @@ function mockFixedActionData(sectionName, input, request, responseValue, extra =
       body_fields: Object.keys(request.body || {}),
       companion_paths: request.companionPaths || []
     },
-    [sectionName]: {
-      ...summary,
-      ...extra
-    },
+    response: responseValue,
+    ...extra,
     generated_at: fixedMockTime()
   };
 }

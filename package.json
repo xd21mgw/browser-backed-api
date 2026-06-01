@@ -12,7 +12,7 @@
     "refresh:once": "node scripts/refresh-profile.js",
     "refresh:daemon": "node scripts/refresh-daemon.js",
     "test:mock": "node --test test/mock.test.js",
-    "check": "node --check src/server.js && node --check src/service.js && node --check src/config.js && node --check src/actions.js && node --check src/browser.js && node --check src/authState.js && node --check src/originRegistry.js && node --check src/quality.js && node --check src/diagnostics.js && node --check scripts/open-profile.js && node --check scripts/refresh-profile.js && node --check scripts/refresh-daemon.js && node --check test/mock.test.js && npm run test:mock"
+    "check": "node --check src/server.js && node --check src/service.js && node --check src/config.js && node --check src/actions.js && node --check src/browser.js && node --check src/authState.js && node --check src/originRegistry.js && node --check src/diagnostics.js && node --check scripts/open-profile.js && node --check scripts/refresh-profile.js && node --check scripts/refresh-daemon.js && node --check test/mock.test.js && npm run test:mock"
   },
   "dependencies": {
     "playwright": "^1.53.0"

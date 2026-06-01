@@ -234,7 +234,7 @@ pgrep -fl "chrome|Chromium|playwright|start:live|refresh:daemon|open-profile" ||
 
 Meaning:
 
-- `blocked`: source quality or platform failure state, not a runtime crash.
+- `blocked`: platform/readiness failure state, not a runtime crash.
 - `auth_failed`: login state or permission flow did not complete.
 - `network_error`: browser fetch failed before a useful platform response.
 
@@ -245,23 +245,21 @@ Fix:
 - Re-run `npm run open:profile` if auth is required.
 - Confirm you personally have permission for the platform.
 
-These states are not no-risk conclusions. In `compat_summary`, preserve the
-legacy diagnostic fields returned by the service. In `passthrough`, preserve the
-service `error_type` and `safety` envelope fields for upper-layer handling.
+These states are not no-risk conclusions. Preserve the service `error_type`,
+transport fields, and `safety` envelope fields for upper-layer handling.
 
-## Passthrough-Only Action Rejects compat_summary
+## Legacy Response Mode Is Rejected
 
 Symptom:
 
-- A recovered action such as `archives_private_message_search` or
-  `rcp_policy_detail_lookup` returns `parameter_error` or `invalid_parameter`
-  when called with `response_mode=compat_summary`.
+- Any action returns `parameter_error` or `invalid_parameter` when called with a
+  legacy response mode.
 
 Meaning:
 
-- The action is passthrough-only by design.
-- It does not generate `source_card`, `source_quality`, evidence summaries,
-  no-data interpretation, or risk judgments.
+- All actions are passthrough-only by design.
+- The service does not generate business summaries, observations, evidence
+  cards, no-data interpretation, source scoring, or risk judgments.
 
 Fix:
 
@@ -339,12 +337,12 @@ that output and treat it as a service bug.
 - method
 - fixed path
 - typed params
-- `compat_summary` vs `passthrough` support
+- passthrough support
 - mock and live smoke status
 - open status
 - safety boundary
 
-It does not define how an Agent should interpret `upstream.body`.
+It does not define how an Agent should interpret platform data.
 
 ## Why Some Capabilities Are Not Open
 
