@@ -112,11 +112,69 @@ Typical meanings:
 | status/error | Meaning |
 | --- | --- |
 | `auth_required` / `auth_redirect` / `login_page` | Login or landing flow did not finish in this profile. |
+| `manual_login_required` | Browser reached a page that requires human login or account input. |
+| `auth_flow_not_completed_in_bound_context` | Browser stayed on the fixed origin but did not finish the bounded landing flow. |
+| `two_factor_required` / `captcha_required` | 2FA, QR, captcha, or another human challenge is required. |
 | `failed` | Required origin failed due to timeout, network, origin mismatch, or other refresh failure. |
 | `optional_failed` | Optional origin failed; this is recorded but does not fail required-origin readiness. |
 | `navigation_timeout` | Platform page did not load within timeout. |
 | `origin_mismatch` | Browser landed outside the configured fixed origin. |
 | `network_error` | Local browser/network could not reach the platform. |
+
+## Archives Center Landing Flow
+
+Symptom:
+
+- Archives actions return `auth_flow_not_completed_in_bound_context`.
+- `/prewarm` or `refresh:once` shows Archives not ready while other origins are
+  ready.
+
+Meaning:
+
+- Archives may have reached its configured origin or the account confirmation
+  origin but stayed on a lightweight account-confirmation page.
+- This can recur every 2-3 hours even when the Chrome profile and platform auth
+  state are otherwise usable.
+- This is not a no-data result and not a risk conclusion.
+
+What the service tries automatically:
+
+- During `refresh:once`, `/prewarm`, refresh daemon, or action-stage
+  ensure-ready before the fixed fetch.
+- At most two clicks.
+- Only lightweight labels: `下一步`, `继续`, `确认`, `进入系统`, `登录`,
+  `Continue`, `Next`, `Confirm`.
+- Safe control candidates include `button`, `input[type=submit]`,
+  `input[type=button]`, `a[role=button]`, `[role=button]`, a form with one
+  matching submit control, or a visible clickable text element with an
+  allowlisted label.
+- The username/account must already be present or prefilled. The service does
+  not fill it.
+- No password, OTP, QR, captcha, localStorage, cookie, token, session, or header
+  is read or output.
+
+When it stops:
+
+- password input is present
+- OTP / 2FA / QR / captcha is present
+- username or account input needs manual entry
+- permission-blocked text appears
+- the same confirmation page remains after the click limit
+- diagnostics show `allowlisted_clickable_control_present=false`
+
+Fix:
+
+```sh
+npm run open:profile
+```
+
+Finish the Archives page manually in the visible browser, then run:
+
+```sh
+npm run refresh:once
+```
+
+Do not delete the profile. Do not copy another teammate's profile.
 
 ## Service Is Not Started
 
@@ -176,7 +234,7 @@ pgrep -fl "chrome|Chromium|playwright|start:live|refresh:daemon|open-profile" ||
 
 Meaning:
 
-- `blocked`: source quality or platform failure state, not a runtime crash.
+- `blocked`: platform/readiness failure state, not a runtime crash.
 - `auth_failed`: login state or permission flow did not complete.
 - `network_error`: browser fetch failed before a useful platform response.
 
@@ -187,23 +245,21 @@ Fix:
 - Re-run `npm run open:profile` if auth is required.
 - Confirm you personally have permission for the platform.
 
-These states are not no-risk conclusions. In `compat_summary`, preserve the
-legacy diagnostic fields returned by the service. In `passthrough`, preserve the
-service `error_type` and `safety` envelope fields for upper-layer handling.
+These states are not no-risk conclusions. Preserve the service `error_type`,
+transport fields, and `safety` envelope fields for upper-layer handling.
 
-## Passthrough-Only Action Rejects compat_summary
+## Legacy Response Mode Is Rejected
 
 Symptom:
 
-- A recovered action such as `archives_private_message_search` or
-  `rcp_policy_detail_lookup` returns `parameter_error` or `invalid_parameter`
-  when called with `response_mode=compat_summary`.
+- Any action returns `parameter_error` or `invalid_parameter` when called with a
+  legacy response mode.
 
 Meaning:
 
-- The action is passthrough-only by design.
-- It does not generate `source_card`, `source_quality`, evidence summaries,
-  no-data interpretation, or risk judgments.
+- All actions are passthrough-only by design.
+- The service does not generate business summaries, observations, evidence
+  cards, no-data interpretation, source scoring, or risk judgments.
 
 Fix:
 
@@ -281,12 +337,12 @@ that output and treat it as a service bug.
 - method
 - fixed path
 - typed params
-- `compat_summary` vs `passthrough` support
+- passthrough support
 - mock and live smoke status
 - open status
 - safety boundary
 
-It does not define how an Agent should interpret `upstream.body`.
+It does not define how an Agent should interpret platform data.
 
 ## Why Some Capabilities Are Not Open
 

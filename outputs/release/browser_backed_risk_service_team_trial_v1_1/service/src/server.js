@@ -52,6 +52,12 @@ async function handleRequest(req, res) {
     return writeJson(res, 200, result);
   }
 
+  if (req.method === "POST" && (url.pathname === "/actions/batch" || url.pathname === "/actions/multi_source_plan")) {
+    const body = await readJsonBody(req);
+    const response = await service.executeBatch(body);
+    return writeJson(res, 200, response);
+  }
+
   const actionMatch = url.pathname.match(/^\/actions\/([a-z0-9_]+)$/);
   if (req.method === "POST" && actionMatch) {
     const body = await readJsonBody(req);

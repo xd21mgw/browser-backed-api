@@ -135,6 +135,7 @@ function domainConfig(definition, env, enabled = true) {
     requiredForRefresh: definition.requiredForRefresh !== false,
     optional: Boolean(definition.optional),
     refreshTtlMs: definition.refreshTtlMs,
+    landingFlow: definition.landingFlow ? { ...definition.landingFlow } : null,
     enabled,
     origin: enabled && rawOrigin ? normalizeOrigin(rawOrigin, definition.envVar) : null,
     prewarmPath: enabled ? normalizeRelativePath(rawPrewarmPath, warmupEnvVar) : "/",
