@@ -83,7 +83,7 @@ export const ORIGIN_REGISTRY = Object.freeze({
     landingFlow: {
       sameOriginActivation: true,
       maxClicks: 2,
-      allowedLabels: ["下一步", "继续", "确认", "进入系统", "Continue", "Next", "Confirm"]
+      allowedLabels: ["下一步", "继续", "确认", "进入系统", "登录", "Continue", "Next", "Confirm"]
     }
   }),
   track_analysis: freezeOrigin({

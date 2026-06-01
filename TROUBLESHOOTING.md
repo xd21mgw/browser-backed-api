@@ -131,16 +131,25 @@ Symptom:
 
 Meaning:
 
-- Archives may have reached its configured origin but stayed on a lightweight
-  account-confirmation page.
+- Archives may have reached its configured origin or the account confirmation
+  origin but stayed on a lightweight account-confirmation page.
+- This can recur every 2-3 hours even when the Chrome profile and platform auth
+  state are otherwise usable.
 - This is not a no-data result and not a risk conclusion.
 
 What the service tries automatically:
 
-- Only during `refresh:once`, `/prewarm`, or profile warmup.
+- During `refresh:once`, `/prewarm`, refresh daemon, or action-stage
+  ensure-ready before the fixed fetch.
 - At most two clicks.
-- Only exact lightweight labels: `下一步`, `继续`, `确认`, `进入系统`,
+- Only lightweight labels: `下一步`, `继续`, `确认`, `进入系统`, `登录`,
   `Continue`, `Next`, `Confirm`.
+- Safe control candidates include `button`, `input[type=submit]`,
+  `input[type=button]`, `a[role=button]`, `[role=button]`, a form with one
+  matching submit control, or a visible clickable text element with an
+  allowlisted label.
+- The username/account must already be present or prefilled. The service does
+  not fill it.
 - No password, OTP, QR, captcha, localStorage, cookie, token, session, or header
   is read or output.
 
@@ -151,6 +160,7 @@ When it stops:
 - username or account input needs manual entry
 - permission-blocked text appears
 - the same confirmation page remains after the click limit
+- diagnostics show `allowlisted_clickable_control_present=false`
 
 Fix:
 

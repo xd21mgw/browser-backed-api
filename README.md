@@ -123,8 +123,9 @@ The safe default is `SERVICE_MODE=mock`. Mock mode does not start Playwright and
 - Allows recovered passthrough-only actions to return only the upstream response
   envelope, without summary/source-card/source-quality generation.
 - Attempts a bounded Archives Center lightweight account-confirmation landing
-  flow during prewarm/refresh only. It clicks only allowlisted confirmation
-  labels and never enters passwords, OTP, QR, captcha, or other manual login
+  flow during prewarm/refresh/action-stage ensure-ready. It clicks only
+  allowlisted confirmation controls when the account is already present and
+  never enters usernames, passwords, OTP, QR, captcha, or other manual login
   factors.
 - Exposes health, prewarm, action latency, and sanitized auth/origin metadata.
 

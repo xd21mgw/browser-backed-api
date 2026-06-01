@@ -252,7 +252,7 @@ export class BrowserBackedApiService {
       boundPageOriginAfterRewarm: actionDiagnostics.bound_page_origin || null
     };
 
-    if (action.domainKey !== "archives" && shouldLazyRewarm(actionDiagnostics)) {
+    if (originWarmed && shouldLazyRewarm(actionDiagnostics)) {
       lazyMeta.lazyRewarmAttempted = true;
       const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
       lazyMeta.lazyRewarmStatus = rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed";
@@ -709,7 +709,7 @@ function isParallelExecution(execution) {
 }
 
 function actionStagePrewarmOptions(action) {
-  return action?.domainKey === "archives" ? { allowLandingFlow: false } : {};
+  return action?.domainKey === "archives" ? { allowLandingFlow: true } : {};
 }
 
 async function executeSerial(sources, runner) {

@@ -86,12 +86,13 @@ fixed registry origins, and writes a refresh-state file. The state file records
 only metadata such as `last_refresh_at`, per-origin readiness, and error type.
 It does not contain credential material.
 
-Archives Center may show a one-time lightweight account confirmation page. The
-refresh/prewarm step can click a small allowlisted confirmation control such as
-`下一步`, `继续`, `确认`, `进入系统`, `Continue`, `Next`, or `Confirm` when no
-password, OTP, QR, or captcha is present. If the page asks for password, 2FA,
-QR scan, captcha, or extra account input, the service stops and reports manual
-login required; run `npm run open:profile` and finish it yourself.
+Archives Center may show a lightweight account confirmation page every few
+hours. The refresh/prewarm/ensure-ready step can click a small allowlisted
+confirmation control such as `下一步`, `继续`, `确认`, `进入系统`, `登录`,
+`Continue`, `Next`, or `Confirm` when the username/account is already present
+and no password, OTP, QR, or captcha is present. If the page asks for password,
+2FA, QR scan, captcha, or extra account input, the service stops and reports
+manual login required; run `npm run open:profile` and finish it yourself.
 
 Expected good result:
 

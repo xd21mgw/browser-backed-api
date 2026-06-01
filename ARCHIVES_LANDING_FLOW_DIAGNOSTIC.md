@@ -119,6 +119,7 @@ sanitized readiness metadata:
 - allowlisted visible button labels
 - whether a username/account input exists
 - whether that username/account input is prefilled, without outputting value
+- whether an allowlisted clickable control exists, and its control kind
 - whether password / OTP / 2FA / QR / captcha / permission-blocked signals exist
 
 It must not output:
@@ -143,13 +144,25 @@ Archives origin now has a same-origin landing-flow activation policy in
   - `继续`
   - `确认`
   - `进入系统`
+  - `登录`
   - `Continue`
   - `Next`
   - `Confirm`
 
-`src/browser.js` now checks same-origin Archives warmup pages during prewarm.
-If a lightweight confirmation page is detected and no manual-auth challenge is
-present, it clicks an allowlisted control and waits for the page to settle.
+`src/browser.js` now checks same-origin and account-origin Archives readiness
+pages during prewarm, refresh, and action-stage ensure-ready. If a lightweight
+confirmation page is detected and no manual-auth challenge is present, it clicks
+an allowlisted control and waits for the page to settle.
+
+The controlled click detector accepts only these safe candidates:
+
+- `button`
+- `input[type=submit]`
+- `input[type=button]`
+- `a[role=button]`
+- `[role=button]`
+- a form with exactly one allowlisted submit control
+- a visible clickable text element whose text contains an allowlisted label
 
 Successful activation records:
 
@@ -165,9 +178,13 @@ Manual-auth or blocked cases record:
   `captcha_required`, `permission_blocked`, or
   `auth_flow_not_completed_in_bound_context`
 
-Business action execution does not trigger this repair path. If an Archives
-action still returns `auth_flow_not_completed_in_bound_context`, the user should
-run `npm run open:profile` and complete the landing page manually.
+Business action response parsing does not trigger this repair path after an API
+body has already returned. The action-stage origin readiness check may run the
+same bounded activation before fetch. If an Archives action still returns
+`auth_flow_not_completed_in_bound_context` or `manual_login_required`, the user
+should run `npm run open:profile` only when diagnostics show no safe
+allowlisted control, empty username, password, OTP, QR, captcha, or permission
+blocking.
 
 ## Mock Coverage
 
@@ -175,10 +192,14 @@ Added or updated tests cover:
 
 - Archives same-origin lightweight confirmation with prefilled username and
   `下一步` button succeeds during prewarm.
+- Archives account-origin lightweight confirmation succeeds for `button`,
+  `input[type=submit]`, `a[role=button]`, `[role=button]`, and unique form
+  submit controls.
 - Archives password page returns `manual_login_required`.
 - Archives OTP / captcha / QR pages stop for manual handling.
 - Archives lightweight confirmation stops after the click limit.
-- Archives business action execution does not trigger landing-flow activation.
+- Archives action-stage ensure-ready uses the same bounded handler, while
+  business response parsing still does not repair login after an API response.
 - No credential material appears in outputs.
 
 ## Live Smoke
@@ -193,23 +214,28 @@ Commands run:
 
 - `npm run refresh:once`
 - `npm run start:live`
+- `GET /health`
 - `POST /prewarm`
 - `POST /actions/archives_user_profile` with `response_mode=passthrough`
+- `POST /actions/archives_private_message_search` with
+  `response_mode=passthrough`
 
 Sanitized result:
 
 | check | result |
 | --- | --- |
 | `refresh:once` | `ok=true`, required origins ready |
-| Archives refresh status | `optional_failed` |
-| Archives final_origin | `https://account.p.adm-corp.kuaishou.com` |
-| Archives page_ready | `false` |
-| Archives error_type | `manual_login_required` |
-| Archives prewarm landing_flow_status | `manual_login_required` |
-| Archives landing_flow_root_cause | `manual_login_required` |
-| allowed_clicks_executed | `0` |
-| username input present | `true` |
-| username prefilled | `true`; value not read or output |
+| service health | `ok=true`, `service_mode=live`, `auth_state=ready` |
+| Archives refresh status | `ready` |
+| Archives final_origin | `https://admin.p.adm-corp.kuaishou.com` |
+| Archives page_ready | `true` |
+| Archives error_type | `null` |
+| Archives prewarm status | `ready` |
+| Archives prewarm landing_flow_status | `not_needed` |
+| Archives landing_flow_root_cause | `null` |
+| allowed_clicks_executed | `0` in this run |
+| username input present | `false` in this run |
+| username prefilled | `false` in this run; value not read or output |
 | password input present | `false` |
 | OTP / 2FA signal | `false` |
 | captcha signal | `false` |
@@ -218,21 +244,22 @@ Sanitized result:
 
 Archives action smoke:
 
-| field | value |
-| --- | --- |
-| action | `archives_user_profile` |
-| response_mode | `passthrough` |
-| HTTP status | `200` |
-| ok | `false` |
-| error_type | `manual_login_required` |
-| upstream body output | `false` |
-| source_card/source_quality | absent |
-| credential_material_output | `false` |
+| action | HTTP status | ok | upstream.status | body_present | error_type | source_card/source_quality | credential_material_output |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `archives_user_profile` | `200` | `true` | `200` | `true` | `null` | absent | `false` |
+| `archives_private_message_search` | `200` | `true` | `200` | `true` | `null` | absent | `false` |
 
 Conclusion:
 
-The current local profile reaches an account confirmation/login origin for
-Archives but does not expose an allowlisted lightweight confirmation button. The
-service correctly stops and reports `manual_login_required`. The user should run
-`npm run open:profile`, complete the Archives step manually in the visible
-browser, then rerun `npm run refresh:once`.
+The current local profile was already ready during the latest live smoke, so no
+Archives account-origin click was needed. The service reached Archives admin
+origin, prewarm reported ready, and two Archives passthrough actions returned
+body-present upstream envelopes without credential material or
+source_card/source_quality fields.
+
+The lightweight account-origin branch is covered by mock tests for `button`,
+`input[type=submit]`, `a[role=button]`, `[role=button]`, and unique form submit
+controls. If the page has a prefilled username and a newly recognized safe
+control, the service should complete activation without asking the user to
+rerun `open:profile`. If no safe control is found or a password/2FA/captcha/QR
+challenge appears, the service must stop with `manual_login_required`.

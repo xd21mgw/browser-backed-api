@@ -1425,7 +1425,7 @@ test("archives action does not trigger landing flow activation during business e
   assertNoCredentialMaterial(response);
 });
 
-test("archives action-stage prewarm disables landing flow activation", async () => {
+test("archives action-stage ensure-ready uses landing flow activation", async () => {
   const config = createLiveConfig();
   const fakeClient = new FakeBrowserClient(config, {
     prewarmResults: {
@@ -1452,7 +1452,7 @@ test("archives action-stage prewarm disables landing flow activation", async () 
   });
 
   assert.deepEqual(fakeClient.prewarmCalls, [
-    { domainKey: "archives", options: { allowLandingFlow: false } }
+    { domainKey: "archives", options: { allowLandingFlow: true } }
   ]);
   assert.equal(fakeClient.runCalls.length, 0);
   assert.equal(response.ok, false);
@@ -1737,6 +1737,83 @@ test("archives same-origin lightweight confirm page activates during prewarm", a
   assert.equal(result.landing_flow_root_cause, "lightweight_confirm_needed");
   assert.deepEqual(page.clickedLabels, ["下一步"]);
   assert.equal(result.landing_flow_observation.username_prefilled, false);
+  assertNoCredentialMaterial(result);
+});
+
+test("archives account-origin prefilled username button activates during prewarm", async () => {
+  const result = await runArchivesAccountConfirmControlSmoke({
+    label: "下一步",
+    control: { kind: "button" }
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.allowed_clicks_executed, 1);
+  assert.equal(result.landing_flow_status, "allowed_click_returned");
+});
+
+test("archives account-origin prefilled username input submit activates during prewarm", async () => {
+  const result = await runArchivesAccountConfirmControlSmoke({
+    label: "Next",
+    control: { kind: "input_submit", role: false }
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.allowed_clicks_executed, 1);
+  assert.equal(result.landing_flow_status, "allowed_click_returned");
+});
+
+test("archives account-origin prefilled username role button activates during prewarm", async () => {
+  for (const [label, kind] of [["Continue", "a_role_button"], ["Confirm", "role_button"]]) {
+    const result = await runArchivesAccountConfirmControlSmoke({
+      label,
+      control: { kind, role: false }
+    });
+
+    assert.equal(result.status, "ready", kind);
+    assert.equal(result.allowed_clicks_executed, 1, kind);
+    assert.equal(result.landing_flow_status, "allowed_click_returned", kind);
+  }
+});
+
+test("archives account-origin unique form submit activates during prewarm", async () => {
+  const result = await runArchivesAccountConfirmControlSmoke({
+    label: "登录",
+    control: { kind: "form_unique_submit", role: false }
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.allowed_clicks_executed, 1);
+  assert.equal(result.landing_flow_status, "allowed_click_returned");
+});
+
+test("archives account-origin empty username requires manual activation", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://account.p.adm-corp.kuaishou.com/login",
+    waitOutcomes: ["timeout"],
+    controls: {
+      "下一步": { kind: "button" }
+    },
+    pageSnapshots: [
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["下一步"],
+        usernameInputPresent: true,
+        usernamePrefilled: false,
+        landingSignal: true
+      }
+    ]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.error_type, "manual_login_required");
+  assert.equal(result.landing_flow_root_cause, "manual_login_required");
+  assert.deepEqual(page.clickedLabels, []);
   assertNoCredentialMaterial(result);
 });
 
@@ -4914,6 +4991,36 @@ function prewarmResult(config, domainKey, overrides = {}) {
   };
 }
 
+async function runArchivesAccountConfirmControlSmoke({ label, control }) {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://account.p.adm-corp.kuaishou.com/login",
+    waitOutcomes: ["timeout", "return"],
+    controls: {
+      [label]: control
+    },
+    pageSnapshots: [
+      {
+        titlePresent: true,
+        allowedButtonLabels: [label],
+        allowedControlKinds: [control.kind || "button"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        landingSignal: true
+      }
+    ]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.deepEqual(page.clickedLabels, [label]);
+  assertNoCredentialMaterial(result);
+  return result;
+}
+
 function warmStateReady(config, domainKey) {
   const domain = config.domains[domainKey];
   return {
@@ -4963,21 +5070,51 @@ class FakeLandingPage {
   }
 
   getByRole(_role, options) {
-    const label = Object.keys(this.controls).find((candidate) => options.name.test(candidate));
+    const label = Object.keys(this.controls).find((candidate) => this.controls[candidate].role !== false && options.name.test(candidate));
     if (!label) {
       return new FakeLandingControl(this, null, { exists: false });
     }
     return new FakeLandingControl(this, label, this.controls[label]);
   }
 
-  async evaluate() {
+  async evaluate(_fn, payload = {}) {
+    if (payload.mode === "click_preview" || payload.mode === "click") {
+      const label = Object.keys(this.controls).find((candidate) => {
+        const control = this.controls[candidate] || {};
+        const allowed = (payload.allowedLabels || []).some((item) => candidate.includes(item));
+        return allowed && control.safe !== false && control.enabled !== false && control.visible !== false;
+      });
+      if (!label) {
+        return payload.mode === "click" ? { clicked: false } : { clickable: false };
+      }
+      const control = this.controls[label] || {};
+      if (payload.mode === "click") {
+        this.clickedLabels.push(label);
+        return {
+          clicked: true,
+          label,
+          kind: control.kind || "button"
+        };
+      }
+      return {
+        clickable: true,
+        label,
+        kind: control.kind || "button"
+      };
+    }
+
     const snapshot = this.pageSnapshots.length > 0 ? this.pageSnapshots.shift() : this.lastPageSnapshot;
     this.lastPageSnapshot = snapshot;
+    const controlLabels = Object.keys(this.controls);
+    const allowedButtonLabels = snapshot.allowedButtonLabels || controlLabels;
     return {
       titlePresent: Boolean(snapshot.titlePresent),
-      allowedButtonLabels: snapshot.allowedButtonLabels || [],
+      allowedButtonLabels,
+      allowedControlKinds: snapshot.allowedControlKinds || allowedButtonLabels.map((label) => this.controls[label]?.kind || "button"),
+      allowlistedClickableControlPresent: snapshot.allowlistedClickableControlPresent ?? allowedButtonLabels.length > 0,
       usernameInputPresent: Boolean(snapshot.usernameInputPresent),
       usernamePrefilled: Boolean(snapshot.usernamePrefilled),
+      accountDisplayPresent: Boolean(snapshot.accountDisplayPresent),
       passwordInputPresent: Boolean(snapshot.passwordInputPresent),
       twoFactorSignal: Boolean(snapshot.twoFactorSignal),
       captchaSignal: Boolean(snapshot.captchaSignal),

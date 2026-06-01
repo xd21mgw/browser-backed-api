@@ -6,7 +6,7 @@ import {
   sanitizeUrl
 } from "./diagnostics.js";
 
-const DEFAULT_LANDING_CLICK_LABELS = Object.freeze(["下一步", "继续", "确认", "进入系统", "Continue", "Next", "Confirm"]);
+const DEFAULT_LANDING_CLICK_LABELS = Object.freeze(["下一步", "继续", "确认", "进入系统", "登录", "Continue", "Next", "Confirm"]);
 const MAX_LANDING_CLICKS = 2;
 const LANDING_WAIT_MS = 5000;
 const LANDING_SETTLE_MS = 800;
@@ -170,7 +170,7 @@ export class BrowserBackedClient {
 
       const control = await findAllowedLandingControl(page, {
         allowedLabels: landingLabelsForDomain(domain),
-        allowFormSubmit: false
+        allowFormSubmit: Boolean(domain.landingFlow?.sameOriginActivation)
       });
       if (!control) {
         break;
@@ -769,14 +769,34 @@ async function waitForConfiguredOrigin(page, configuredOrigin, timeout) {
 }
 
 async function findAllowedLandingControl(page, { allowedLabels = DEFAULT_LANDING_CLICK_LABELS, allowFormSubmit = false } = {}) {
-  if (typeof page.getByRole !== "function") {
-    return null;
+  if (typeof page.getByRole === "function") {
+    for (const label of allowedLabels) {
+      const control = page.getByRole("button", { name: looseLabelPattern(label) }).first();
+      if (await isSafeLandingControl(control, { allowFormSubmit })) {
+        return control;
+      }
+    }
   }
 
-  for (const label of allowedLabels) {
-    const control = page.getByRole("button", { name: exactLabelPattern(label) }).first();
-    if (await isSafeLandingControl(control, { allowFormSubmit })) {
-      return control;
+  if (typeof page.evaluate === "function") {
+    const clickPreview = await evaluateLandingPage(page, {
+      allowedLabels,
+      allowFormSubmit,
+      mode: "click_preview"
+    });
+    if (clickPreview?.clickable) {
+      return {
+        async click({ timeout: _timeout } = {}) {
+          const clickResult = await evaluateLandingPage(page, {
+            allowedLabels,
+            allowFormSubmit,
+            mode: "click"
+          });
+          if (!clickResult?.clicked) {
+            throw new Error("Allowed landing control disappeared before click");
+          }
+        }
+      };
     }
   }
   return null;
@@ -838,70 +858,29 @@ async function observeLandingFlow(page, domain) {
     return fallback;
   }
 
-  let snapshot;
   try {
-    snapshot = await page.evaluate(({ allowedLabels }) => {
-      const visible = (element) => {
-        if (!element) {
-          return false;
-        }
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.visibility !== "hidden" && style.display !== "none" && rect.width >= 0 && rect.height >= 0;
-      };
-      const textOf = (element) => String(
-        element.innerText ||
-        element.textContent ||
-        element.getAttribute?.("aria-label") ||
-        element.getAttribute?.("title") ||
-        ""
-      ).trim();
-      const allText = String(document.body?.innerText || "").slice(0, 5000);
-      const title = String(document.title || "").trim();
-      const controls = Array.from(document.querySelectorAll("button,[role='button']"))
-        .filter(visible)
-        .map(textOf)
-        .filter(Boolean);
-      const allowedButtonLabels = controls.filter((label) => allowedLabels.includes(label));
-      const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
-      const usernameInputs = inputs.filter((input) => {
-        const type = String(input.getAttribute("type") || "text").toLowerCase();
-        const combined = [
-          input.getAttribute("name"),
-          input.getAttribute("id"),
-          input.getAttribute("autocomplete"),
-          input.getAttribute("placeholder"),
-          input.getAttribute("aria-label")
-        ].filter(Boolean).join(" ").toLowerCase();
-        return ["text", "email", "tel"].includes(type) &&
-          /(user|account|email|phone|mobile|login|username|账号|账户|用户名|手机号|邮箱|工号)/i.test(combined);
-      });
-      const passwordInputs = inputs.filter((input) => String(input.getAttribute("type") || "").toLowerCase() === "password");
-      const textSignals = `${title}\n${allText}`;
-      return {
-        titlePresent: title.length > 0,
-        allowedButtonLabels,
-        usernameInputPresent: usernameInputs.length > 0,
-        usernamePrefilled: usernameInputs.length > 0 && usernameInputs.every((input) => String(input.value || "").trim().length > 0),
-        passwordInputPresent: passwordInputs.length > 0,
-        twoFactorSignal: /(otp|2fa|mfa|two[- ]?factor|verification code|one[- ]?time|动态码|二次验证|安全验证|短信验证码|手机验证码)/i.test(textSignals),
-        captchaSignal: /(captcha|验证码|滑块|人机验证|安全校验)/i.test(textSignals),
-        qrSignal: /(qr|二维码|扫码|扫一扫)/i.test(textSignals),
-        permissionBlockedSignal: /(permission denied|forbidden|not authorized|无权限|没有权限|权限不足|无访问权限)/i.test(textSignals),
-        landingSignal: /(sso|login|auth|account|confirm|认证|登录|账号|账户|身份|确认)/i.test(textSignals)
-      };
-    }, { allowedLabels: landingLabelsForDomain(domain) });
+    const snapshot = await evaluateLandingPage(page, {
+      allowedLabels: landingLabelsForDomain(domain),
+      allowFormSubmit: true,
+      mode: "snapshot"
+    });
+    return landingObservationFromSnapshot(page, domain, snapshot);
   } catch {
     return fallback;
   }
+}
 
+function landingObservationFromSnapshot(page, domain, snapshot) {
   const summary = {
     current_origin: originFromUrl(safePageUrl(page)),
     current_path: safePathFromUrl(safePageUrl(page)),
     title_present: Boolean(snapshot?.titlePresent),
     allowed_button_labels: sanitizeButtonLabels(snapshot?.allowedButtonLabels),
+    allowed_control_kinds: sanitizeButtonLabels(snapshot?.allowedControlKinds),
+    allowlisted_clickable_control_present: Boolean(snapshot?.allowlistedClickableControlPresent),
     username_input_present: Boolean(snapshot?.usernameInputPresent),
     username_prefilled: Boolean(snapshot?.usernamePrefilled),
+    account_display_present: Boolean(snapshot?.accountDisplayPresent),
     password_input_present: Boolean(snapshot?.passwordInputPresent),
     two_factor_signal: Boolean(snapshot?.twoFactorSignal),
     captcha_signal: Boolean(snapshot?.captchaSignal),
@@ -924,10 +903,203 @@ async function observeLandingFlow(page, domain) {
   if (summary.username_input_present && !summary.username_prefilled) {
     return { rootCause: "manual_login_required", summary };
   }
-  if (summary.allowed_button_labels.length > 0 && (snapshot?.landingSignal || summary.username_input_present)) {
+  if (!isRecognizedLandingContext(summary, snapshot, domain)) {
+    return { rootCause: "not_landing", summary };
+  }
+  if (
+    summary.allowlisted_clickable_control_present &&
+    (summary.username_prefilled || summary.account_display_present)
+  ) {
     return { rootCause: "lightweight_confirm_needed", summary };
   }
-  return { rootCause: "not_landing", summary };
+  return { rootCause: "manual_login_required", summary };
+}
+
+async function evaluateLandingPage(page, { allowedLabels, allowFormSubmit, mode }) {
+  return page.evaluate(({ allowedLabels: rawAllowedLabels, allowFormSubmit: rawAllowFormSubmit, mode: rawMode }) => {
+    const allowedLabels = rawAllowedLabels.map(normalizeText).filter(Boolean);
+    const allowFormSubmit = Boolean(rawAllowFormSubmit);
+    const mode = rawMode || "snapshot";
+
+    const visible = (element) => {
+      if (!element) {
+        return false;
+      }
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" &&
+        style.display !== "none" &&
+        style.pointerEvents !== "none" &&
+        rect.width > 0 &&
+        rect.height > 0;
+    };
+    const normalize = (value) => normalizeText(String(value || ""));
+    const textOf = (element) => normalize(
+      element.innerText ||
+      element.textContent ||
+      element.value ||
+      element.getAttribute?.("aria-label") ||
+      element.getAttribute?.("title") ||
+      element.getAttribute?.("value") ||
+      ""
+    );
+    const labelAllowed = (label) => {
+      const normalized = normalize(label);
+      return Boolean(normalized && allowedLabels.some((allowed) => normalized.includes(allowed)));
+    };
+    const disabled = (element) => {
+      const ariaDisabled = String(element.getAttribute?.("aria-disabled") || "").toLowerCase();
+      return Boolean(element.disabled || ariaDisabled === "true" || element.getAttribute?.("disabled") !== null);
+    };
+    const elementKind = (element, fallback = "clickable_text") => {
+      const tagName = String(element.tagName || "").toLowerCase();
+      const role = String(element.getAttribute?.("role") || "").toLowerCase();
+      const type = String(element.getAttribute?.("type") || "").toLowerCase();
+      if (tagName === "button") {
+        return "button";
+      }
+      if (tagName === "input" && type === "submit") {
+        return "input_submit";
+      }
+      if (tagName === "input" && type === "button") {
+        return "input_button";
+      }
+      if (tagName === "a" && role === "button") {
+        return "a_role_button";
+      }
+      if (role === "button") {
+        return "role_button";
+      }
+      return fallback;
+    };
+    const candidates = [];
+    const seen = new Set();
+    const addCandidate = (element, kind, priority) => {
+      if (!element || seen.has(element) || !visible(element) || disabled(element)) {
+        return;
+      }
+      const tagName = String(element.tagName || "").toLowerCase();
+      const type = String(element.getAttribute?.("type") || "").toLowerCase();
+      const label = textOf(element);
+      if (!labelAllowed(label)) {
+        return;
+      }
+      if (!allowFormSubmit && (type === "submit" || Boolean(element.closest?.("form")))) {
+        return;
+      }
+      seen.add(element);
+      const rect = element.getBoundingClientRect();
+      candidates.push({
+        element,
+        kind: kind || elementKind(element),
+        label,
+        priority,
+        area: rect.width * rect.height,
+        tagName
+      });
+    };
+
+    for (const element of document.querySelectorAll("button")) {
+      addCandidate(element, "button", 10);
+    }
+    for (const element of document.querySelectorAll("input[type='submit'],input[type='button']")) {
+      addCandidate(element, elementKind(element), 20);
+    }
+    for (const element of document.querySelectorAll("a[role='button'],[role='button']")) {
+      addCandidate(element, elementKind(element), 30);
+    }
+    for (const form of document.querySelectorAll("form")) {
+      const submitControls = Array.from(form.querySelectorAll("button,input[type='submit'],input[type='button']"))
+        .filter((element) => visible(element) && !disabled(element));
+      const allowedSubmitControls = submitControls.filter((element) => labelAllowed(textOf(element)));
+      if (allowedSubmitControls.length === 1) {
+        addCandidate(allowedSubmitControls[0], "form_unique_submit", 40);
+      }
+    }
+    for (const element of document.querySelectorAll("a,[onclick],[tabindex],[class*='button'],[class*='btn'],[class*='next'],[class*='confirm']")) {
+      addCandidate(element, elementKind(element, "clickable_text"), 50);
+    }
+    for (const element of document.querySelectorAll("body *")) {
+      const style = window.getComputedStyle(element);
+      const childText = Array.from(element.children || []).map((child) => textOf(child)).filter(Boolean);
+      const label = textOf(element);
+      const childHasSameText = childText.some((text) => text === label);
+      if (style.cursor === "pointer" && !childHasSameText) {
+        addCandidate(element, elementKind(element, "clickable_text"), 60);
+      }
+    }
+
+    candidates.sort((left, right) => left.priority - right.priority || left.area - right.area);
+    if (mode === "click_preview") {
+      const candidate = candidates[0] || null;
+      return {
+        clickable: Boolean(candidate),
+        label: candidate?.label || null,
+        kind: candidate?.kind || null
+      };
+    }
+    if (mode === "click") {
+      const candidate = candidates[0] || null;
+      if (!candidate) {
+        return { clicked: false };
+      }
+      candidate.element.click();
+      return {
+        clicked: true,
+        label: candidate.label,
+        kind: candidate.kind
+      };
+    }
+
+    const allText = String(document.body?.innerText || "").slice(0, 5000);
+    const title = String(document.title || "").trim();
+    const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
+    const usernameInputs = inputs.filter((input) => {
+      const type = String(input.getAttribute("type") || "text").toLowerCase();
+      const combined = [
+        input.getAttribute("name"),
+        input.getAttribute("id"),
+        input.getAttribute("autocomplete"),
+        input.getAttribute("placeholder"),
+        input.getAttribute("aria-label")
+      ].filter(Boolean).join(" ").toLowerCase();
+      return ["text", "email", "tel"].includes(type) &&
+        /(user|account|email|phone|mobile|login|username|账号|账户|用户名|手机号|邮箱|工号)/i.test(combined);
+    });
+    const passwordInputs = inputs.filter((input) => String(input.getAttribute("type") || "").toLowerCase() === "password");
+    const textSignals = `${title}\n${allText}`;
+    const accountDisplayPresent = /(当前账号|登录账号|账号[:：]|账户[:：]|用户名[:：]|current account|signed in as|login account)/i.test(textSignals);
+    return {
+      titlePresent: title.length > 0,
+      allowedButtonLabels: candidates.map((item) => item.label),
+      allowedControlKinds: candidates.map((item) => item.kind),
+      allowlistedClickableControlPresent: candidates.length > 0,
+      usernameInputPresent: usernameInputs.length > 0,
+      usernamePrefilled: usernameInputs.length > 0 && usernameInputs.every((input) => String(input.value || "").trim().length > 0),
+      accountDisplayPresent,
+      passwordInputPresent: passwordInputs.length > 0,
+      twoFactorSignal: /(otp|2fa|mfa|two[- ]?factor|verification code|one[- ]?time|动态码|二次验证|安全验证|短信验证码|手机验证码)/i.test(textSignals),
+      captchaSignal: /(captcha|验证码|滑块|人机验证|安全校验)/i.test(textSignals),
+      qrSignal: /(qr|二维码|扫码|扫一扫)/i.test(textSignals),
+      permissionBlockedSignal: /(permission denied|forbidden|not authorized|无权限|没有权限|权限不足|无访问权限)/i.test(textSignals),
+      landingSignal: /(sso|login|auth|account|confirm|认证|登录|账号|账户|身份|确认)/i.test(textSignals)
+    };
+
+    function normalizeText(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+  }, { allowedLabels, allowFormSubmit, mode });
+}
+
+function isRecognizedLandingContext(summary, snapshot, domain) {
+  const currentOrigin = summary.current_origin;
+  if (currentOrigin === domain.origin) {
+    return Boolean(snapshot?.landingSignal || summary.username_input_present || summary.allowlisted_clickable_control_present);
+  }
+  return Boolean(
+    domain.key === "archives" &&
+    isAuthRedirectTarget({ origin: currentOrigin, url: currentOrigin })
+  );
 }
 
 function applyManualLandingResult(result, page, observation) {
@@ -1010,8 +1182,8 @@ function safePathFromUrl(rawUrl) {
   }
 }
 
-function exactLabelPattern(label) {
-  return new RegExp(`^${escapeRegExp(label)}$`, /[a-z]/i.test(label) ? "i" : "");
+function looseLabelPattern(label) {
+  return new RegExp(escapeRegExp(label), /[a-z]/i.test(label) ? "i" : "");
 }
 
 function escapeRegExp(value) {
