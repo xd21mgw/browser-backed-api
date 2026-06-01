@@ -9,3 +9,4 @@ screenshots/
 *.har
 chrome-agent-auth-profile/
 .DS_Store
+outputs/dist/
