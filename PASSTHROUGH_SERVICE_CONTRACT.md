@@ -17,11 +17,9 @@ reasoning.
 Agents call the service through a configured `service_base_url`.
 
 - Local Agent Mode default: `http://127.0.0.1:8787`
-- Remote Main Agent + Local Worker Mode: a controlled bridge/tunnel URL supplied
-  by `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent Agent configuration
-- Temporary Profile Bootstrap Mode: a same-user GUI bootstrap path for
-  first-time `open:profile`, Archives/account confirmation, or required human
-  SSO/verification when the eventual service machine has no GUI
+- Remote Main Agent + Mac Local Worker Mode: a controlled Mac worker/bridge or
+  tunnel URL supplied by `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent Agent
+  configuration
 
 The browser-backed service itself still binds locally by default. A
 bridge/tunnel is deployment infrastructure and is not implemented by this
@@ -159,9 +157,9 @@ Forbidden:
 - Agent-built platform URLs
 
 The service listens locally on `127.0.0.1` by default. Remote/cloud main Agents
-must not assume that their own `127.0.0.1` is the teammate's computer. They must
-use a configured `service_base_url` that points to a controlled local-worker
-bridge/tunnel.
+must not assume that their own `127.0.0.1` is the teammate's Mac. They must use
+a configured `service_base_url` that points to a controlled Mac local worker,
+bridge, or tunnel.
 
 The bridge/tunnel may forward only the service routes needed for controlled
 access:
@@ -176,11 +174,11 @@ It must not expose arbitrary URL fetch, arbitrary local files, arbitrary
 platform paths, Chrome profiles, cookies, tokens, sessions, authorization
 values, request headers, localStorage, or Playwright storageState.
 
-Temporary Profile Bootstrap Mode is not a bridge/tunnel and is not a long-term
-action forwarding mode. It is only for same-user profile activation when the
-machine that will run `refresh:once`, `start:live`, and actions cannot run a GUI
-browser. It must not be used to share profiles across users or expose a GUI Mac
-as a central service.
+Mac profile copy/bootstrap to Linux headless is not a recommended service
+deployment. Joint testing showed RCP, Weapon, Login Logs, and Archives can
+trigger `two_factor_required` in Linux headless after profile copy. The service
+contract assumes either Local Agent Mode or Remote Main Agent + Mac Local Worker
+Mode.
 
 ## Output Boundary
 

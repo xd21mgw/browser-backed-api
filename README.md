@@ -12,21 +12,17 @@ Agents should call the service through a configured `service_base_url`.
 - Default local value: `http://127.0.0.1:8787`
 - Local Agent Mode: Agent, script, or curl runs on the same computer as the
   service, so the default value works.
-- Remote Main Agent + Local Worker Mode: the main Agent runs in a remote/cloud
-  environment, so `127.0.0.1` points to the remote Agent machine, not the
-  teammate's computer. In that mode, set `BROWSER_BACKED_SERVICE_BASE_URL` or
-  the Agent's equivalent config to a controlled local-worker bridge/tunnel URL.
-- Temporary Profile Bootstrap Mode: if the machine that will run the service has
-  no GUI and cannot run `npm run open:profile`, the same user may temporarily
-  use a GUI Mac to complete profile activation or periodic account confirmation.
-  This is a bootstrap/debugging mode only, not a long-term action forwarding
-  mode.
+- Remote Main Agent + Mac Local Worker Mode: the main Agent runs in a
+  remote/cloud/Linux environment, while browser-backed service and Chrome
+  profile stay on the teammate's Mac. In that mode, set
+  `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's equivalent config to a
+  controlled Mac local worker/bridge URL.
 
 The bridge/tunnel is a deployment-layer requirement, not part of this service
-release. It must forward only `/health`, `/actions`, and
-`/actions/<allowlisted_action>` to the teammate's local worker; it must not
-expose arbitrary URL fetch, Chrome profile files, cookies, tokens, sessions, or
-request headers.
+release. It must forward only `/health`, `/actions`,
+`/actions/<allowlisted_action>`, and approved batch routes to the teammate's Mac
+local worker; it must not expose arbitrary URL fetch, Chrome profile files,
+cookies, tokens, sessions, or request headers.
 
 The service only does:
 
@@ -176,6 +172,24 @@ One source failure does not block unrelated sources. Batch still does not
 produce business observations, evidence cards, source quality, or final risk
 judgment.
 
+## Skill-Managed Workflow
+
+The Agent Skill should behave like a command-oriented helper, similar to an
+rc-cli workflow:
+
+- `/browser-backed-risk-service 安装`
+- `/browser-backed-risk-service 启动`
+- `/browser-backed-risk-service 状态`
+- `/browser-backed-risk-service actions`
+- `/browser-backed-risk-service 调用 <action> <params>`
+- `/browser-backed-risk-service 停止`
+- `/browser-backed-risk-service 排障`
+
+The Skill resolves `service_base_url`, checks `/health`, lists `/actions`,
+validates allowlisted actions and typed params, and outputs only envelope
+summaries. It must not print full upstream body or ask the service to do risk
+judgment.
+
 ## Deployment Modes
 
 ### Local Agent Mode
@@ -189,40 +203,36 @@ as the browser-backed service.
 - The normal `npm run open:profile`, `npm run refresh:once`, and
   `npm run start:live` flow is unchanged.
 
-### Remote Main Agent + Local Worker Mode
+### Remote Main Agent + Mac Local Worker Mode
 
 Use this when the main Agent runs remotely or in a cloud environment.
 
 - Do not assume the remote Agent can reach the teammate's
   `http://127.0.0.1:8787`; that address refers to the remote Agent's own
   machine.
-- Run the browser-backed service on the teammate's computer as the local worker.
+- Run the browser-backed service on the teammate's Mac as the local worker.
+- Keep Chrome profile and refresh state on the teammate's Mac.
+- Let the teammate complete SSO, two-factor checks, and Archives account
+  confirmation in Mac Chrome.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL`, or the Agent's equivalent
-  setting, to a controlled bridge/tunnel URL that reaches that local worker.
-- Keep Chrome profile, refresh state, cookies, tokens, sessions, and browser
-  storage on the teammate's computer.
+  setting, to a controlled Mac worker/bridge/tunnel URL.
 - Do not expose the service directly to the public internet.
+- Do not copy the Mac profile to Linux, inject cookies, inject storageState, or
+  use `sso_session.py`.
 
-See `LOCAL_WORKER_BRIDGE_PLAN.md` for bridge/tunnel deployment requirements.
+This is the recommended path for remote main Agents. It matches the successful
+rc-cli style flow: authentication and platform access happen on Mac, while the
+remote Agent only invokes bounded worker capabilities.
 
-### Temporary Profile Bootstrap Mode
+### Not Recommended: Mac Profile Copy To Linux Headless
 
-Use this only when the machine that will run `refresh:once`, `start:live`, and
-actions has no GUI and cannot complete `npm run open:profile` directly.
+Joint testing showed that Mac profile bootstrap to Linux headless is not a
+stable team path. Track Analysis may become ready, but RCP, Weapon, Login Logs,
+and Archives can trigger `two_factor_required`. Do not ask teammates to copy Mac
+profiles to Linux as a normal workflow.
 
-- A GUI Mac may be used temporarily by the same user to complete first-time SSO,
-  required two-factor steps, or periodic Archives/account confirmation.
-- After profile activation, `refresh:once`, `start:live`, and action calls can
-  run on the main Agent's local machine only if that same user's usable profile
-  is available there.
-- Do not use the Mac service as a long-term central service.
-- Do not share the profile across users.
-- Do not upload cookies, tokens, sessions, request headers, browser storage, or
-  profile contents to the Agent.
-- Do not let the Agent read profile files.
-
-This mode is a temporary profile activation path. It does not replace Local
-Agent Mode, and it is not the team's formal remote-Agent deployment shape.
+See `LOCAL_WORKER_BRIDGE_PLAN.md`, `MAC_LOCAL_WORKER_GUIDE.md`, and
+`BROWSER_BACKED_SERVICE_COMMANDS.md`.
 
 ## Local Setup
 
@@ -305,3 +315,5 @@ or captcha values. If manual factors appear, run `npm run open:profile`.
 - `TEAM_LOCAL_SETUP.md`
 - `TROUBLESHOOTING.md`
 - `LOCAL_WORKER_BRIDGE_PLAN.md`
+- `MAC_LOCAL_WORKER_GUIDE.md`
+- `BROWSER_BACKED_SERVICE_COMMANDS.md`

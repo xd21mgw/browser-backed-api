@@ -15,6 +15,8 @@ Path: `service/`
 - `TEAM_HANDOFF_CHECKLIST.md`
 - `TROUBLESHOOTING.md`
 - `LOCAL_WORKER_BRIDGE_PLAN.md`
+- `MAC_LOCAL_WORKER_GUIDE.md`
+- `BROWSER_BACKED_SERVICE_COMMANDS.md`
 
 ## Runtime
 
@@ -33,13 +35,12 @@ Local Agent Mode uses:
 service_base_url=http://127.0.0.1:8787
 ```
 
-Remote Main Agent + Local Worker Mode requires a controlled bridge/tunnel URL
-configured in the Agent as `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent.
+Remote Main Agent + Mac Local Worker Mode requires running this service on the
+user's Mac and configuring the Agent with:
 
-Temporary Profile Bootstrap Mode may be used only by the same user to complete
-first-time `open:profile`, Archives/account confirmation, or required human
-SSO/verification on a GUI Mac when the eventual service machine has no GUI. It
-is not a long-term action forwarding mode.
+```txt
+BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>
+```
 
 ## Not Included
 

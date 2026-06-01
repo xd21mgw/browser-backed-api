@@ -10,8 +10,8 @@ to expose readiness and transport metadata without credential material.
 Use `service_base_url` when calling the service:
 
 - Local Agent Mode default: `http://127.0.0.1:8787`
-- Remote Main Agent + Local Worker Mode: a configured controlled bridge/tunnel
-  URL, usually from `BROWSER_BACKED_SERVICE_BASE_URL`
+- Remote Main Agent + Mac Local Worker Mode: a configured controlled Mac
+  worker/bridge/tunnel URL, usually from `BROWSER_BACKED_SERVICE_BASE_URL`
 
 Local users normally do not need to set `BROWSER_BACKED_SERVICE_BASE_URL`.
 
@@ -37,11 +37,11 @@ Fix:
 The normal service host is `127.0.0.1`.
 
 If your main Agent is remote/cloud-hosted, `127.0.0.1` is the remote Agent's
-machine, not the teammate's computer. Configure the Agent's `service_base_url`
-to a controlled local-worker bridge/tunnel URL instead of assuming direct
-localhost access.
+machine, not the teammate's Mac. Configure the Agent's `service_base_url` to a
+controlled Mac worker/bridge/tunnel URL instead of assuming direct localhost
+access.
 
-## Remote Main Agent Cannot Reach The Local Worker
+## Remote Main Agent Cannot Reach The Mac Local Worker
 
 Symptom:
 
@@ -55,8 +55,9 @@ Meaning:
 Fix:
 
 - Keep the browser-backed service running on the teammate's computer.
+- Run browser-backed service on the user's Mac.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's equivalent setting
-  to a controlled bridge/tunnel URL for that local worker.
+  to a controlled Mac worker/bridge/tunnel URL.
 - The bridge/tunnel should forward only `/health`, `/actions`,
   `/actions/<allowlisted_action>`, `/actions/batch`, and
   `/actions/multi_source_plan`.
@@ -64,39 +65,37 @@ Fix:
 - Do not forward or upload profile files, cookies, tokens, sessions, request
   headers, localStorage, or Playwright storageState.
 
-## Main Agent Machine Has No GUI For open:profile
+## Main Agent Machine Has No GUI
 
 Symptom:
 
-- The machine that should run `refresh:once`, `start:live`, and actions cannot
-  open a visible browser.
-- `npm run open:profile` is not usable on that machine.
+- The remote/cloud/Linux main Agent machine cannot open a visible browser.
+- `npm run open:profile` is not usable there.
 
-Allowed temporary workaround:
+Recommended fix:
 
-- Use Temporary Profile Bootstrap Mode.
-- The same user may temporarily use a GUI Mac to complete first-time
-  `open:profile`, Archives/account confirmation, SSO, or required human
-  verification.
-- Use this only for profile activation or periodic account confirmation.
-- After activation, run `refresh:once`, `start:live`, and action calls on the
-  main Agent's local machine only if that same user's usable profile is
-  available there.
+- Use Remote Main Agent + Mac Local Worker Mode.
+- Run `npm run open:profile`, `npm run refresh:once`, and `npm run start:live`
+  on the user's Mac.
+- Complete SSO, two-factor checks, and Archives account confirmation in Mac
+  Chrome.
+- Configure `BROWSER_BACKED_SERVICE_BASE_URL` to the Mac worker/bridge/tunnel
+  URL.
 
 Not allowed:
 
-- Do not use the Mac service as a long-term central service.
-- Do not share profiles across users.
+- Do not copy the Mac profile to Linux headless as the team workflow.
+- Do not inject cookies.
+- Do not inject storageState.
+- Do not use `sso_session.py`.
 - Do not upload cookies, tokens, sessions, request headers, browser storage,
   storageState, or profile contents.
-- Do not let the Agent read profile files.
 
-Mode positioning:
+Why:
 
-- Local Agent Mode is the default local path.
-- Remote Main Agent + Local Worker Mode is the formal team remote-Agent shape.
-- Temporary Profile Bootstrap Mode is a debugging/transition profile activation
-  path only.
+- Joint testing showed that Track Analysis can be ready after profile copy, but
+  RCP, Weapon, Login Logs, and Archives may trigger `two_factor_required` in
+  Linux headless.
 
 ## Profile Does Not Exist
 

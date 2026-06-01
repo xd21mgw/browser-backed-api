@@ -31,7 +31,7 @@ It does not share login state between teammates. It does not give anyone new
 permissions. It does not call arbitrary URLs. It does not make risk judgments or
 automatic disposal decisions.
 
-## Two Deployment Modes
+## Deployment Modes
 
 ### Local Agent Mode
 
@@ -42,17 +42,20 @@ as this service.
 - No bridge or tunnel is needed.
 - The setup commands in this guide are unchanged.
 
-### Remote Main Agent + Local Worker Mode
+### Remote Main Agent + Mac Local Worker Mode
 
 Use this only when the main Agent runs remotely or in the cloud.
 
-- The service still runs on your own computer.
-- Your computer acts as the local worker.
-- The remote main Agent must not assume its own `127.0.0.1` is your computer.
+- The service runs on your Mac.
+- Your Mac acts as the local worker.
+- Chrome profile and refresh state stay on your Mac.
+- You complete SSO, two-factor checks, and Archives account confirmation in Mac
+  Chrome.
+- The remote main Agent must not assume its own `127.0.0.1` is your Mac.
 - The remote main Agent needs a configured `service_base_url`, usually from
   `BROWSER_BACKED_SERVICE_BASE_URL` or its Agent config.
-- That URL should point to a controlled bridge/tunnel that reaches your local
-  worker.
+- That URL should point to a controlled Mac worker/bridge/tunnel that reaches
+  your Mac service.
 - The bridge/tunnel is not implemented by this release; it is a deployment
   requirement.
 
@@ -60,27 +63,16 @@ Do not expose the service directly to the public internet. Do not upload or copy
 your profile, refresh state, cookies, tokens, sessions, request headers, browser
 storage, or `.env` files to the remote Agent.
 
-### Temporary Profile Bootstrap Mode
+This is the recommended remote main Agent path. It matches the successful
+rc-cli style flow: authentication and platform access happen on Mac; the remote
+Agent only calls the bounded Mac worker.
 
-This is only for a same-user debugging or transition case where the machine that
-will run `refresh:once`, `start:live`, and actions has no GUI and cannot run
-`npm run open:profile` directly.
+### Not Recommended: Mac Profile Copy To Linux
 
-- Temporarily use a GUI Mac to complete first-time `open:profile`, SSO,
-  two-factor steps, or Archives/account confirmation.
-- Use it only for profile activation or required human confirmation.
-- Do not use the Mac service as a long-term action forwarding service.
-- After activation, run `refresh:once`, `start:live`, and actions on the main
-  Agent's local machine only if that same user's usable profile is available
-  there.
-- Do not share a profile across users.
-- Do not upload cookies, tokens, sessions, request headers, profile contents,
-  localStorage, browser storage, or Playwright storageState.
-- Do not let the Agent read profile files.
-
-This is not the default team deployment. Local Agent Mode is the default local
-path. Remote Main Agent + Local Worker Mode is the team's formal remote-Agent
-shape.
+Do not copy the Mac profile to Linux headless as the normal setup. Joint testing
+showed that Track Analysis may become ready, but RCP, Weapon, Login Logs, and
+Archives can trigger `two_factor_required`. Do not use cookie injection,
+storageState injection, or `sso_session.py`.
 
 ## First-Time Setup
 
@@ -198,7 +190,8 @@ POST http://127.0.0.1:8787/actions/track_analysis_summary
 POST http://127.0.0.1:8787/actions/rcp_snapshot
 ```
 
-Remote main Agent examples use the configured bridge/tunnel value instead:
+Remote main Agent examples use the configured Mac worker/bridge/tunnel value
+instead:
 
 ```txt
 POST {service_base_url}/actions/login_logs_search

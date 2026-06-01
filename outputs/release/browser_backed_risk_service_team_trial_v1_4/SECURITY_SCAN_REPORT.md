@@ -1,12 +1,12 @@
 # Security Scan Report
 
-Version: `browser_backed_risk_service_team_trial_v1_2`
+Version: `browser_backed_risk_service_team_trial_v1_4`
 
 Status: pass
 
 Scan results:
 
-- file count: 29
+- file count: 33
 - trailing whitespace: pass
 - forbidden filename scan: pass
 - credential-assignment-like content scan: pass

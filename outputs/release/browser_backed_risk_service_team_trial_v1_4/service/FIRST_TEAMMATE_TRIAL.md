@@ -61,15 +61,12 @@ curl "$SERVICE_BASE_URL/health"
 
 把示例里的 `<your_test_user_id>` 换成你自己有权限、平台上可能有数据的测试用户。
 如果是本地 Agent / 本地脚本 / curl，`SERVICE_BASE_URL` 保持默认即可。如果 main
-Agent 在远程/cloud，需要由部署方提供可访问你本机 local worker 的
-`BROWSER_BACKED_SERVICE_BASE_URL`；本 release 只说明 bridge/tunnel 口径，不实现
-bridge/tunnel。
+Agent 在远程/cloud/Linux，需要使用 Mac Local Worker：service 和 Chrome profile 跑在你
+的 Mac 上，远程 main Agent 通过 `BROWSER_BACKED_SERVICE_BASE_URL` 指向 Mac worker /
+bridge / tunnel。本 release 只说明 bridge/tunnel 口径，不实现 bridge/tunnel。
 
-如果 main agent 所在机器没有 GUI，不能直接运行 `npm run open:profile`，可以在同一
-用户自己的 GUI Mac 上临时完成 profile 激活、Archives/account 确认、SSO 或二次验证。
-这叫 Temporary Profile Bootstrap Mode，只用于激活/确认，不用于长期 action 转发。
-完成后，`refresh:once` / `start:live` / action 调用仍应在 main agent 本地机器执行，
-前提是该机器已经具备同一用户可用的 profile。
+不要把 Mac profile 拷到 Linux headless 当作常规路径。联调显示该路径可能让 RCP /
+Weapon / Login Logs / Archives 触发 `two_factor_required`。
 
 ### 1. 固定 action passthrough 示例
 
@@ -121,11 +118,11 @@ curl -X POST "$SERVICE_BASE_URL/actions/archives_private_message_search" \
 - `no_data`：可能是样本没数据，不代表服务失败。
 - `auth_blocked`：可能是本人权限不足、登录态过期或平台落地页未完成。
 - 远程 main Agent 调不通：不要让远程 Agent 直接访问它自己的
-  `127.0.0.1:8787`。需要配置 `BROWSER_BACKED_SERVICE_BASE_URL` 指向受控
-  local-worker bridge/tunnel。本地试用不需要这一步。
-- main agent 机器没有 GUI：可以使用 Temporary Profile Bootstrap Mode，在同一用户的
-  GUI Mac 上临时完成 `open:profile` / SSO / Archives 确认。不要跨用户共享 profile，
-  不要把 Mac service 当成长期中心服务。
+  `127.0.0.1:8787`。需要在 Mac 上运行 service，并配置
+  `BROWSER_BACKED_SERVICE_BASE_URL` 指向受控 Mac worker / bridge / tunnel。本地试用不
+  需要这一步。
+- main agent 机器没有 GUI：推荐 Mac Local Worker，不推荐把 Mac profile 拷到 Linux
+  headless。
 
 ## F. 反馈模板
 
@@ -137,3 +134,17 @@ curl -X POST "$SERVICE_BASE_URL/actions/archives_private_message_search" \
 - `error_type`：
 - 是否有认证材料输出：
 - 截图/日志摘要，不贴完整 body：
+
+## G. Skill 命令入口
+
+如果通过 Agent Skill 使用，优先让 Skill 走命令式流程：
+
+- `/browser-backed-risk-service 安装`
+- `/browser-backed-risk-service 启动`
+- `/browser-backed-risk-service 状态`
+- `/browser-backed-risk-service actions`
+- `/browser-backed-risk-service 调用 <action> <params>`
+- `/browser-backed-risk-service 停止`
+- `/browser-backed-risk-service 排障`
+
+Skill 会先确认 `service_base_url` 和 `/health`，再调用 allowlisted action。

@@ -22,7 +22,7 @@ another Agent interprets returned transport status or any platform data.
 Callers should address the service through `service_base_url`:
 
 - default local value: `http://127.0.0.1:8787`
-- remote main Agent value: controlled local-worker bridge/tunnel URL from
+- remote main Agent value: controlled Mac local worker/bridge/tunnel URL from
   `BROWSER_BACKED_SERVICE_BASE_URL` or equivalent Agent configuration
 
 The service must not accept or output caller-provided URLs, paths, request
