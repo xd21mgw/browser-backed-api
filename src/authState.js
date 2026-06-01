@@ -7,16 +7,21 @@ const DEFAULT_SERVICE_VERSION = "0.1.0";
 const SAFE_ERROR_TYPES = Object.freeze(new Set([
   "auth_required",
   "auth_redirect",
+  "auth_flow_not_completed_in_bound_context",
+  "captcha_required",
   "expired",
   "landing_flow_blocked",
   "login_page",
+  "manual_login_required",
   "navigation_timeout",
   "network_error",
   "origin_mismatch",
   "page_load_error",
+  "permission_blocked",
   "platform_not_enabled",
   "refresh_failed",
   "state_parse_error",
+  "two_factor_required",
   "unknown"
 ]));
 const FORBIDDEN_AUTH_MATERIAL_PATTERN = /cookie|token|session|header|authorization|password|localstorage|raw_browser_storage|secret/i;
@@ -215,7 +220,7 @@ function resolveAuthState({ profileExists: exists, stateFileExists, state, origi
   if (!stateFileExists && !state.last_refresh_at && Object.keys(state.origin_status).length === 0) {
     return "unknown";
   }
-  if (state.last_error_type && ["auth_required", "auth_redirect", "landing_flow_blocked", "login_page"].includes(state.last_error_type)) {
+  if (state.last_error_type && isAuthRequiredErrorType(state.last_error_type)) {
     return "auth_required";
   }
 
@@ -339,13 +344,26 @@ function statusFromErrorType(errorType, { optional = false } = {}) {
   if (optional) {
     return "optional_failed";
   }
-  if (["auth_required", "auth_redirect", "landing_flow_blocked", "login_page"].includes(errorType)) {
+  if (isAuthRequiredErrorType(errorType)) {
     return "auth_required";
   }
   if (errorType === "expired") {
     return "expired";
   }
   return "failed";
+}
+
+function isAuthRequiredErrorType(errorType) {
+  return [
+    "auth_required",
+    "auth_redirect",
+    "auth_flow_not_completed_in_bound_context",
+    "captcha_required",
+    "landing_flow_blocked",
+    "login_page",
+    "manual_login_required",
+    "two_factor_required"
+  ].includes(errorType);
 }
 
 function topLevelErrorType(originStatus) {

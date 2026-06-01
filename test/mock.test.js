@@ -1396,6 +1396,70 @@ test("Archives body-level redirect code is classified as auth flow incomplete", 
   assert.match(response.data.response_summary.archives_user_analysis.next_action, /visible service browser context/);
 });
 
+test("archives action does not trigger landing flow activation during business execution", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    fetchResults: {
+      archives_user_analysis: {
+        completed: true,
+        ok: true,
+        status: 200,
+        bodyText: JSON.stringify({
+          result: 302,
+          message: "redirect",
+          currentTime: 1780000000000
+        }),
+        bodyTruncated: false,
+        observedBytes: 64
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+  service.warmState.set("archives", warmStateReady(config, "archives"));
+
+  const response = await service.executeAction("archives_user_analysis", MOCK_ACTION_INPUTS.archives_user_analysis);
+
+  assert.equal(response.error_type, "auth_flow_not_completed_in_bound_context");
+  assert.deepEqual(fakeClient.prewarmCalls, []);
+  assert.equal(fakeClient.runCalls.length, 1);
+  assertNoCredentialMaterial(response);
+});
+
+test("archives action-stage prewarm disables landing flow activation", async () => {
+  const config = createLiveConfig();
+  const fakeClient = new FakeBrowserClient(config, {
+    prewarmResults: {
+      archives: prewarmResult(config, "archives", {
+        finalOrigin: "https://account.p.adm-corp.kuaishou.com",
+        pageReady: false,
+        status: "auth_failed",
+        errorType: "manual_login_required"
+      })
+    },
+    diagnostics: {
+      archives: {
+        bound_page_origin: "https://account.p.adm-corp.kuaishou.com",
+        origin_match: false,
+        page_ready: false
+      }
+    }
+  });
+  const service = new BrowserBackedApiService(config, fakeClient);
+
+  const response = await service.executeAction("archives_user_profile", {
+    response_mode: "passthrough",
+    user_id: "2871834924"
+  });
+
+  assert.deepEqual(fakeClient.prewarmCalls, [
+    { domainKey: "archives", options: { allowLandingFlow: false } }
+  ]);
+  assert.equal(fakeClient.runCalls.length, 0);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "manual_login_required");
+  assertNoCredentialMaterial(response);
+});
+
 test("archives_user_analysis truncated large response returns partial observation", () => {
   const config = createLiveConfig();
   const rawPhone = ["138", "1234", "5678"].join("");
@@ -1627,9 +1691,195 @@ test("prewarm recognizes Archives account landing origin as auth redirect", asyn
   assert.equal(result.page_ready, false);
   assert.equal(result.auth_redirect_detected, true);
   assert.equal(result.landing_flow_attempted, true);
-  assert.equal(result.error_type, "landing_flow_blocked");
+  assert.equal(result.error_type, "manual_login_required");
   assert.equal(result.final_origin_after_landing, "https://account.p.adm-corp.kuaishou.com");
-  assert.equal(result.landing_flow_status, "landing_flow_blocked");
+  assert.equal(result.landing_flow_status, "manual_login_required");
+  assert.equal(result.landing_flow_root_cause, "manual_login_required");
+});
+
+test("archives same-origin lightweight confirm page activates during prewarm", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://archives.example.test/frontend/archives/index.html",
+    controls: {
+      "下一步": { safe: true }
+    },
+    pageSnapshots: [
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["下一步"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        landingSignal: true
+      },
+      {
+        titlePresent: true,
+        allowedButtonLabels: [],
+        usernameInputPresent: false,
+        usernamePrefilled: false,
+        landingSignal: false
+      }
+    ]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.page_ready, true);
+  assert.equal(result.error_type, null);
+  assert.equal(result.auth_redirect_detected, false);
+  assert.equal(result.landing_flow_attempted, true);
+  assert.equal(result.allowed_clicks_executed, 1);
+  assert.equal(result.landing_flow_status, "completed");
+  assert.equal(result.landing_flow_root_cause, "lightweight_confirm_needed");
+  assert.deepEqual(page.clickedLabels, ["下一步"]);
+  assert.equal(result.landing_flow_observation.username_prefilled, false);
+  assertNoCredentialMaterial(result);
+});
+
+test("archives async account-origin drift is not marked ready", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://archives.example.test/frontend/archives/index.html",
+    settleUrl: "https://account.p.adm-corp.kuaishou.com/login",
+    waitOutcomes: ["timeout"]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.page_ready, false);
+  assert.equal(result.error_type, "manual_login_required");
+  assert.equal(result.final_origin_after_landing, "https://account.p.adm-corp.kuaishou.com");
+  assert.equal(result.landing_flow_status, "manual_login_required");
+  assert.equal(result.landing_flow_root_cause, "manual_login_required");
+  assert.equal(result.landing_flow_attempted, true);
+  assertNoCredentialMaterial(result);
+});
+
+test("archives same-origin password page requires manual profile activation", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://archives.example.test/frontend/archives/index.html",
+    controls: {
+      "下一步": { safe: true }
+    },
+    pageSnapshots: [
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["下一步"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        passwordInputPresent: true,
+        landingSignal: true
+      }
+    ]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.page_ready, false);
+  assert.equal(result.error_type, "manual_login_required");
+  assert.equal(result.landing_flow_status, "manual_login_required");
+  assert.equal(result.landing_flow_root_cause, "password_required");
+  assert.deepEqual(page.clickedLabels, []);
+  assertNoCredentialMaterial(result);
+});
+
+test("archives OTP captcha and QR pages require manual profile activation", async () => {
+  const cases = [
+    ["otp", { twoFactorSignal: true }, "two_factor_required"],
+    ["captcha", { captchaSignal: true }, "captcha_required"],
+    ["qr", { qrSignal: true }, "two_factor_required"]
+  ];
+
+  for (const [name, snapshot, errorType] of cases) {
+    const config = createLiveConfig();
+    const client = new BrowserBackedClient(config);
+    const page = new FakeLandingPage({
+      gotoUrl: "https://archives.example.test/frontend/archives/index.html",
+      controls: {
+        Confirm: { safe: true }
+      },
+      pageSnapshots: [
+        {
+          titlePresent: true,
+          allowedButtonLabels: ["Confirm"],
+          usernameInputPresent: true,
+          usernamePrefilled: true,
+          landingSignal: true,
+          ...snapshot
+        }
+      ]
+    });
+    client.start = async () => {};
+    client.context = { newPage: async () => page };
+
+    const result = await client.prewarmDomain("archives");
+
+    assert.equal(result.status, "auth_failed", name);
+    assert.equal(result.page_ready, false, name);
+    assert.equal(result.error_type, errorType, name);
+    assert.equal(result.landing_flow_status, "manual_login_required", name);
+    assert.deepEqual(page.clickedLabels, [], name);
+    assertNoCredentialMaterial(result);
+  }
+});
+
+test("archives same-origin lightweight confirm stops after max clicks", async () => {
+  const config = createLiveConfig();
+  const client = new BrowserBackedClient(config);
+  const page = new FakeLandingPage({
+    gotoUrl: "https://archives.example.test/frontend/archives/index.html",
+    controls: {
+      Continue: { safe: true }
+    },
+    pageSnapshots: [
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["Continue"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        landingSignal: true
+      },
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["Continue"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        landingSignal: true
+      },
+      {
+        titlePresent: true,
+        allowedButtonLabels: ["Continue"],
+        usernameInputPresent: true,
+        usernamePrefilled: true,
+        landingSignal: true
+      }
+    ]
+  });
+  client.start = async () => {};
+  client.context = { newPage: async () => page };
+
+  const result = await client.prewarmDomain("archives");
+
+  assert.equal(result.status, "auth_failed");
+  assert.equal(result.page_ready, false);
+  assert.equal(result.error_type, "auth_flow_not_completed_in_bound_context");
+  assert.equal(result.allowed_clicks_executed, 2);
+  assert.equal(result.landing_flow_status, "blocked");
+  assert.deepEqual(page.clickedLabels, ["Continue", "Continue"]);
+  assertNoCredentialMaterial(result);
 });
 
 test("prewarm auth redirect can use one allowlisted next click before becoming ready", async () => {
@@ -1775,7 +2025,7 @@ test("action execution uses the warmed page for the matching fixed origin", asyn
 
   const response = await service.executeAction("weapon_inventory", { user_id: "demo-user" });
 
-  assert.deepEqual(fakeClient.prewarmCalls, ["weapon"]);
+  assert.deepEqual(fakeClient.prewarmCalls, [{ domainKey: "weapon", options: {} }]);
   assert.equal(fakeClient.runCalls.length, 1);
   assert.equal(fakeClient.runCalls[0].domainKey, "weapon");
   assert.equal(fakeClient.runCalls[0].actionName, "weapon_inventory");
@@ -1810,7 +2060,7 @@ test("action detects SSO drift and attempts one lazy rewarm", async () => {
 
   const response = await service.executeAction("track_analysis_summary", { user_id: "demo", appName: "KUAISHOU" });
 
-  assert.deepEqual(fakeClient.prewarmCalls, ["track_analysis"]);
+  assert.deepEqual(fakeClient.prewarmCalls, [{ domainKey: "track_analysis", options: {} }]);
   assert.equal(response.lazy_rewarm_attempted, true);
   assert.equal(response.lazy_rewarm_status, "ready");
   assert.equal(response.bound_page_origin_before_rewarm, "https://sso.corp.kuaishou.com");
@@ -4565,8 +4815,8 @@ class FakeBrowserClient {
 
   async close() {}
 
-  async prewarmDomain(domainKey) {
-    this.prewarmCalls.push(domainKey);
+  async prewarmDomain(domainKey, options = {}) {
+    this.prewarmCalls.push({ domainKey, options });
     return this.prewarmResults[domainKey] || prewarmResult(this.config, domainKey);
   }
 
@@ -4680,10 +4930,13 @@ function warmStateReady(config, domainKey) {
 }
 
 class FakeLandingPage {
-  constructor({ gotoUrl, waitOutcomes = [], controls = {} }) {
+  constructor({ gotoUrl, settleUrl = null, waitOutcomes = [], controls = {}, pageSnapshots = [] }) {
     this.gotoUrl = gotoUrl;
+    this.settleUrl = settleUrl;
     this.waitOutcomes = [...waitOutcomes];
     this.controls = controls;
+    this.pageSnapshots = [...pageSnapshots];
+    this.lastPageSnapshot = pageSnapshots[pageSnapshots.length - 1] || {};
     this.clickedLabels = [];
     this.currentUrl = "about:blank";
     this.targetUrl = null;
@@ -4715,6 +4968,31 @@ class FakeLandingPage {
       return new FakeLandingControl(this, null, { exists: false });
     }
     return new FakeLandingControl(this, label, this.controls[label]);
+  }
+
+  async evaluate() {
+    const snapshot = this.pageSnapshots.length > 0 ? this.pageSnapshots.shift() : this.lastPageSnapshot;
+    this.lastPageSnapshot = snapshot;
+    return {
+      titlePresent: Boolean(snapshot.titlePresent),
+      allowedButtonLabels: snapshot.allowedButtonLabels || [],
+      usernameInputPresent: Boolean(snapshot.usernameInputPresent),
+      usernamePrefilled: Boolean(snapshot.usernamePrefilled),
+      passwordInputPresent: Boolean(snapshot.passwordInputPresent),
+      twoFactorSignal: Boolean(snapshot.twoFactorSignal),
+      captchaSignal: Boolean(snapshot.captchaSignal),
+      qrSignal: Boolean(snapshot.qrSignal),
+      permissionBlockedSignal: Boolean(snapshot.permissionBlockedSignal),
+      landingSignal: Boolean(snapshot.landingSignal)
+    };
+  }
+
+  async waitForLoadState() {}
+
+  async waitForTimeout() {
+    if (this.settleUrl) {
+      this.currentUrl = this.settleUrl;
+    }
   }
 }
 

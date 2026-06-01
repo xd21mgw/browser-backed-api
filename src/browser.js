@@ -6,9 +6,10 @@ import {
   sanitizeUrl
 } from "./diagnostics.js";
 
-const LANDING_CLICK_LABELS = Object.freeze(["继续", "下一步", "进入", "Continue", "Next"]);
+const DEFAULT_LANDING_CLICK_LABELS = Object.freeze(["下一步", "继续", "确认", "进入系统", "Continue", "Next", "Confirm"]);
 const MAX_LANDING_CLICKS = 2;
 const LANDING_WAIT_MS = 5000;
+const LANDING_SETTLE_MS = 800;
 
 export class BrowserBackedClient {
   constructor(config) {
@@ -44,7 +45,7 @@ export class BrowserBackedClient {
     return results;
   }
 
-  async prewarmDomain(domainKey) {
+  async prewarmDomain(domainKey, { allowLandingFlow = true } = {}) {
     await this.start();
 
     const domain = this.config.domains[domainKey];
@@ -68,6 +69,10 @@ export class BrowserBackedClient {
       navigationError = error;
     }
 
+    if (domain.landingFlow?.sameOriginActivation) {
+      await waitForLandingSettle(page, this.config.browser.requestTimeoutMs);
+    }
+
     const initialResult = buildNavigationDiagnostics({
       domain,
       target,
@@ -77,15 +82,20 @@ export class BrowserBackedClient {
     });
     const authRedirectDetected = initialResult.error_type === "auth_redirect";
     const landingFlow = authRedirectDetected
-      ? await this.runLandingFlow(page, domain)
-      : defaultLandingFlow(initialResult.final_url, initialResult.final_origin);
+      ? allowLandingFlow
+        ? await this.runLandingFlow(page, domain)
+        : manualLandingFlow(page, "manual_login_required")
+      : allowLandingFlow
+        ? await this.runSameOriginLandingFlow(page, domain, initialResult)
+        : await this.observeSameOriginLandingFlow(page, domain, initialResult);
     const finalUrl = landingFlow.finalUrl || initialResult.final_url;
     const finalOrigin = landingFlow.finalOrigin || initialResult.final_origin;
     const navigationStatus = landingFlow.navigationStatus ?? initialResult.navigation_status;
     const sameOriginActual = Boolean(finalOrigin && finalOrigin === domain.origin);
-    const errorType = sameOriginActual
-      ? null
-      : landingFlow.errorType ||
+    const errorType = landingFlow.errorType ||
+      (sameOriginActual
+        ? null
+        :
         classifyNavigation({
           error: navigationError,
           finalUrl,
@@ -93,7 +103,7 @@ export class BrowserBackedClient {
           expectedOrigin: domain.origin,
           navigationStatus
         }) ||
-        "page_load_error";
+        "page_load_error");
     const pageReady = Boolean(sameOriginActual && !errorType);
     this.pageReady.set(domain.key, pageReady);
 
@@ -123,7 +133,9 @@ export class BrowserBackedClient {
       allowed_clicks_executed: landingFlow.allowedClicksExecuted,
       final_origin_after_landing: finalOrigin,
       page_ready: pageReady,
-      landing_flow_status: landingFlow.status
+      landing_flow_status: landingFlow.status,
+      landing_flow_root_cause: landingFlow.rootCause || null,
+      landing_flow_observation: landingFlow.observation || null
     };
   }
 
@@ -148,7 +160,18 @@ export class BrowserBackedClient {
     }
 
     for (let index = 0; index < MAX_LANDING_CLICKS; index += 1) {
-      const control = await findAllowedLandingControl(page);
+      const observation = await observeLandingFlow(page, domain);
+      result.observation = observation.summary;
+      result.rootCause = observation.rootCause === "not_landing" ? null : observation.rootCause;
+      if (isManualLandingRootCause(observation.rootCause)) {
+        applyManualLandingResult(result, page, observation);
+        return result;
+      }
+
+      const control = await findAllowedLandingControl(page, {
+        allowedLabels: landingLabelsForDomain(domain),
+        allowFormSubmit: false
+      });
       if (!control) {
         break;
       }
@@ -172,11 +195,115 @@ export class BrowserBackedClient {
       }
     }
 
-    result.status = result.allowedClicksExecuted >= MAX_LANDING_CLICKS ? "max_clicks_exceeded" : "landing_flow_blocked";
-    result.errorType = "landing_flow_blocked";
-    result.errorMessage = "Auth landing flow did not return to configured origin";
+    const manualRequired = Boolean(domain.landingFlow?.sameOriginActivation && result.allowedClicksExecuted === 0);
+    result.status = manualRequired
+      ? "manual_login_required"
+      : result.allowedClicksExecuted >= MAX_LANDING_CLICKS
+        ? "max_clicks_exceeded"
+        : "landing_flow_blocked";
+    result.errorType = manualRequired ? "manual_login_required" : "landing_flow_blocked";
+    result.errorMessage = manualRequired
+      ? "Manual profile activation is required for this landing flow"
+      : "Auth landing flow did not return to configured origin";
     result.finalUrl = safePageUrl(page);
     result.finalOrigin = originFromUrl(result.finalUrl);
+    result.rootCause = manualRequired ? "manual_login_required" : result.rootCause;
+    return result;
+  }
+
+  async runSameOriginLandingFlow(page, domain, initialResult) {
+    if (!domain.landingFlow?.sameOriginActivation || initialResult.final_origin !== domain.origin) {
+      return defaultLandingFlow(initialResult.final_url, initialResult.final_origin);
+    }
+
+    const waitMs = Math.min(this.config.browser.requestTimeoutMs, LANDING_WAIT_MS);
+    const result = {
+      attempted: false,
+      allowedClicksExecuted: 0,
+      status: "not_needed",
+      finalUrl: safePageUrl(page),
+      finalOrigin: originFromUrl(safePageUrl(page)),
+      navigationStatus: initialResult.navigation_status,
+      errorType: null,
+      errorMessage: null,
+      rootCause: null,
+      observation: null
+    };
+
+    let observation = await observeLandingFlow(page, domain);
+    result.observation = observation.summary;
+    result.rootCause = observation.rootCause === "not_landing" ? null : observation.rootCause;
+    if (observation.rootCause === "not_landing") {
+      return result;
+    }
+
+    result.attempted = true;
+    if (observation.rootCause !== "lightweight_confirm_needed") {
+      applyManualLandingResult(result, page, observation);
+      return result;
+    }
+
+    const maxClicks = landingMaxClicksForDomain(domain);
+    for (let index = 0; index < maxClicks; index += 1) {
+      const control = await findAllowedLandingControl(page, {
+        allowedLabels: landingLabelsForDomain(domain),
+        allowFormSubmit: true
+      });
+      if (!control) {
+        break;
+      }
+
+      await control.click({ timeout: waitMs });
+      result.allowedClicksExecuted += 1;
+      await waitForLandingSettle(page, waitMs);
+      result.finalUrl = safePageUrl(page);
+      result.finalOrigin = originFromUrl(result.finalUrl);
+
+      observation = await observeLandingFlow(page, domain);
+      result.observation = observation.summary;
+      result.rootCause = observation.rootCause === "not_landing" ? "lightweight_confirm_needed" : observation.rootCause;
+
+      if (observation.rootCause === "not_landing") {
+        result.status = "completed";
+        result.errorType = null;
+        result.errorMessage = null;
+        return result;
+      }
+      if (observation.rootCause !== "lightweight_confirm_needed") {
+        applyManualLandingResult(result, page, observation);
+        return result;
+      }
+    }
+
+    result.status = "blocked";
+    result.errorType = "auth_flow_not_completed_in_bound_context";
+    result.errorMessage = "Archives landing flow remained in the bound origin after allowed confirmation clicks";
+    result.finalUrl = safePageUrl(page);
+    result.finalOrigin = originFromUrl(result.finalUrl);
+    result.rootCause = "lightweight_confirm_needed";
+    return result;
+  }
+
+  async observeSameOriginLandingFlow(page, domain, initialResult) {
+    if (!domain.landingFlow?.sameOriginActivation || initialResult.final_origin !== domain.origin) {
+      return defaultLandingFlow(initialResult.final_url, initialResult.final_origin);
+    }
+
+    const result = defaultLandingFlow(safePageUrl(page), originFromUrl(safePageUrl(page)));
+    result.navigationStatus = initialResult.navigation_status;
+    const observation = await observeLandingFlow(page, domain);
+    result.observation = observation.summary;
+    result.rootCause = observation.rootCause === "not_landing" ? null : observation.rootCause;
+    if (observation.rootCause === "not_landing") {
+      return result;
+    }
+
+    result.attempted = false;
+    result.status = "manual_login_required";
+    result.errorType = observation.rootCause === "lightweight_confirm_needed"
+      ? "manual_login_required"
+      : errorTypeForLandingRootCause(observation.rootCause);
+    result.errorMessage = "Manual profile activation is required for this landing flow";
     return result;
   }
 
@@ -587,11 +714,35 @@ function defaultLandingFlow(finalUrl, finalOrigin) {
   };
 }
 
+function manualLandingFlow(page, rootCause = "manual_login_required") {
+  return {
+    attempted: false,
+    allowedClicksExecuted: 0,
+    status: "manual_login_required",
+    finalUrl: safePageUrl(page),
+    finalOrigin: originFromUrl(safePageUrl(page)),
+    navigationStatus: null,
+    errorType: errorTypeForLandingRootCause(rootCause),
+    errorMessage: "Manual profile activation is required for this landing flow",
+    rootCause,
+    observation: null
+  };
+}
+
 function statusFromPrewarm({ pageReady, errorType }) {
   if (pageReady) {
     return "ready";
   }
-  if (["auth_redirect", "login_page", "landing_flow_blocked"].includes(errorType)) {
+  if ([
+    "auth_redirect",
+    "login_page",
+    "landing_flow_blocked",
+    "auth_flow_not_completed_in_bound_context",
+    "manual_login_required",
+    "two_factor_required",
+    "captcha_required",
+    "permission_blocked"
+  ].includes(errorType)) {
     return "auth_failed";
   }
   return "error";
@@ -617,21 +768,21 @@ async function waitForConfiguredOrigin(page, configuredOrigin, timeout) {
   }
 }
 
-async function findAllowedLandingControl(page) {
+async function findAllowedLandingControl(page, { allowedLabels = DEFAULT_LANDING_CLICK_LABELS, allowFormSubmit = false } = {}) {
   if (typeof page.getByRole !== "function") {
     return null;
   }
 
-  for (const label of LANDING_CLICK_LABELS) {
+  for (const label of allowedLabels) {
     const control = page.getByRole("button", { name: exactLabelPattern(label) }).first();
-    if (await isSafeLandingControl(control)) {
+    if (await isSafeLandingControl(control, { allowFormSubmit })) {
       return control;
     }
   }
   return null;
 }
 
-async function isSafeLandingControl(control) {
+async function isSafeLandingControl(control, { allowFormSubmit = false } = {}) {
   try {
     if ((await control.count()) < 1) {
       return false;
@@ -654,11 +805,208 @@ async function isSafeLandingControl(control) {
           disabled: Boolean(element.disabled || ariaDisabled.toLowerCase() === "true")
         };
       });
-      return Boolean(safety.isButton && !safety.isSubmit && !safety.inForm && !safety.disabled);
+      return Boolean(
+        safety.isButton &&
+        !safety.disabled &&
+        (allowFormSubmit || (!safety.isSubmit && !safety.inForm))
+      );
     }
     return true;
   } catch {
     return false;
+  }
+}
+
+async function observeLandingFlow(page, domain) {
+  const fallback = {
+    rootCause: "not_landing",
+    summary: {
+      current_origin: originFromUrl(safePageUrl(page)),
+      current_path: safePathFromUrl(safePageUrl(page)),
+      title_present: false,
+      allowed_button_labels: [],
+      username_input_present: false,
+      username_prefilled: false,
+      password_input_present: false,
+      two_factor_signal: false,
+      captcha_signal: false,
+      qr_signal: false,
+      permission_blocked_signal: false
+    }
+  };
+  if (typeof page.evaluate !== "function") {
+    return fallback;
+  }
+
+  let snapshot;
+  try {
+    snapshot = await page.evaluate(({ allowedLabels }) => {
+      const visible = (element) => {
+        if (!element) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden" && style.display !== "none" && rect.width >= 0 && rect.height >= 0;
+      };
+      const textOf = (element) => String(
+        element.innerText ||
+        element.textContent ||
+        element.getAttribute?.("aria-label") ||
+        element.getAttribute?.("title") ||
+        ""
+      ).trim();
+      const allText = String(document.body?.innerText || "").slice(0, 5000);
+      const title = String(document.title || "").trim();
+      const controls = Array.from(document.querySelectorAll("button,[role='button']"))
+        .filter(visible)
+        .map(textOf)
+        .filter(Boolean);
+      const allowedButtonLabels = controls.filter((label) => allowedLabels.includes(label));
+      const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
+      const usernameInputs = inputs.filter((input) => {
+        const type = String(input.getAttribute("type") || "text").toLowerCase();
+        const combined = [
+          input.getAttribute("name"),
+          input.getAttribute("id"),
+          input.getAttribute("autocomplete"),
+          input.getAttribute("placeholder"),
+          input.getAttribute("aria-label")
+        ].filter(Boolean).join(" ").toLowerCase();
+        return ["text", "email", "tel"].includes(type) &&
+          /(user|account|email|phone|mobile|login|username|账号|账户|用户名|手机号|邮箱|工号)/i.test(combined);
+      });
+      const passwordInputs = inputs.filter((input) => String(input.getAttribute("type") || "").toLowerCase() === "password");
+      const textSignals = `${title}\n${allText}`;
+      return {
+        titlePresent: title.length > 0,
+        allowedButtonLabels,
+        usernameInputPresent: usernameInputs.length > 0,
+        usernamePrefilled: usernameInputs.length > 0 && usernameInputs.every((input) => String(input.value || "").trim().length > 0),
+        passwordInputPresent: passwordInputs.length > 0,
+        twoFactorSignal: /(otp|2fa|mfa|two[- ]?factor|verification code|one[- ]?time|动态码|二次验证|安全验证|短信验证码|手机验证码)/i.test(textSignals),
+        captchaSignal: /(captcha|验证码|滑块|人机验证|安全校验)/i.test(textSignals),
+        qrSignal: /(qr|二维码|扫码|扫一扫)/i.test(textSignals),
+        permissionBlockedSignal: /(permission denied|forbidden|not authorized|无权限|没有权限|权限不足|无访问权限)/i.test(textSignals),
+        landingSignal: /(sso|login|auth|account|confirm|认证|登录|账号|账户|身份|确认)/i.test(textSignals)
+      };
+    }, { allowedLabels: landingLabelsForDomain(domain) });
+  } catch {
+    return fallback;
+  }
+
+  const summary = {
+    current_origin: originFromUrl(safePageUrl(page)),
+    current_path: safePathFromUrl(safePageUrl(page)),
+    title_present: Boolean(snapshot?.titlePresent),
+    allowed_button_labels: sanitizeButtonLabels(snapshot?.allowedButtonLabels),
+    username_input_present: Boolean(snapshot?.usernameInputPresent),
+    username_prefilled: Boolean(snapshot?.usernamePrefilled),
+    password_input_present: Boolean(snapshot?.passwordInputPresent),
+    two_factor_signal: Boolean(snapshot?.twoFactorSignal),
+    captcha_signal: Boolean(snapshot?.captchaSignal),
+    qr_signal: Boolean(snapshot?.qrSignal),
+    permission_blocked_signal: Boolean(snapshot?.permissionBlockedSignal)
+  };
+
+  if (summary.permission_blocked_signal) {
+    return { rootCause: "permission_blocked", summary };
+  }
+  if (summary.password_input_present) {
+    return { rootCause: "password_required", summary };
+  }
+  if (summary.two_factor_signal || summary.qr_signal) {
+    return { rootCause: "two_factor_required", summary };
+  }
+  if (summary.captcha_signal) {
+    return { rootCause: "captcha_required", summary };
+  }
+  if (summary.username_input_present && !summary.username_prefilled) {
+    return { rootCause: "manual_login_required", summary };
+  }
+  if (summary.allowed_button_labels.length > 0 && (snapshot?.landingSignal || summary.username_input_present)) {
+    return { rootCause: "lightweight_confirm_needed", summary };
+  }
+  return { rootCause: "not_landing", summary };
+}
+
+function applyManualLandingResult(result, page, observation) {
+  result.status = "manual_login_required";
+  result.errorType = errorTypeForLandingRootCause(observation.rootCause);
+  result.errorMessage = "Manual profile activation is required for this landing flow";
+  result.finalUrl = safePageUrl(page);
+  result.finalOrigin = originFromUrl(result.finalUrl);
+  result.rootCause = observation.rootCause;
+  result.observation = observation.summary;
+}
+
+function isManualLandingRootCause(rootCause) {
+  return [
+    "manual_login_required",
+    "password_required",
+    "two_factor_required",
+    "captcha_required",
+    "permission_blocked"
+  ].includes(rootCause);
+}
+
+function errorTypeForLandingRootCause(rootCause) {
+  if (rootCause === "permission_blocked") {
+    return "permission_blocked";
+  }
+  if (rootCause === "two_factor_required") {
+    return "two_factor_required";
+  }
+  if (rootCause === "captcha_required") {
+    return "captcha_required";
+  }
+  return "manual_login_required";
+}
+
+async function waitForLandingSettle(page, timeout) {
+  if (typeof page.waitForLoadState === "function") {
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: Math.min(timeout, LANDING_SETTLE_MS) });
+    } catch {}
+  }
+  if (typeof page.waitForTimeout === "function") {
+    await page.waitForTimeout(LANDING_SETTLE_MS);
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, LANDING_SETTLE_MS));
+}
+
+function landingLabelsForDomain(domain) {
+  const labels = Array.isArray(domain?.landingFlow?.allowedLabels)
+    ? domain.landingFlow.allowedLabels
+    : DEFAULT_LANDING_CLICK_LABELS;
+  return labels.filter((label) => typeof label === "string" && label.length > 0);
+}
+
+function landingMaxClicksForDomain(domain) {
+  const value = Number(domain?.landingFlow?.maxClicks);
+  if (!Number.isInteger(value) || value <= 0) {
+    return MAX_LANDING_CLICKS;
+  }
+  return Math.min(value, MAX_LANDING_CLICKS);
+}
+
+function sanitizeButtonLabels(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))]
+    .map((item) => item.slice(0, 40));
+}
+
+function safePathFromUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return null;
+  }
+  try {
+    return new URL(rawUrl).pathname || "/";
+  } catch {
+    return null;
   }
 }
 

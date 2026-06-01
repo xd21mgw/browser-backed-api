@@ -82,7 +82,7 @@ export class BrowserBackedApiService {
     };
   }
 
-  async prewarmDomain(domainKey) {
+  async prewarmDomain(domainKey, options = {}) {
     const domain = this.config.domains[domainKey];
     if (!domain) {
       throw publicError(404, "unknown_origin", "Unknown origin");
@@ -129,7 +129,7 @@ export class BrowserBackedApiService {
         return result;
       }
 
-      const liveResult = await this.browserClient.prewarmDomain(domain.key);
+      const liveResult = await this.browserClient.prewarmDomain(domain.key, options);
       const warmed = liveResult.status === "ready" && liveResult.page_ready === true;
       const prewarmAt = new Date().toISOString();
       const result = {
@@ -238,7 +238,7 @@ export class BrowserBackedApiService {
     }
 
     if (!this.warmState.get(action.domainKey)?.warmed) {
-      await this.prewarmDomain(action.domainKey);
+      await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
     }
 
     let originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
@@ -252,9 +252,9 @@ export class BrowserBackedApiService {
       boundPageOriginAfterRewarm: actionDiagnostics.bound_page_origin || null
     };
 
-    if (shouldLazyRewarm(actionDiagnostics)) {
+    if (action.domainKey !== "archives" && shouldLazyRewarm(actionDiagnostics)) {
       lazyMeta.lazyRewarmAttempted = true;
-      const rewarmResult = await this.prewarmDomain(action.domainKey);
+      const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
       lazyMeta.lazyRewarmStatus = rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed";
       originWarmed = Boolean(rewarmResult.warmed);
       actionDiagnostics = this.browserClient.actionDiagnostics(action, originWarmed);
@@ -706,6 +706,10 @@ function boundedTimeout(value, fallback) {
 
 function isParallelExecution(execution) {
   return execution === "independent_parallel";
+}
+
+function actionStagePrewarmOptions(action) {
+  return action?.domainKey === "archives" ? { allowLandingFlow: false } : {};
 }
 
 async function executeSerial(sources, runner) {

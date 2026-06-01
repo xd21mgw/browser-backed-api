@@ -95,9 +95,15 @@ export function sourceStatusFromErrorType(errorType) {
   switch (errorType) {
     case "auth_redirect":
     case "auth_failed":
+    case "auth_flow_not_completed_in_bound_context":
+    case "captcha_required":
     case "login_page":
     case "landing_flow_blocked":
+    case "manual_login_required":
+    case "two_factor_required":
       return "auth_failed";
+    case "permission_blocked":
+      return "blocked";
     case "navigation_timeout":
     case "timeout":
       return "timeout";

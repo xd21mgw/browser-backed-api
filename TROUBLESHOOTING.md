@@ -112,11 +112,59 @@ Typical meanings:
 | status/error | Meaning |
 | --- | --- |
 | `auth_required` / `auth_redirect` / `login_page` | Login or landing flow did not finish in this profile. |
+| `manual_login_required` | Browser reached a page that requires human login or account input. |
+| `auth_flow_not_completed_in_bound_context` | Browser stayed on the fixed origin but did not finish the bounded landing flow. |
+| `two_factor_required` / `captcha_required` | 2FA, QR, captcha, or another human challenge is required. |
 | `failed` | Required origin failed due to timeout, network, origin mismatch, or other refresh failure. |
 | `optional_failed` | Optional origin failed; this is recorded but does not fail required-origin readiness. |
 | `navigation_timeout` | Platform page did not load within timeout. |
 | `origin_mismatch` | Browser landed outside the configured fixed origin. |
 | `network_error` | Local browser/network could not reach the platform. |
+
+## Archives Center Landing Flow
+
+Symptom:
+
+- Archives actions return `auth_flow_not_completed_in_bound_context`.
+- `/prewarm` or `refresh:once` shows Archives not ready while other origins are
+  ready.
+
+Meaning:
+
+- Archives may have reached its configured origin but stayed on a lightweight
+  account-confirmation page.
+- This is not a no-data result and not a risk conclusion.
+
+What the service tries automatically:
+
+- Only during `refresh:once`, `/prewarm`, or profile warmup.
+- At most two clicks.
+- Only exact lightweight labels: `下一步`, `继续`, `确认`, `进入系统`,
+  `Continue`, `Next`, `Confirm`.
+- No password, OTP, QR, captcha, localStorage, cookie, token, session, or header
+  is read or output.
+
+When it stops:
+
+- password input is present
+- OTP / 2FA / QR / captcha is present
+- username or account input needs manual entry
+- permission-blocked text appears
+- the same confirmation page remains after the click limit
+
+Fix:
+
+```sh
+npm run open:profile
+```
+
+Finish the Archives page manually in the visible browser, then run:
+
+```sh
+npm run refresh:once
+```
+
+Do not delete the profile. Do not copy another teammate's profile.
 
 ## Service Is Not Started
 
