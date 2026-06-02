@@ -29,6 +29,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "dateRange",
   "filters",
   "limit",
+  "max_records",
   "cursor",
   "query",
   "severity",
@@ -140,6 +141,9 @@ const LOGIN_LOGS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
+const LOGIN_LOGS_DEFAULT_SERVICE_ROW_CAP = 100;
+const LOGIN_LOGS_MAX_SERVICE_ROW_CAP = 200;
+const LOGIN_LOGS_JSON_CAP_PATH = Object.freeze(["data", "logSearchModels"]);
 const DEFAULT_RESPONSE_MODE = "passthrough";
 const RESPONSE_MODES = Object.freeze(["passthrough"]);
 const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
@@ -283,7 +287,8 @@ export const ACTIONS = Object.freeze({
       from_timestamp: "optional epoch ms",
       to_timestamp: "optional epoch ms",
       recallSource: "optional string; default 2,0,1,3",
-      limit: "optional positive integer <= 100; default 20"
+      limit: "optional positive integer <= 100; legacy service row target when max_records is absent",
+      max_records: "optional service-side JSON row target <= 200; defaults to as many as fit up to 100"
     },
     validateParams: validateLoginLogsInput,
     buildRequest: buildLoginLogsRequest,
@@ -715,8 +720,17 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     : Buffer.byteLength(bodyText, "utf8");
   const httpStatus = typeof fetchResult?.status === "number" ? fetchResult.status : null;
   const bodyTruncated = Boolean(fetchResult?.bodyTruncated);
-  const rawBodyHandling = bodyPresent ? (bodyTruncated ? "capped" : "visible") : "omitted";
-  const returnedBody = buildReturnedUpstreamBody(bodyText, contentType, { truncated: bodyTruncated });
+  const jsonArrayCap = normalizeJsonArrayCap(fetchResult?.jsonArrayCap);
+  const rawBodyHandling = bodyPresent
+    ? jsonArrayCap?.ok && bodyTruncated
+      ? "json_array_capped"
+      : bodyTruncated
+        ? "capped"
+        : "visible"
+    : "omitted";
+  const returnedBody = buildReturnedUpstreamBody(bodyText, contentType, {
+    truncated: bodyTruncated && !jsonArrayCap?.ok
+  });
   const upstream = {
     status: httpStatus,
     content_type: contentType,
@@ -725,7 +739,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     body_truncated: bodyTruncated,
     response_too_large: bodyTruncated,
     observed_bytes: observedBytes,
-    returned_bytes: returnedBody.returnedBytes,
+    returned_bytes: typeof fetchResult?.returnedBytes === "number" ? fetchResult.returnedBytes : returnedBody.returnedBytes,
     raw_body_handling: rawBodyHandling
   };
   let ok = Boolean(fetchResult?.ok);
@@ -733,13 +747,30 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   let platformError = errorType;
   let transportError = null;
 
-  if (bodyPresent && bodyTruncated) {
+  if (bodyPresent && bodyTruncated && jsonArrayCap?.ok) {
+    ok = false;
+    errorType = "response_too_large";
+    platformError = null;
+    upstream.response_too_large = true;
+    upstream.error_type = errorType;
+    upstream.raw_body_handling = "json_array_capped";
+    upstream.capped_json_path = jsonArrayCap.path;
+    upstream.observed_records = jsonArrayCap.observedRecords;
+    upstream.returned_records = jsonArrayCap.returnedRecords;
+    upstream.missing_records = jsonArrayCap.missingRecords;
+    upstream.missing_body_reason = "response_too_large";
+    upstream.capped_body = returnedBody.body;
+  } else if (bodyPresent && bodyTruncated) {
     ok = false;
     errorType = "response_too_large";
     platformError = null;
     upstream.response_too_large = true;
     upstream.error_type = errorType;
     upstream.body_snippet = returnedBody.body;
+    if (jsonArrayCap?.attempted && !jsonArrayCap.ok) {
+      upstream.json_array_cap_error_type = jsonArrayCap.errorType || "json_parse_error";
+      upstream.capped_json_path = jsonArrayCap.path || null;
+    }
   } else if (bodyPresent) {
     upstream.body = returnedBody.body;
   } else {
@@ -1832,6 +1863,34 @@ function buildReturnedUpstreamBody(bodyText, contentType, { truncated = false } 
   };
 }
 
+function normalizeJsonArrayCap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const ok = Boolean(value.ok);
+  const observedRecords = safeNonNegativeInteger(value.observedRecords);
+  const returnedRecords = safeNonNegativeInteger(value.returnedRecords);
+  const missingRecords = safeNonNegativeInteger(value.missingRecords);
+  return {
+    attempted: Boolean(value.attempted),
+    ok,
+    path: typeof value.path === "string" && value.path.trim() ? value.path.trim().slice(0, 256) : null,
+    observedRecords,
+    returnedRecords,
+    missingRecords,
+    maxRecords: safeNonNegativeInteger(value.maxRecords),
+    errorType: typeof value.errorType === "string" ? value.errorType.slice(0, 128) : null
+  };
+}
+
+function safeNonNegativeInteger(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    return 0;
+  }
+  return Math.trunc(number);
+}
+
 function isJsonContentType(contentType) {
   return typeof contentType === "string" && /\bjson\b/i.test(contentType);
 }
@@ -2009,6 +2068,13 @@ function validateLoginLogsInput(input) {
       errorType: "invalid_parameter"
     };
   }
+  if (Object.hasOwn(input, "max_records") && (!validPositiveInteger(input.max_records) || input.max_records > LOGIN_LOGS_MAX_SERVICE_ROW_CAP)) {
+    return {
+      message: `login_logs_search max_records must be a positive integer <= ${LOGIN_LOGS_MAX_SERVICE_ROW_CAP}`,
+      required: [`max_records positive integer <= ${LOGIN_LOGS_MAX_SERVICE_ROW_CAP}`],
+      errorType: "invalid_parameter"
+    };
+  }
 
   return null;
 }
@@ -2060,7 +2126,13 @@ function buildLoginLogsRequest(input) {
     path: `${LOGIN_LOGS_SEARCH_PATH}?${params.toString()}`,
     displayPath: `${LOGIN_LOGS_SEARCH_PATH}?${displayParams.toString()}`,
     method: "GET",
-    body: {}
+    body: {},
+    responseBodyCap: {
+      kind: "json_array",
+      path: LOGIN_LOGS_JSON_CAP_PATH,
+      pathLabel: LOGIN_LOGS_JSON_CAP_PATH.join("."),
+      maxRecords: loginLogsServiceRowCap(input)
+    }
   };
 }
 
@@ -2104,6 +2176,16 @@ function loginLogsRecallSource(input) {
 
 function loginLogsLimit(input) {
   return Object.hasOwn(input, "limit") ? Math.trunc(input.limit) : LOGIN_LOGS_DEFAULT_LIMIT;
+}
+
+function loginLogsServiceRowCap(input) {
+  if (Object.hasOwn(input, "max_records")) {
+    return Math.trunc(input.max_records);
+  }
+  if (Object.hasOwn(input, "limit")) {
+    return Math.min(loginLogsLimit(input), LOGIN_LOGS_MAX_SERVICE_ROW_CAP);
+  }
+  return LOGIN_LOGS_DEFAULT_SERVICE_ROW_CAP;
 }
 
 function validRecallSource(value) {

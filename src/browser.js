@@ -670,17 +670,18 @@ export class BrowserBackedClient {
     });
     const body = await response.body();
     const maxBytes = this.config.browser.maxLiveBodyBytes;
-    const bodyTruncated = body.byteLength > maxBytes;
-    const cappedBody = bodyTruncated ? body.subarray(0, maxBytes) : body;
+    const readResult = readBoundedBuffer(body, maxBytes, actionRequest.responseBodyCap, response.headers()["content-type"] || null);
 
     return {
       completed: true,
       ok: response.ok(),
       status: response.status(),
       contentType: response.headers()["content-type"] || null,
-      bodyText: cappedBody.toString("utf8"),
-      bodyTruncated,
-      observedBytes: cappedBody.byteLength
+      bodyText: readResult.text,
+      bodyTruncated: readResult.truncated,
+      observedBytes: readResult.observedBytes,
+      returnedBytes: readResult.returnedBytes,
+      jsonArrayCap: readResult.jsonArrayCap || null
     };
   }
 
@@ -748,6 +749,149 @@ function sameOriginActionUrl(domain, rawPath) {
   }
 
   return url.toString();
+}
+
+function readBoundedBuffer(buffer, maxBytes, responseBodyCap, contentType) {
+  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
+  if (responseBodyCap?.kind === "json_array" && /\bjson\b/i.test(String(contentType || ""))) {
+    const text = bytes.toString("utf8");
+    if (bytes.byteLength <= maxBytes) {
+      return {
+        text,
+        truncated: false,
+        observedBytes: bytes.byteLength,
+        returnedBytes: bytes.byteLength
+      };
+    }
+
+    const capped = buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes);
+    if (capped.ok) {
+      return capped;
+    }
+
+    const snippet = bytes.subarray(0, maxBytes).toString("utf8");
+    return {
+      text: snippet,
+      truncated: true,
+      observedBytes: bytes.byteLength,
+      returnedBytes: Buffer.byteLength(snippet, "utf8"),
+      jsonArrayCap: {
+        attempted: true,
+        ok: false,
+        errorType: capped.errorType || "json_parse_error",
+        path: responseBodyCap.pathLabel || String(responseBodyCap.path || "")
+      }
+    };
+  }
+
+  const bodyTruncated = bytes.byteLength > maxBytes;
+  const cappedBody = bodyTruncated ? bytes.subarray(0, maxBytes) : bytes;
+  const text = cappedBody.toString("utf8");
+  return {
+    text,
+    truncated: bodyTruncated,
+    observedBytes: bytes.byteLength,
+    returnedBytes: Buffer.byteLength(text, "utf8")
+  };
+}
+
+function buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { ok: false, errorType: "json_parse_error" };
+  }
+
+  const path = Array.isArray(responseBodyCap.path) ? responseBodyCap.path : [];
+  const target = valueAtPath(value, path);
+  if (!Array.isArray(target)) {
+    return { ok: false, errorType: "json_array_path_not_found" };
+  }
+
+  const maxRecords = clampPositiveInteger(responseBodyCap.maxRecords, 100, 200);
+  const observedRecords = target.length;
+  const targetRecords = Math.min(observedRecords, maxRecords);
+  const best = fitJsonArrayCapToBytes(value, path, target, targetRecords, maxBytes);
+  const returnedRecords = best.returnedRecords;
+  const cappedText = best.text;
+  const missingRecords = Math.max(observedRecords - returnedRecords, 0);
+  return {
+    ok: true,
+    text: cappedText,
+    truncated: missingRecords > 0,
+    observedBytes: Buffer.byteLength(text, "utf8"),
+    returnedBytes: Buffer.byteLength(cappedText, "utf8"),
+    jsonArrayCap: {
+      attempted: true,
+      ok: true,
+      path: responseBodyCap.pathLabel || path.join("."),
+      observedRecords,
+      returnedRecords,
+      missingRecords,
+      maxRecords,
+      rawBodyHandling: missingRecords > 0 ? "json_array_capped" : "visible"
+    }
+  };
+}
+
+function fitJsonArrayCapToBytes(value, path, records, targetRecords, maxBytes) {
+  let low = 0;
+  let high = targetRecords;
+  let best = buildCappedJsonText(value, path, records, 0);
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = buildCappedJsonText(value, path, records, mid);
+    if (Buffer.byteLength(candidate, "utf8") <= maxBytes || mid === 0) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return {
+    text: best,
+    returnedRecords: valueAtPath(JSON.parse(best), path).length
+  };
+}
+
+function buildCappedJsonText(value, path, records, count) {
+  const cappedValue = cloneJson(value);
+  setValueAtPath(cappedValue, path, records.slice(0, count));
+  return JSON.stringify(cappedValue);
+}
+
+function valueAtPath(value, path) {
+  let cursor = value;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object" || Array.isArray(cursor) || !Object.prototype.hasOwnProperty.call(cursor, key)) {
+      return undefined;
+    }
+    cursor = cursor[key];
+  }
+  return cursor;
+}
+
+function setValueAtPath(value, path, nextValue) {
+  let cursor = value;
+  for (const key of path.slice(0, -1)) {
+    cursor = cursor[key];
+  }
+  cursor[path[path.length - 1]] = nextValue;
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function clampPositiveInteger(value, fallback, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.trunc(number), max);
 }
 
 function defaultLandingFlow(finalUrl, finalOrigin) {

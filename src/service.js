@@ -248,7 +248,9 @@ export class BrowserBackedApiService {
     }
 
     try {
-      const fetchResult = await this.browserClient.runAction(action, actionRequest);
+      const fetchResult = shouldUseContextRequestForAction(action, this.browserClient)
+        ? await this.browserClient.runActionWithContextRequest(action, actionRequest)
+        : await this.browserClient.runAction(action, actionRequest);
       return buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
@@ -720,6 +722,11 @@ function summarizeBatchUpstream(response) {
       error_type: upstream.error_type || null,
       raw_body_handling: upstream.raw_body_handling || "omitted",
       raw_body_suppressed: Boolean(upstream.body_omitted && !Object.hasOwn(upstream, "body") && !Object.hasOwn(upstream, "body_snippet") && !Object.hasOwn(upstream, "capped_body")),
+      ...(Object.hasOwn(upstream, "capped_json_path") ? { capped_json_path: upstream.capped_json_path } : {}),
+      ...(Object.hasOwn(upstream, "observed_records") ? { observed_records: upstream.observed_records } : {}),
+      ...(Object.hasOwn(upstream, "returned_records") ? { returned_records: upstream.returned_records } : {}),
+      ...(Object.hasOwn(upstream, "missing_records") ? { missing_records: upstream.missing_records } : {}),
+      ...(Object.hasOwn(upstream, "missing_body_reason") ? { missing_body_reason: upstream.missing_body_reason } : {}),
       ...(Object.hasOwn(upstream, "body") ? { body: upstream.body } : {}),
       ...(Object.hasOwn(upstream, "body_snippet") ? { body_snippet: upstream.body_snippet } : {}),
       ...(Object.hasOwn(upstream, "capped_body") ? { capped_body: upstream.capped_body } : {})
@@ -825,6 +832,7 @@ function buildTransportStatusMatrix(sourceResults) {
         content_type: sourceResult.content_type,
         body_present: sourceResult.body_present,
         body_truncated: sourceResult.body_truncated,
+        response_too_large: Boolean(sourceResult.upstream?.response_too_large),
         observed_bytes: sourceResult.observed_bytes,
         returned_bytes: sourceResult.upstream?.returned_bytes ?? null,
         elapsed_ms: sourceResult.elapsed_ms,
@@ -1005,6 +1013,13 @@ function shouldUseContextRequestFallback(action, errorType, browserClient) {
   return Boolean(
     action?.name === "login_logs_search" &&
       errorType === "network_error" &&
+      typeof browserClient?.runActionWithContextRequest === "function"
+  );
+}
+
+function shouldUseContextRequestForAction(action, browserClient) {
+  return Boolean(
+    action?.name === "login_logs_search" &&
       typeof browserClient?.runActionWithContextRequest === "function"
   );
 }

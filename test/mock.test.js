@@ -190,6 +190,38 @@ function createLiveConfig(extraEnv = {}) {
   });
 }
 
+function buildLargeLoginLogsBody(count) {
+  return {
+    code: 0,
+    data: {
+      total: count,
+      logSearchModels: Array.from({ length: count }, (_, index) => ({
+        id: `login_log_${index + 1}`,
+        userId: "internal_test_user",
+        logType: index % 2 === 0 ? "账号中台登录相关日志" : "业务鉴权日志",
+        actionName: index % 2 === 0 ? "账号中台登录相关日志成功" : "业务鉴权日志失败",
+        logSource: index % 2 === 0 ? "WEB" : "ANDROID",
+        method: index % 2 === 0 ? "/pass/kuaishou/login/sync" : "/pass/kshop/web/login/passToken",
+        deviceId: index % 2 === 0 ? "web_internal_test_device" : "ANDROID_internal_test_device",
+        ip: `10.0.0.${(index % 200) + 1}`,
+        ua: `UA_INTERNAL_TEST_${index + 1}`,
+        logContent: {
+          params: {
+            login_time: 1780000000000 + index * 1000,
+            login_type: index % 2 === 0 ? "sync" : "token",
+            login_source: index % 2 === 0 ? "web" : "android",
+            login_device: index % 2 === 0 ? "web_internal_test_device" : "ANDROID_internal_test_device",
+            ip: `10.0.0.${(index % 200) + 1}`,
+            ua: `UA_INTERNAL_TEST_${index + 1}`,
+            tokenType: "business_event_field",
+            loginSessionEvent: "visible_business_event"
+          }
+        }
+      }))
+    }
+  };
+}
+
 function assertNoOldBusinessFields(value) {
   const serialized = JSON.stringify(value);
   for (const field of OLD_BUSINESS_FIELDS) {
@@ -216,7 +248,7 @@ function assertTransportEnvelope(response, actionName) {
   assert.equal(typeof response.body_present, "boolean");
   assert.equal(typeof response.body_truncated, "boolean");
   assert.equal(typeof response.observed_bytes === "number" || response.observed_bytes === null, true);
-  assert.equal(["visible", "capped", "omitted"].includes(response.raw_body_handling), true);
+  assert.equal(["visible", "capped", "json_array_capped", "omitted"].includes(response.raw_body_handling), true);
   assert.ok(response.upstream);
   assert.equal(response.upstream.raw_body_handling, response.raw_body_handling);
   assert.equal(response.upstream.body_omitted, response.body_present ? false : true);
@@ -231,7 +263,7 @@ function assertTransportEnvelope(response, actionName) {
       true,
       `${actionName} must expose capped upstream body`
     );
-    assert.equal(response.upstream.raw_body_handling, "capped");
+    assert.equal(["capped", "json_array_capped"].includes(response.upstream.raw_body_handling), true);
     assert.equal(response.upstream.response_too_large, true);
   }
   assert.ok(response.meta);
@@ -335,6 +367,12 @@ test("fixed request builders keep typed params on fixed paths", () => {
   assert.equal(loginRequest.path.startsWith("/rest/unified/log/search?"), true);
   assert.equal(loginRequest.path.includes("2871834924"), true);
   assert.equal(decodeURIComponent(loginRequest.displayPath).includes("[typed_user_id]"), true);
+  assert.equal(loginRequest.responseBodyCap.pathLabel, "data.logSearchModels");
+  assert.equal(loginRequest.responseBodyCap.maxRecords, 10);
+  const defaultLoginInput = { ...ACTION_INPUTS.login_logs_search };
+  delete defaultLoginInput.limit;
+  const defaultLoginRequest = buildActionBody(ACTIONS.login_logs_search, defaultLoginInput);
+  assert.equal(defaultLoginRequest.responseBodyCap.maxRecords, 100);
 
   const rcpRequest = buildActionBody(ACTIONS.rcp_snapshot, ACTION_INPUTS.rcp_snapshot);
   assert.equal(rcpRequest.method, "POST");
@@ -452,6 +490,119 @@ test("response too large returns capped passthrough body without summary fallbac
   assert.equal(response.upstream.body_snippet, "{\"data\":[");
   assert.equal(response.raw_body_handling, "capped");
   assertTransportEnvelope(response, "rcp_event_feature_list");
+});
+
+test("login_logs_search large JSON returns structured row-capped passthrough body", () => {
+  const input = { ...ACTION_INPUTS.login_logs_search };
+  delete input.limit;
+  const body = buildLargeLoginLogsBody(334);
+  const cappedBody = {
+    ...body,
+    data: {
+      ...body.data,
+      logSearchModels: body.data.logSearchModels.slice(0, 100)
+    }
+  };
+  const cappedText = JSON.stringify(cappedBody);
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, input, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json;charset=UTF-8",
+    bodyText: cappedText,
+    bodyTruncated: true,
+    observedBytes: Buffer.byteLength(JSON.stringify(body)),
+    returnedBytes: Buffer.byteLength(cappedText),
+    jsonArrayCap: {
+      attempted: true,
+      ok: true,
+      path: "data.logSearchModels",
+      observedRecords: 334,
+      returnedRecords: 100,
+      missingRecords: 234,
+      maxRecords: 100
+    }
+  }, { latencyMs: 12 });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "response_too_large");
+  assert.equal(response.raw_body_handling, "json_array_capped");
+  assert.equal(response.upstream.raw_body_handling, "json_array_capped");
+  assert.equal(response.upstream.capped_json_path, "data.logSearchModels");
+  assert.equal(response.upstream.observed_records, 334);
+  assert.equal(response.upstream.returned_records, 100);
+  assert.equal(response.upstream.missing_records, 234);
+  assert.equal(response.upstream.missing_body_reason, "response_too_large");
+  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 100);
+  assert.equal(response.upstream.capped_body.data.logSearchModels[0].logContent.params.login_time, 1780000000000);
+  assert.equal(Object.hasOwn(response.upstream, "body_snippet"), false);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search max_records controls structured row cap", () => {
+  const input = { ...ACTION_INPUTS.login_logs_search, max_records: 5 };
+  const body = buildLargeLoginLogsBody(334);
+  const cappedBody = {
+    ...body,
+    data: {
+      ...body.data,
+      logSearchModels: body.data.logSearchModels.slice(0, 5)
+    }
+  };
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, input, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText: JSON.stringify(cappedBody),
+    bodyTruncated: true,
+    observedBytes: Buffer.byteLength(JSON.stringify(body)),
+    returnedBytes: Buffer.byteLength(JSON.stringify(cappedBody)),
+    jsonArrayCap: {
+      attempted: true,
+      ok: true,
+      path: "data.logSearchModels",
+      observedRecords: 334,
+      returnedRecords: 5,
+      missingRecords: 329,
+      maxRecords: 5
+    }
+  });
+  assert.equal(response.upstream.returned_records, 5);
+  assert.equal(response.upstream.missing_records, 329);
+  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 5);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search invalid max_records is rejected", async () => {
+  const response = await createService().executeAction("login_logs_search", {
+    ...ACTION_INPUTS.login_logs_search,
+    max_records: 201
+  });
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "invalid_parameter");
+  assert.equal(response.invalid_params, true);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search JSON cap parse failure falls back to capped snippet", () => {
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText: "{\"data\":{\"logSearchModels\":[",
+    bodyTruncated: true,
+    observedBytes: 999999,
+    returnedBytes: 27,
+    jsonArrayCap: {
+      attempted: true,
+      ok: false,
+      path: "data.logSearchModels",
+      errorType: "json_parse_error"
+    }
+  });
+  assert.equal(response.raw_body_handling, "capped");
+  assert.equal(response.upstream.body_snippet, "{\"data\":{\"logSearchModels\":[");
+  assert.equal(response.upstream.json_array_cap_error_type, "json_parse_error");
+  assertTransportEnvelope(response, "login_logs_search");
 });
 
 test("large text response returns body snippet instead of metadata only", () => {
@@ -710,6 +861,62 @@ test("single source failure does not block completed batch sources", async () =>
   assert.equal(response.transport_status_matrix.bad_login.invalid_params, true);
   assert.equal(response.transport_status_matrix.profile.category, "completed");
   assert.equal(response.missing_or_failed_sources[0].source_id, "bad_login");
+  assertNoOldBusinessFields(response);
+});
+
+test("batch preserves structured capped upstream body", async () => {
+  const service = createService();
+  const body = buildLargeLoginLogsBody(334);
+  const cappedBody = {
+    ...body,
+    data: {
+      ...body.data,
+      logSearchModels: body.data.logSearchModels.slice(0, 50)
+    }
+  };
+  const loginResponse = buildLiveActionResponse(ACTIONS.login_logs_search, {
+    ...ACTION_INPUTS.login_logs_search,
+    max_records: 50
+  }, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText: JSON.stringify(cappedBody),
+    bodyTruncated: true,
+    observedBytes: Buffer.byteLength(JSON.stringify(body)),
+    returnedBytes: Buffer.byteLength(JSON.stringify(cappedBody)),
+    jsonArrayCap: {
+      attempted: true,
+      ok: true,
+      path: "data.logSearchModels",
+      observedRecords: 334,
+      returnedRecords: 50,
+      missingRecords: 284,
+      maxRecords: 50
+    }
+  });
+  service.executeAction = async (actionName) => {
+    assert.equal(actionName, "login_logs_search");
+    return loginResponse;
+  };
+  const response = await service.executeBatch({
+    sources: [
+      {
+        source_id: "login",
+        action: "login_logs_search",
+        params: { ...ACTION_INPUTS.login_logs_search, max_records: 50 }
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "partial");
+  assert.equal(response.source_results.login.upstream.raw_body_handling, "json_array_capped");
+  assert.equal(response.source_results.login.upstream.capped_body.data.logSearchModels.length, 50);
+  assert.equal(response.source_results.login.upstream.observed_records, 334);
+  assert.equal(response.source_results.login.upstream.returned_records, 50);
+  assert.equal(response.source_results.login.upstream.missing_records, 284);
+  assert.equal(response.transport_status_matrix.login.body_truncated, true);
+  assert.equal(response.transport_status_matrix.login.response_too_large, true);
   assertNoOldBusinessFields(response);
 });
 
