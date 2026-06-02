@@ -324,7 +324,7 @@ export class BrowserBackedApiService {
         source_count: plan.source_count,
         default_source_timeout_ms: plan.default_timeout_ms,
         max_source_timeout_ms: MAX_BATCH_SOURCE_TIMEOUT_MS,
-        raw_body_output: false
+        upstream_business_body_output: "bounded"
       },
       execution_groups: groupResults,
       source_results: sourceResults,
@@ -696,9 +696,9 @@ function buildBatchSourceResult({
     invalid_params: Boolean(validationError || response?.invalid_params),
     timeout: timedOut,
     auth_redirect_detected: false,
-    raw_body_handling: "suppressed",
+    raw_body_handling: upstream.raw_body_handling,
     upstream,
-    raw_body_suppressed: true,
+    raw_body_suppressed: upstream.raw_body_suppressed,
     ...(validationError ? { validation_error: validationError } : {}),
     ...(exceptionMessage ? { error_message_sanitized: exceptionMessage } : {})
   };
@@ -715,9 +715,14 @@ function summarizeBatchUpstream(response) {
       body_truncated: Boolean(upstream.body_truncated),
       response_too_large: Boolean(upstream.response_too_large),
       observed_bytes: upstream.observed_bytes ?? null,
+      returned_bytes: upstream.returned_bytes ?? null,
       platform_error: response?.platform_error || null,
       error_type: upstream.error_type || null,
-      raw_body_suppressed: true
+      raw_body_handling: upstream.raw_body_handling || "omitted",
+      raw_body_suppressed: Boolean(upstream.body_omitted && !Object.hasOwn(upstream, "body") && !Object.hasOwn(upstream, "body_snippet") && !Object.hasOwn(upstream, "capped_body")),
+      ...(Object.hasOwn(upstream, "body") ? { body: upstream.body } : {}),
+      ...(Object.hasOwn(upstream, "body_snippet") ? { body_snippet: upstream.body_snippet } : {}),
+      ...(Object.hasOwn(upstream, "capped_body") ? { capped_body: upstream.capped_body } : {})
     };
   }
   return {
@@ -728,8 +733,10 @@ function summarizeBatchUpstream(response) {
     body_truncated: Boolean(response?.body_truncated),
     response_too_large: Boolean(response?.body_truncated),
     observed_bytes: response?.observed_bytes ?? null,
+    returned_bytes: null,
     platform_error: response?.platform_error || null,
     error_type: response?.error_type || null,
+    raw_body_handling: response?.raw_body_handling || "omitted",
     raw_body_suppressed: true
   };
 }
@@ -819,6 +826,7 @@ function buildTransportStatusMatrix(sourceResults) {
         body_present: sourceResult.body_present,
         body_truncated: sourceResult.body_truncated,
         observed_bytes: sourceResult.observed_bytes,
+        returned_bytes: sourceResult.upstream?.returned_bytes ?? null,
         elapsed_ms: sourceResult.elapsed_ms,
         timeout_ms: sourceResult.timeout_ms,
         timed_out: Boolean(sourceResult.timed_out),
@@ -901,7 +909,9 @@ function batchSafety() {
     credential_material_output: false,
     request_headers_output: false,
     browser_profile_material_output: false,
-    raw_upstream_body_output: false,
+    transport_auth_material_output: false,
+    upstream_business_body_visible: true,
+    raw_upstream_body_output: "bounded",
     arbitrary_url_fetch: false
   };
 }

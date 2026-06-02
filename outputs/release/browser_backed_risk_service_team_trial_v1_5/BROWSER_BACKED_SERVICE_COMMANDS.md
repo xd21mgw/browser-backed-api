@@ -109,8 +109,8 @@ Behavior:
 - Load `ACTION_REGISTRY.md`.
 - List 19 allowlisted actions.
 - Show typed params.
-- State that service output is a transport envelope and raw upstream body is
-  suppressed.
+- State that service output is a passthrough envelope with bounded upstream
+  business body visibility.
 
 ## `/browser-backed-risk-service 自测用户 <user_id>`
 
@@ -220,10 +220,17 @@ Envelope summary fields:
 - `upstream.content_type`
 - `upstream.body_present`
 - `upstream.body_omitted`
+- `upstream.body_truncated`
+- `upstream.raw_body_handling`
+- whether `upstream.body`, `upstream.body_snippet`, or `upstream.capped_body` is present
 - `error_type`
 - `safety.credential_material_output`
 
-Do not output full upstream body.
+The main Agent can parse `upstream.body`, `upstream.body_snippet`, or
+`upstream.capped_body` for its own processing. Do not print the full upstream
+body to the user by default. Do not print request headers, response
+`set-cookie`, cookies, tokens, sessions, authorization values, Chrome profile
+contents, localStorage/browser storage, or Playwright storage state.
 
 ## `/browser-backed-risk-service 停止`
 

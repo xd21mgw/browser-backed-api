@@ -54,7 +54,8 @@ Auth State Transfer experiments must follow these rules:
 - required origins ready for the target workflow
 - stable actions can be called through fixed action + typed params
 - no credential material output
-- no raw upstream body output
+- bounded upstream business body is available for main-Agent parsing without
+  printing full body by default
 - no cookie/token/session/header/profile/storage dump
 - lightweight landing flow is handled in readiness/prewarm/ensure-ready only
 

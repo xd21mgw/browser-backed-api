@@ -201,7 +201,7 @@ function assertNoOldBusinessFields(value) {
 function assertNoCredentialMaterial(value) {
   const serialized = JSON.stringify(value);
   assert.equal(/secret-token-value|Bearer secret-auth-value|sid=secret-session-value/i.test(serialized), false);
-  assert.equal(/"token"\s*:|"authorization"\s*:|"cookie"\s*:|"session"\s*:|"password"\s*:/i.test(serialized), false);
+  assert.equal(/"request_headers"\s*:|"headers"\s*:|"set-cookie"\s*:|"authorization"\s*:\s*"(Bearer|Basic)\s/i.test(serialized), false);
 }
 
 function assertTransportEnvelope(response, actionName) {
@@ -216,17 +216,32 @@ function assertTransportEnvelope(response, actionName) {
   assert.equal(typeof response.body_present, "boolean");
   assert.equal(typeof response.body_truncated, "boolean");
   assert.equal(typeof response.observed_bytes === "number" || response.observed_bytes === null, true);
-  assert.equal(response.raw_body_handling, "suppressed");
+  assert.equal(["visible", "capped", "omitted"].includes(response.raw_body_handling), true);
   assert.ok(response.upstream);
-  assert.equal(Object.hasOwn(response.upstream, "body"), false);
-  assert.equal(response.upstream.body_omitted, true);
-  assert.equal(response.upstream.raw_body_handling, "suppressed");
+  assert.equal(response.upstream.raw_body_handling, response.raw_body_handling);
+  assert.equal(response.upstream.body_omitted, response.body_present ? false : true);
+  if (response.body_present && !response.body_truncated) {
+    assert.equal(Object.hasOwn(response.upstream, "body"), true, `${actionName} must expose small upstream body`);
+    assert.equal(response.upstream.raw_body_handling, "visible");
+    assert.equal(typeof response.upstream.returned_bytes, "number");
+  }
+  if (response.body_present && response.body_truncated) {
+    assert.equal(
+      Object.hasOwn(response.upstream, "body_snippet") || Object.hasOwn(response.upstream, "capped_body"),
+      true,
+      `${actionName} must expose capped upstream body`
+    );
+    assert.equal(response.upstream.raw_body_handling, "capped");
+    assert.equal(response.upstream.response_too_large, true);
+  }
   assert.ok(response.meta);
   assert.equal(response.meta.origin, ACTIONS[actionName].domainKey);
   assert.deepEqual(response.safety, {
     credential_material_output: false,
     request_headers_output: false,
-    browser_profile_material_output: false
+    browser_profile_material_output: false,
+    transport_auth_material_output: false,
+    upstream_business_body_visible: Boolean(response.body_present)
   });
   assertNoOldBusinessFields(response);
   assertNoCredentialMaterial(response);
@@ -251,15 +266,15 @@ test("actions endpoint exposes passthrough-only contract for every action", () =
     assert.equal(action.default_response_mode, "passthrough");
     assert.deepEqual(action.response_modes, ["passthrough"]);
     assert.equal(action.input_contract.response_mode, "optional enum passthrough; default passthrough");
-    assert.equal(action.response_policy.raw_upstream_body_returned, false);
-    assert.equal(action.response_policy.upstream_body_suppressed, true);
-    assert.equal(action.response_policy.transport_status_only, true);
+    assert.equal(action.response_policy.upstream_business_body_returned, "bounded");
+    assert.equal(action.response_policy.upstream_body_suppressed, false);
+    assert.equal(action.response_policy.transport_status_only, false);
     assert.equal(action.response_policy.reads_cookie_token_session_header_plaintext, false);
     assertNoOldBusinessFields(action);
   }
 });
 
-test("mock actions return pure passthrough transport envelope without raw body", async () => {
+test("mock actions return pure passthrough envelope with visible upstream body", async () => {
   const service = createService();
   for (const actionName of ACTION_ALLOWLIST) {
     const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
@@ -269,6 +284,7 @@ test("mock actions return pure passthrough transport envelope without raw body",
     assert.equal(response.body_present, true);
     assert.equal(response.upstream.status, 200);
     assert.equal(response.upstream.body_present, true);
+    assert.equal(Object.hasOwn(response.upstream, "body"), true);
   }
 });
 
@@ -330,7 +346,7 @@ test("fixed request builders keep typed params on fixed paths", () => {
   assert.equal(recoveredRequest.path.startsWith("/v2/rest/pc/policy/nodeBindPolicyAttribution?"), true);
 });
 
-test("live response builder suppresses raw upstream body and reports response size", () => {
+test("live response builder exposes small JSON upstream body and reports response size", () => {
   const bodyText = JSON.stringify({ data: { rows: [{ id: 1 }] } });
   const response = buildLiveActionResponse(ACTIONS.archives_user_profile, ACTION_INPUTS.archives_user_profile, {}, {
     ok: true,
@@ -344,7 +360,26 @@ test("live response builder suppresses raw upstream body and reports response si
   assert.equal(response.body_present, true);
   assert.equal(response.observed_bytes, Buffer.byteLength(bodyText));
   assert.equal(response.upstream.body_present, true);
-  assert.equal(Object.hasOwn(response.upstream, "body"), false);
+  assert.deepEqual(response.upstream.body, { data: { rows: [{ id: 1 }] } });
+  assert.equal(response.upstream.returned_bytes, Buffer.byteLength(bodyText));
+  assert.equal(response.raw_body_handling, "visible");
+  assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("live response builder exposes small text upstream body", () => {
+  const bodyText = "plain upstream business response";
+  const response = buildLiveActionResponse(ACTIONS.archives_user_profile, ACTION_INPUTS.archives_user_profile, {}, {
+    ok: true,
+    status: 200,
+    contentType: "text/plain",
+    bodyText,
+    observedBytes: Buffer.byteLength(bodyText),
+    bodyTruncated: false
+  }, { latencyMs: 10 });
+  assert.equal(response.ok, true);
+  assert.equal(response.upstream.body, bodyText);
+  assert.equal(response.upstream.returned_bytes, Buffer.byteLength(bodyText));
+  assert.equal(response.raw_body_handling, "visible");
   assertTransportEnvelope(response, "archives_user_profile");
 });
 
@@ -394,12 +429,13 @@ test("login_logs_search falls back to context request when page fetch fails", as
   assert.equal(response.http_status, 200);
   assert.equal(response.upstream.status, 200);
   assert.equal(response.upstream.body_present, true);
-  assert.equal(response.upstream.body_omitted, true);
+  assert.equal(response.upstream.body_omitted, false);
+  assert.deepEqual(response.upstream.body, { code: 0, data: { logSearchModels: [] } });
   assert.equal(response.error_type, undefined);
   assertTransportEnvelope(response, "login_logs_search");
 });
 
-test("response too large returns transport-limited envelope without summary fallback", () => {
+test("response too large returns capped passthrough body without summary fallback", () => {
   const response = buildLiveActionResponse(ACTIONS.rcp_event_feature_list, ACTION_INPUTS.rcp_event_feature_list, {}, {
     ok: true,
     status: 200,
@@ -412,22 +448,78 @@ test("response too large returns transport-limited envelope without summary fall
   assert.equal(response.error_type, "response_too_large");
   assert.equal(response.body_truncated, true);
   assert.equal(response.upstream.response_too_large, true);
+  assert.equal(response.upstream.body_omitted, false);
+  assert.equal(response.upstream.body_snippet, "{\"data\":[");
+  assert.equal(response.raw_body_handling, "capped");
   assertTransportEnvelope(response, "rcp_event_feature_list");
 });
 
-test("credential material in upstream body fails closed without outputting it", () => {
-  const response = buildLiveActionResponse(ACTIONS.archives_user_profile, ACTION_INPUTS.archives_user_profile, {}, {
+test("large text response returns body snippet instead of metadata only", () => {
+  const bodyText = "large text prefix";
+  const response = buildLiveActionResponse(ACTIONS.archives_user_analysis, ACTION_INPUTS.archives_user_analysis, {}, {
     ok: true,
     status: 200,
     contentType: "text/plain",
-    bodyText: "authorization: Bearer secret-auth-value",
-    observedBytes: 39,
+    bodyText,
+    observedBytes: 1024 * 1024,
+    bodyTruncated: true
+  }, { latencyMs: 18 });
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "response_too_large");
+  assert.equal(response.upstream.body_snippet, bodyText);
+  assert.equal(response.upstream.body_omitted, false);
+  assert.equal(response.upstream.returned_bytes, Buffer.byteLength(bodyText));
+  assertTransportEnvelope(response, "archives_user_analysis");
+});
+
+test("business token session login auth fields in upstream body remain visible", () => {
+  const bodyText = JSON.stringify({
+    data: {
+      refreshToken: "business-refresh-marker",
+      tokenType: "device_event_type",
+      loginSessionEvent: "login_session_event",
+      authEvent: "account_auth_event"
+    }
+  });
+  const response = buildLiveActionResponse(ACTIONS.archives_user_profile, ACTION_INPUTS.archives_user_profile, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText,
+    observedBytes: Buffer.byteLength(bodyText),
     bodyTruncated: false
   }, { latencyMs: 8 });
-  assert.equal(response.ok, false);
-  assert.equal(response.error_type, "credential_material_detected");
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.upstream.body.data, {
+    refreshToken: "business-refresh-marker",
+    tokenType: "device_event_type",
+    loginSessionEvent: "login_session_event",
+    authEvent: "account_auth_event"
+  });
   assert.equal(response.safety.credential_material_output, false);
   assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("passthrough response does not expose request or transport auth headers", () => {
+  const bodyText = JSON.stringify({ data: { tokenType: "business", login_time: 1780000000000 } });
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText,
+    observedBytes: Buffer.byteLength(bodyText),
+    bodyTruncated: false,
+    headers: {
+      "set-cookie": "sid=secret-session-value",
+      authorization: "Bearer secret-auth-value"
+    }
+  }, { latencyMs: 7 });
+  assert.equal(response.ok, true);
+  assert.equal(Object.hasOwn(response.upstream, "headers"), false);
+  assert.equal(Object.hasOwn(response, "request_headers"), false);
+  assert.deepEqual(response.upstream.body, { data: { tokenType: "business", login_time: 1780000000000 } });
+  assertNoCredentialMaterial(response);
+  assertTransportEnvelope(response, "login_logs_search");
 });
 
 test("health and refresh state expose auth readiness metadata only", () => {
@@ -521,10 +613,36 @@ test("batch executes independent parallel sources and returns transport matrix",
   assert.deepEqual(response.classifications.completed.sort(), ["archives_profile", "login_logs", "track_ready"].sort());
   assert.ok(response.transport_status_matrix.login_logs);
   assert.equal(response.transport_status_matrix.login_logs.body_present, true);
-  assert.equal(response.transport_status_matrix.login_logs.raw_body_handling, "suppressed");
+  assert.equal(response.transport_status_matrix.login_logs.raw_body_handling, "visible");
+  assert.equal(Object.hasOwn(response.source_results.login_logs.upstream, "body"), true);
+  assert.equal(response.source_results.login_logs.upstream.body_omitted, false);
   assert.equal(response.missing_or_failed_sources.length, 0);
   assertNoOldBusinessFields(response);
   assertNoCredentialMaterial(response);
+});
+
+test("batch preserves capped upstream body snippets in source results", async () => {
+  const bodyText = "{\"large\":true";
+  const response = buildLiveActionResponse(ACTIONS.rcp_event_feature_list, ACTION_INPUTS.rcp_event_feature_list, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText,
+    observedBytes: 2048,
+    bodyTruncated: true
+  }, { latencyMs: 30 });
+  const service = createService();
+  service.executeAction = async () => response;
+  const batch = await service.executeBatch({
+    sources: [
+      { source_id: "features", action: "rcp_event_feature_list", params: ACTION_INPUTS.rcp_event_feature_list }
+    ]
+  });
+  assert.equal(batch.batch_status, "partial");
+  assert.equal(batch.source_results.features.upstream.body_snippet, bodyText);
+  assert.equal(batch.source_results.features.upstream.body_omitted, false);
+  assert.equal(batch.source_results.features.raw_body_handling, "capped");
+  assert.equal(batch.transport_status_matrix.features.raw_body_handling, "capped");
 });
 
 test("batch runs dependency groups serially", async () => {

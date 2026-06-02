@@ -10,8 +10,9 @@ It has two layers:
 
 The service is a controlled transport service. It only does fixed action
 allowlist, typed params validation, fixed origin/path construction,
-browser-session readiness, same-origin fetch, raw-body suppression, transport
-status, and controlled batch scheduling.
+browser-session readiness, same-origin fetch, bounded upstream business body
+passthrough, response-size guard, transport status, and controlled batch
+scheduling.
 
 The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive
@@ -89,8 +90,9 @@ The Skill supports rc-cli style command intents:
 - `/browser-backed-risk-service 排障`
 
 The Skill resolves `service_base_url`, checks `/health`, lists `/actions`, and
-validates allowlisted actions before invoking them. It outputs only envelope
-summaries and does not print full upstream body.
+validates allowlisted actions before invoking them. It may parse
+`upstream.body`, `upstream.body_snippet`, or `upstream.capped_body` for main
+Agent processing, but it does not print full upstream body by default.
 
 `/browser-backed-risk-service 自测用户 <user_id>` is the recommended one-command
 user self-test. The main Agent calls a default read-only action group:
@@ -106,7 +108,8 @@ Optional:
 
 The service remains pure passthrough. Field extraction, tables, evidence-package
 summaries, missing-source lists, and next-step suggestions are main-Agent
-processing over returned envelopes, not browser-backed service output.
+processing over returned `upstream.body` / bounded body content, not
+browser-backed service output.
 
 ## Auth State Transfer POC
 

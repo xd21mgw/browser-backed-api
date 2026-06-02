@@ -8,8 +8,14 @@ Version: `browser_backed_risk_service_team_trial_v1_5`
   `network_error` falls back to a bounded Playwright context request for the
   same fixed origin/path.
 - The login logs patch keeps the service pure passthrough: no arbitrary URL,
-  no caller-provided headers, no cookie/token/session/header output, and no raw
-  upstream body output.
+  no caller-provided headers, no cookie/token/session/header output, and bounded
+  upstream business body visibility.
+- Exposes `upstream.body` for small upstream business responses and
+  `upstream.body_snippet` / `upstream.capped_body` for large responses so the
+  main Agent can parse business fields without asking the service to summarize.
+- Does not delete upstream business body fields only because their names contain
+  `token`, `session`, `login`, or `auth`; request/browser/service credential
+  material and transport auth headers remain blocked.
 - Strengthened Mac Local Worker Mode as the current stable path for remote main
   Agents.
 - Clarified that daily use should not open a browser every time.
@@ -43,7 +49,7 @@ Version: `browser_backed_risk_service_team_trial_v1_5`
 - Documented Auth State Transfer as a candidate POC: not assumed to succeed,
   not assumed to fail, and not promoted until validated.
 - Kept `action_count=19`.
-- Kept pure passthrough/transport service positioning.
+- Kept pure passthrough service positioning.
 - No summary, source card, source quality, evidence card, no-data
   interpretation, risk judgment, DataAgent/Hive call, arbitrary URL fetch, or
   platform write logic was added.

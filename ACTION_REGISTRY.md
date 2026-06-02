@@ -16,8 +16,8 @@ another Agent interprets returned transport status or any platform data.
 - fixed `origin_key`
 - fixed method and same-origin path
 - browser-managed local profile state
-- transport-only passthrough envelope
-- raw upstream body suppressed
+- bounded upstream business body passthrough envelope
+- request/browser/service auth material suppressed
 
 Callers should address the service through `service_base_url`:
 
@@ -41,33 +41,31 @@ or set `response_mode=passthrough`. Other response modes are rejected.
 | `open_explicit` | Callable fixed action, but callers should invoke it only through an explicit plan or user request. |
 | `excluded_noise` | Intentionally not eligible for action registration. |
 
-`passthrough_body=no` means the service does not return raw upstream body. It
-reports only body presence, truncation, byte count, HTTP status, content type,
-and sanitized transport/platform error fields.
+`passthrough_body=bounded` means the service returns `upstream.body` for small upstream business responses and `upstream.body_snippet` or `upstream.capped_body` for large responses. Request headers, response `set-cookie`, browser auth stores, Chrome profile material, localStorage, and Playwright storage state remain forbidden.
 
 ## Callable Action Matrix
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `track_analysis_summary` | Track Analysis / `track_analysis` | `GET` or `POST` by `sub_interface` | Track Analysis sequence fixed paths | `user_id` or `device_id`, `appName`, optional `sub_interface`, `time_window` | passthrough only | no | yes | yes | `live_complete` | `open_default` | Fixed sub-interface enum only; no caller path/url/header/auth/raw body. |
-| `login_logs_search` | Login Logs / `login_logs` | `GET` | `/rest/unified/log/search` | `user_id`, optional time window/limit/recall source | passthrough only | no | yes | yes | `live_complete`; `live_smoke_verified` | `open_default` | Fixed path and typed query only. |
-| `weapon_inventory` | Weapon / `weapon` | `GET` | `/apiv2/graphData`; chained `/apiv2/riskData` | `user_id` or `device_id`, optional product/search controls | passthrough only | no | yes | yes | `live_complete` | `open_default` | Chained risk path is service-owned. |
-| `rcp_snapshot` | RCP / `rcp` | `POST` | `/v2/rest/event/eventList` | typed event/time/source/device/page/column controls | passthrough only | no | yes | yes | `live_complete` | `open_default` | Service builds fixed request body. |
-| `archives_user_profile` | Archives Center / `archives` | `GET` | `/archives/user/home/info` | `user_id` | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed path only. |
-| `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed request body from typed fields only. |
-| `archives_photo_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/photo/search` | `user_id`, `begin`, `end`, optional page/filter params | passthrough only | no | yes | yes | `no_data` smoke | `open_explicit` | Fixed path and typed params only. |
-| `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
-| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed private-message search body. |
-| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed four-info search body. |
-| `rcp_event_detail` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, `queryTime` | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Typed event identity only. |
-| `rcp_event_feature_list` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, `queryTime`, optional empty `featureGroup` | passthrough only | no | yes | yes | size-limited smoke | `open_explicit` | Large upstream body is suppressed and may set `response_too_large`. |
-| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed policy-version query. |
-| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed policy-detail query. |
-| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | passthrough only | no | yes | yes | `live_no_data` | `open_explicit` | Fixed release-record body. |
-| `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode` | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version only. |
-| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed node-policy attribution body. |
-| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | passthrough only | no | yes | yes | `live_pass` | `open_explicit` | Fixed node-bind attribution query. |
-| `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, `startTime`, `endTime`, optional filters | passthrough only | no | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed readiness path and typed params only. |
+| `track_analysis_summary` | Track Analysis / `track_analysis` | `GET` or `POST` by `sub_interface` | Track Analysis sequence fixed paths | `user_id` or `device_id`, `appName`, optional `sub_interface`, `time_window` | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Fixed sub-interface enum only; no caller path/url/header/auth/raw body. |
+| `login_logs_search` | Login Logs / `login_logs` | `GET` | `/rest/unified/log/search` | `user_id`, optional time window/limit/recall source | passthrough only | bounded | yes | yes | `live_complete`; `live_smoke_verified` | `open_default` | Fixed path and typed query only. |
+| `weapon_inventory` | Weapon / `weapon` | `GET` | `/apiv2/graphData`; chained `/apiv2/riskData` | `user_id` or `device_id`, optional product/search controls | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Chained risk path is service-owned. |
+| `rcp_snapshot` | RCP / `rcp` | `POST` | `/v2/rest/event/eventList` | typed event/time/source/device/page/column controls | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Service builds fixed request body. |
+| `archives_user_profile` | Archives Center / `archives` | `GET` | `/archives/user/home/info` | `user_id` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed path only. |
+| `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed request body from typed fields only. |
+| `archives_photo_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/photo/search` | `user_id`, `begin`, `end`, optional page/filter params | passthrough only | bounded | yes | yes | `no_data` smoke | `open_explicit` | Fixed path and typed params only. |
+| `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
+| `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed private-message search body. |
+| `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed four-info search body. |
+| `rcp_event_detail` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventDetail` | `eventType`, `eventId`, `queryTime` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Typed event identity only. |
+| `rcp_event_feature_list` | RCP / `rcp` | `GET` | `/v2/rest/event/rcpEventFeatureList` | `eventType`, `eventId`, `queryTime`, optional empty `featureGroup` | passthrough only | bounded | yes | yes | size-limited smoke | `open_explicit` | Large upstream body is capped and may set `response_too_large`. |
+| `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed policy-version query. |
+| `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed policy-detail query. |
+| `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | passthrough only | bounded | yes | yes | `live_no_data` | `open_explicit` | Fixed release-record body. |
+| `rcp_policy_tree_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryProPolicyTree` | `policyTreeCode`, `policyTreeVersion`, optional `targetPolicyCode` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Safe policy code/version only. |
+| `rcp_node_policy_attribution` | RCP / `rcp` | `POST` | `/v2/rest/pc/policy/nodePolicyAttribution` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime`, optional `region`, fixed `type` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed node-policy attribution body. |
+| `rcp_node_bind_policy_attribution` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/nodeBindPolicyAttribution` | `eventType`, `eventId`, `queryTime`, `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed node-bind attribution query. |
+| `track_analysis_check_data_ready` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/checkDataReady` | `device_id`, `appName`, `startTime`, `endTime`, optional filters | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed readiness path and typed params only. |
 
 ## Excluded Noise
 
@@ -95,8 +93,8 @@ following exist:
 - fixed method and same-origin path
 - typed params
 - forbidden input validation for URL/path/header/cookie/token/session/raw body
-- transport-only output contract
-- raw body suppression
+- bounded upstream business body passthrough contract
+- request/browser/service auth material suppression
 - credential-material protection
 - mock tests
 - live smoke plan and result

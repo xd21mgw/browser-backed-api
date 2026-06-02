@@ -56,7 +56,7 @@ The service only does:
 - fixed origin/path/body construction
 - browser session and origin readiness/prewarm
 - same-origin fetch through the local browser context
-- raw body suppression and response-size guard
+- bounded upstream business body passthrough and response-size guard
 - credential-material output protection
 - transport status envelope
 - controlled parallel batch scheduling
@@ -142,16 +142,20 @@ Example shape:
   "invalid_params": false,
   "timeout": false,
   "auth_redirect_detected": false,
-  "raw_body_handling": "suppressed",
+  "raw_body_handling": "visible",
   "upstream": {
     "status": 200,
     "content_type": "application/json",
     "body_present": true,
-    "body_omitted": true,
+    "body_omitted": false,
     "body_truncated": false,
     "response_too_large": false,
     "observed_bytes": 1234,
-    "raw_body_handling": "suppressed"
+    "returned_bytes": 1234,
+    "raw_body_handling": "visible",
+    "body": {
+      "data": {}
+    }
   },
   "meta": {
     "origin": "login_logs",
@@ -161,12 +165,19 @@ Example shape:
   "safety": {
     "credential_material_output": false,
     "request_headers_output": false,
-    "browser_profile_material_output": false
+    "browser_profile_material_output": false,
+    "transport_auth_material_output": false,
+    "upstream_business_body_visible": true
   }
 }
 ```
 
-No raw upstream body is included in this envelope.
+The upstream business response body is visible by default when it fits within
+the passthrough size cap. Large responses return `upstream.body_snippet` or
+`upstream.capped_body` with `raw_body_handling=capped` instead of a full body.
+The service still never outputs request headers, response `set-cookie` headers,
+browser cookie jars, Chrome profile contents, localStorage/browser storage, or
+Playwright storage state.
 
 ## Controlled Batch
 

@@ -36,7 +36,7 @@ The service is responsible for:
 - same-origin fetch
 - timeout handling
 - response-size guard
-- raw upstream body suppression
+- bounded upstream business body passthrough
 - credential-material output protection
 - controlled parallel batch scheduling
 - per-source transport status
@@ -57,8 +57,10 @@ The service is not responsible for:
 
 ## Single Action Envelope
 
-The action response is passthrough-only and transport-only. Raw upstream body is
-not returned.
+The action response is passthrough-only. The upstream business response body is
+returned when it fits within the configured passthrough size cap. Large
+responses return a bounded `upstream.body_snippet` or `upstream.capped_body`
+instead of the full body.
 
 ```json
 {
@@ -80,16 +82,20 @@ not returned.
   "invalid_params": false,
   "timeout": false,
   "auth_redirect_detected": false,
-  "raw_body_handling": "suppressed",
+  "raw_body_handling": "visible",
   "upstream": {
     "status": 200,
     "content_type": "application/json",
     "body_present": true,
-    "body_omitted": true,
+    "body_omitted": false,
     "body_truncated": false,
     "response_too_large": false,
     "observed_bytes": 1234,
-    "raw_body_handling": "suppressed"
+    "returned_bytes": 1234,
+    "raw_body_handling": "visible",
+    "body": {
+      "data": {}
+    }
   },
   "meta": {
     "origin": "login_logs",
@@ -99,7 +105,9 @@ not returned.
   "safety": {
     "credential_material_output": false,
     "request_headers_output": false,
-    "browser_profile_material_output": false
+    "browser_profile_material_output": false,
+    "transport_auth_material_output": false,
+    "upstream_business_body_visible": true
   }
 }
 ```
@@ -114,21 +122,26 @@ Too-large response example:
   "error_type": "response_too_large",
   "body_present": true,
   "body_truncated": true,
-  "raw_body_handling": "suppressed",
+  "raw_body_handling": "capped",
   "upstream": {
     "status": 200,
     "content_type": "application/json",
     "body_present": true,
-    "body_omitted": true,
+    "body_omitted": false,
     "body_truncated": true,
     "response_too_large": true,
-    "raw_body_handling": "suppressed",
+    "observed_bytes": 65536,
+    "returned_bytes": 65536,
+    "raw_body_handling": "capped",
+    "body_snippet": "{\"data\":[",
     "error_type": "response_too_large"
   },
   "safety": {
     "credential_material_output": false,
     "request_headers_output": false,
-    "browser_profile_material_output": false
+    "browser_profile_material_output": false,
+    "transport_auth_material_output": false,
+    "upstream_business_body_visible": true
   }
 }
 ```
@@ -195,13 +208,15 @@ Allowed:
 - body presence boolean
 - body truncation boolean
 - observed byte count
+- returned byte count
+- upstream business response body when it fits within the size cap
+- bounded `body_snippet` / `capped_body` for large responses
 - elapsed time
 - sanitized transport/platform/auth error type
 - safety booleans
 
 Forbidden:
 
-- raw upstream response body
 - request headers
 - response `set-cookie` headers
 - cookies, tokens, sessions, authorization values, passwords
@@ -210,8 +225,13 @@ Forbidden:
 - Playwright storage state
 - caller-provided auth material
 
-If the upstream body appears to contain authentication material, the service
-fails closed or suppresses it. `safety.credential_material_output` must remain
+The upstream body is business data. Field names such as `token`, `session`,
+`login`, or `auth` inside the upstream body can be legitimate platform business
+fields and must not be deleted only because of the name. The service blocks
+request/browser/service credential material and transport auth headers; it does
+not read browser auth stores and does not return request headers, `set-cookie`,
+cookies, tokens, sessions, passwords, profile files, localStorage dumps, or
+Playwright storage state. `safety.credential_material_output` must remain
 `false`.
 
 ## Controlled Batch Execution

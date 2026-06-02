@@ -7,7 +7,8 @@ Service**. The service is a controlled local/Mac worker for risk-platform reads.
 
 The service only does fixed action allowlist, typed params validation, fixed
 origin/path construction, browser-session readiness, same-origin fetch,
-raw-body suppression, transport status, and controlled batch scheduling.
+bounded upstream business body passthrough, response-size guard, transport
+status, and controlled batch scheduling.
 
 The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive
@@ -165,8 +166,8 @@ manual. Use these command intents.
 
 - List the 19 allowlisted fixed actions.
 - Show typed params from `ACTION_REGISTRY.md`.
-- Remind that service output is a transport envelope and raw upstream body is
-  suppressed.
+- Remind that service output is a passthrough envelope with bounded upstream
+  business body visibility.
 
 ### `/browser-backed-risk-service 自测用户 <user_id>`
 
@@ -350,14 +351,24 @@ Single action responses include transport fields such as:
 - `invalid_params`
 - `timeout`
 - `auth_redirect_detected`
-- `raw_body_handling=suppressed`
+- `raw_body_handling=visible` for small responses
+- `raw_body_handling=capped` for large responses
 - `upstream.status`
 - `upstream.content_type`
 - `upstream.body_present`
-- `upstream.body_omitted=true`
+- `upstream.body` for small JSON/text responses
+- `upstream.body_snippet` or `upstream.capped_body` for large responses
+- `upstream.body_omitted=false` when bounded body content is returned
 - `safety.credential_material_output=false`
 
-Agent must not expect raw upstream body in the browser-backed service response.
+Agent may parse `upstream.body`, `upstream.body_snippet`, or
+`upstream.capped_body` as upstream business response data. Do not print the full
+body to the user by default. Field names such as `token`, `session`, `login`, or
+`auth` inside `upstream.body` can be business fields and are not service auth
+material by name alone. The forbidden material remains request headers,
+`set-cookie`, browser cookie jars, Chrome profile contents, localStorage/browser
+storage dumps, Playwright storage state, caller-provided auth material, and
+service/browser credential material.
 
 ## Fixed Actions
 
@@ -409,8 +420,8 @@ Before a new service action can become callable, it must have:
 - typed params and validation
 - forbidden-input rejection for URL/path/header/cookie/token/session/raw body/raw
   query
-- transport-only response envelope
-- raw body suppression
+- passthrough response envelope
+- bounded upstream business body visibility
 - credential-material protection
 - mock tests for success, parameter errors, forbidden inputs, upstream errors,
   too-large responses, and credential-material protection

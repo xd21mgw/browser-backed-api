@@ -228,36 +228,6 @@ const FORBIDDEN_INPUT_KEYS = Object.freeze([
   "csrf",
   "jwt"
 ]);
-const PASSTHROUGH_CREDENTIAL_KEYS = Object.freeze(new Set([
-  "authorization",
-  "cookie",
-  "cookies",
-  "header",
-  "headers",
-  "requestheader",
-  "requestheaders",
-  "responseheader",
-  "responseheaders",
-  "setcookie",
-  "token",
-  "accesstoken",
-  "refreshtoken",
-  "idtoken",
-  "session",
-  "sessionid",
-  "password",
-  "passwd",
-  "secret",
-  "credential",
-  "credentials",
-  "csrf",
-  "csrftoken",
-  "jwt",
-  "localstorage",
-  "storagestate",
-  "browserstorage"
-]));
-
 export const ACTIONS = Object.freeze({
   rcp_snapshot: freezeAction({
     name: "rcp_snapshot",
@@ -660,9 +630,9 @@ export function listActions(config) {
         response_mode: responseModeContractText(responseModes, defaultResponseMode)
       },
       response_policy: {
-        raw_upstream_body_returned: false,
-        upstream_body_suppressed: true,
-        transport_status_only: true,
+        upstream_business_body_returned: "bounded",
+        upstream_body_suppressed: false,
+        transport_status_only: false,
         reads_cookie_token_session_header_plaintext: false
       }
     };
@@ -744,36 +714,36 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     ? fetchResult.observedBytes
     : Buffer.byteLength(bodyText, "utf8");
   const httpStatus = typeof fetchResult?.status === "number" ? fetchResult.status : null;
+  const bodyTruncated = Boolean(fetchResult?.bodyTruncated);
+  const rawBodyHandling = bodyPresent ? (bodyTruncated ? "capped" : "visible") : "omitted";
+  const returnedBody = buildReturnedUpstreamBody(bodyText, contentType, { truncated: bodyTruncated });
   const upstream = {
     status: httpStatus,
     content_type: contentType,
     body_present: bodyPresent,
-    body_omitted: true,
-    body_truncated: Boolean(fetchResult?.bodyTruncated),
-    response_too_large: Boolean(fetchResult?.bodyTruncated),
+    body_omitted: false,
+    body_truncated: bodyTruncated,
+    response_too_large: bodyTruncated,
     observed_bytes: observedBytes,
-    raw_body_handling: "suppressed"
+    returned_bytes: returnedBody.returnedBytes,
+    raw_body_handling: rawBodyHandling
   };
   let ok = Boolean(fetchResult?.ok);
   let errorType = classifyHttpStatus(httpStatus) || null;
   let platformError = errorType;
   let transportError = null;
-  const bodyResult = bodyPresent ? passthroughBody(bodyText) : { failClosed: false, credentialMaterialRemoved: false };
 
-  if (fetchResult?.bodyTruncated) {
+  if (bodyPresent && bodyTruncated) {
     ok = false;
     errorType = "response_too_large";
     platformError = null;
-    upstream.body_omitted = true;
     upstream.response_too_large = true;
     upstream.error_type = errorType;
-  } else if (bodyResult.failClosed) {
-    ok = false;
-    errorType = "credential_material_detected";
-    platformError = null;
-    upstream.error_type = errorType;
-  } else if (bodyResult.credentialMaterialRemoved) {
-    upstream.credential_fields_removed = true;
+    upstream.body_snippet = returnedBody.body;
+  } else if (bodyPresent) {
+    upstream.body = returnedBody.body;
+  } else {
+    upstream.body_omitted = true;
   }
 
   if (!ok && !errorType) {
@@ -808,7 +778,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
       latency_ms: meta.latencyMs ?? null,
       fetched_at: fetchedAt
     },
-    safety: passthroughSafety()
+    safety: passthroughSafety({ upstreamBusinessBodyVisible: bodyPresent && !upstream.body_omitted })
   };
 }
 
@@ -838,7 +808,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     invalid_params: invalidParams,
     timeout: timedOut,
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
-    raw_body_handling: "suppressed",
+    raw_body_handling: "omitted",
     upstream: {
       status: httpStatus,
       content_type: null,
@@ -847,7 +817,8 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       body_truncated: false,
       response_too_large: false,
       observed_bytes: 0,
-      raw_body_handling: "suppressed",
+      returned_bytes: 0,
+      raw_body_handling: "omitted",
       error_type: errorType
     },
     ...(meta.parameterError
@@ -863,7 +834,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       latency_ms: meta.latencyMs ?? null,
       fetched_at: meta.fetchedAt || new Date().toISOString()
     },
-    safety: passthroughSafety()
+    safety: passthroughSafety({ upstreamBusinessBodyVisible: false })
   };
 }
 
@@ -1816,11 +1787,13 @@ function looksSensitive(key) {
   return /(authorization|cookie|token|secret|session|password|credential|csrf|jwt)/i.test(key);
 }
 
-function passthroughSafety() {
+function passthroughSafety({ upstreamBusinessBodyVisible = false } = {}) {
   return {
     credential_material_output: false,
     request_headers_output: false,
-    browser_profile_material_output: false
+    browser_profile_material_output: false,
+    transport_auth_material_output: false,
+    upstream_business_body_visible: Boolean(upstreamBusinessBodyVisible)
   };
 }
 
@@ -1833,78 +1806,34 @@ function contentTypeFromFetchResult(fetchResult) {
   return parsed.ok ? "application/json" : "text/plain";
 }
 
-function passthroughBody(bodyText) {
-  if (bodyText === undefined || bodyText === null || bodyText === "") {
-    return { body: null, credentialMaterialRemoved: false, failClosed: false };
-  }
-
-  const parsed = parseJson(bodyText);
-  if (parsed.ok) {
-    const sanitized = sanitizePassthroughJson(parsed.value);
+function buildReturnedUpstreamBody(bodyText, contentType, { truncated = false } = {}) {
+  const text = typeof bodyText === "string" ? bodyText : "";
+  const returnedBytes = Buffer.byteLength(text, "utf8");
+  if (truncated) {
     return {
-      body: sanitized.value,
-      credentialMaterialRemoved: sanitized.credentialMaterialRemoved,
-      failClosed: false
+      body: text,
+      returnedBytes
     };
   }
 
-  const text = String(bodyText);
-  if (containsCredentialMaterialText(text)) {
-    return { body: null, credentialMaterialRemoved: false, failClosed: true };
+  if (isJsonContentType(contentType)) {
+    const parsed = parseJson(text);
+    if (parsed.ok) {
+      return {
+        body: parsed.value,
+        returnedBytes
+      };
+    }
   }
 
   return {
     body: text,
-    credentialMaterialRemoved: false,
-    failClosed: false
+    returnedBytes
   };
 }
 
-function sanitizePassthroughJson(value, depth = 0) {
-  if (depth > 20) {
-    return { value: null, credentialMaterialRemoved: false };
-  }
-  if (Array.isArray(value)) {
-    let credentialMaterialRemoved = false;
-    const items = value.map((item) => {
-      const sanitized = sanitizePassthroughJson(item, depth + 1);
-      credentialMaterialRemoved = credentialMaterialRemoved || sanitized.credentialMaterialRemoved;
-      return sanitized.value;
-    });
-    return { value: items, credentialMaterialRemoved };
-  }
-  if (value && typeof value === "object") {
-    let credentialMaterialRemoved = false;
-    const output = {};
-    for (const [key, childValue] of Object.entries(value)) {
-      if (isCredentialMaterialKey(key)) {
-        credentialMaterialRemoved = true;
-        continue;
-      }
-      const sanitized = sanitizePassthroughJson(childValue, depth + 1);
-      credentialMaterialRemoved = credentialMaterialRemoved || sanitized.credentialMaterialRemoved;
-      output[key] = sanitized.value;
-    }
-    return { value: output, credentialMaterialRemoved };
-  }
-  if (typeof value === "string" && containsCredentialMaterialText(value)) {
-    return { value: "[redacted_value]", credentialMaterialRemoved: true };
-  }
-  return { value, credentialMaterialRemoved: false };
-}
-
-function isCredentialMaterialKey(key) {
-  const normalized = String(key || "").toLowerCase().replace(/[_\-\s]/g, "");
-  return PASSTHROUGH_CREDENTIAL_KEYS.has(normalized);
-}
-
-function containsCredentialMaterialText(text) {
-  const sample = String(text || "").slice(0, 4096);
-  return /authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{8,}/i.test(sample) ||
-    /\bset-cookie\s*:/i.test(sample) ||
-    /\bcookie\s*[:=]\s*[a-z0-9_.-]+=[^;\s]{8,}/i.test(sample) ||
-    /\b(sessionid|sid|token|jwt|csrf)\s*[:=]\s*[a-z0-9._~+/=-]{12,}/i.test(sample) ||
-    /\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/.test(sample);
+function isJsonContentType(contentType) {
+  return typeof contentType === "string" && /\bjson\b/i.test(contentType);
 }
 
 function localRequestId() {
