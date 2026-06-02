@@ -256,6 +256,22 @@ export class BrowserBackedApiService {
       });
     } catch (error) {
       const errorType = classifyError(error);
+      if (shouldUseContextRequestFallback(action, errorType, this.browserClient)) {
+        try {
+          const fetchResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
+          return buildLiveActionResponse(action, input, this.config, fetchResult, {
+            latencyMs: Date.now() - startedAt,
+            authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
+            ...lazyMeta
+          });
+        } catch (fallbackError) {
+          return buildPassthroughFailureResponse(action, input, {
+            latencyMs: Date.now() - startedAt,
+            errorType: classifyError(fallbackError),
+            ...lazyMeta
+          });
+        }
+      }
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
         errorType,
@@ -972,6 +988,14 @@ function shouldLazyRewarm(actionDiagnostics) {
         origin: actionDiagnostics.bound_page_origin,
         url: actionDiagnostics.bound_page_origin
       })
+  );
+}
+
+function shouldUseContextRequestFallback(action, errorType, browserClient) {
+  return Boolean(
+    action?.name === "login_logs_search" &&
+      errorType === "network_error" &&
+      typeof browserClient?.runActionWithContextRequest === "function"
   );
 }
 

@@ -652,6 +652,38 @@ export class BrowserBackedClient {
     );
   }
 
+  async runActionWithContextRequest(action, actionRequest) {
+    await this.start();
+
+    const domain = this.config.domains[action.domainKey];
+    const requestUrl = sameOriginActionUrl(domain, actionRequest.path);
+    const method = actionRequest.method || action.method || "GET";
+    const response = await this.context.request.fetch(requestUrl, {
+      method,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json"
+      },
+      data: method === "GET" ? undefined : JSON.stringify(actionRequest.body || {}),
+      timeout: this.config.browser.requestTimeoutMs,
+      failOnStatusCode: false
+    });
+    const body = await response.body();
+    const maxBytes = this.config.browser.maxLiveBodyBytes;
+    const bodyTruncated = body.byteLength > maxBytes;
+    const cappedBody = bodyTruncated ? body.subarray(0, maxBytes) : body;
+
+    return {
+      completed: true,
+      ok: response.ok(),
+      status: response.status(),
+      contentType: response.headers()["content-type"] || null,
+      bodyText: cappedBody.toString("utf8"),
+      bodyTruncated,
+      observedBytes: cappedBody.byteLength
+    };
+  }
+
   async close() {
     if (this.context) {
       await this.context.close();
@@ -699,6 +731,23 @@ function safePageUrl(page) {
   } catch {
     return null;
   }
+}
+
+function sameOriginActionUrl(domain, rawPath) {
+  if (!domain?.origin || typeof rawPath !== "string" || !rawPath.startsWith("/") || rawPath.startsWith("//")) {
+    const error = new Error("Invalid fixed action path for context request");
+    error.code = "origin_mismatch";
+    throw error;
+  }
+
+  const url = new URL(rawPath, domain.origin);
+  if (url.origin !== domain.origin) {
+    const error = new Error("Context request URL must remain on the configured origin");
+    error.code = "origin_mismatch";
+    throw error;
+  }
+
+  return url.toString();
 }
 
 function defaultLandingFlow(finalUrl, finalOrigin) {

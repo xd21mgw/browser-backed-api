@@ -348,6 +348,57 @@ test("live response builder suppresses raw upstream body and reports response si
   assertTransportEnvelope(response, "archives_user_profile");
 });
 
+test("login_logs_search falls back to context request when page fetch fails", async () => {
+  const config = createLiveConfig();
+  let contextFallbackCalled = false;
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("Failed to fetch");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      contextFallbackCalled = true;
+      assert.equal(action.name, "login_logs_search");
+      assert.equal(actionRequest.method, "GET");
+      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
+      const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [] } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin
+  });
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(contextFallbackCalled, true);
+  assert.equal(response.ok, true);
+  assert.equal(response.http_status, 200);
+  assert.equal(response.upstream.status, 200);
+  assert.equal(response.upstream.body_present, true);
+  assert.equal(response.upstream.body_omitted, true);
+  assert.equal(response.error_type, undefined);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
 test("response too large returns transport-limited envelope without summary fallback", () => {
   const response = buildLiveActionResponse(ACTIONS.rcp_event_feature_list, ACTION_INPUTS.rcp_event_feature_list, {}, {
     ok: true,

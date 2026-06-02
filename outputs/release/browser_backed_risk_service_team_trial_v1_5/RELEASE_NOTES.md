@@ -4,6 +4,12 @@ Version: `browser_backed_risk_service_team_trial_v1_5`
 
 ## Changes Since v1.4
 
+- Patched `login_logs_search` in Mac Local Worker mode so a page-context fetch
+  `network_error` falls back to a bounded Playwright context request for the
+  same fixed origin/path.
+- The login logs patch keeps the service pure passthrough: no arbitrary URL,
+  no caller-provided headers, no cookie/token/session/header output, and no raw
+  upstream body output.
 - Strengthened Mac Local Worker Mode as the current stable path for remote main
   Agents.
 - Clarified that daily use should not open a browser every time.
