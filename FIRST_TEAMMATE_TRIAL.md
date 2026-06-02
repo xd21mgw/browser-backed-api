@@ -43,10 +43,10 @@ npm run refresh:once
 5. 启动本地服务：
 
 ```sh
-npm run start:live
+npm run worker:start
 ```
 
-这个终端不要关。
+这会启动或复用后台 worker。调试时也可以用 `npm run start:live` 前台运行，这个终端不要关。
 
 6. 另开一个终端检查健康状态：
 
@@ -123,6 +123,9 @@ curl -X POST "$SERVICE_BASE_URL/actions/archives_private_message_search" \
   需要这一步。
 - main agent 机器没有 GUI：推荐 Mac Local Worker，不推荐把 Mac profile 拷到 Linux
   headless。
+- 日常不应该每次弹浏览器：保持 Mac worker 常驻，main agent 只调 action。只有首次
+  setup、登录过期、Archives/account 确认、`manual_login_required` 时才需要用户打开
+  Mac Chrome。
 
 ## F. 反馈模板
 
@@ -148,3 +151,10 @@ curl -X POST "$SERVICE_BASE_URL/actions/archives_private_message_search" \
 - `/browser-backed-risk-service 排障`
 
 Skill 会先确认 `service_base_url` 和 `/health`，再调用 allowlisted action。
+
+Mac worker 常用命令：
+
+- `npm run worker:start`
+- `npm run worker:status`
+- `npm run worker:stop`
+- `npm run worker:doctor`

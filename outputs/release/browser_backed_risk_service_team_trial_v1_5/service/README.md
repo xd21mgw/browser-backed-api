@@ -24,6 +24,18 @@ release. It must forward only `/health`, `/actions`,
 local worker; it must not expose arbitrary URL fetch, Chrome profile files,
 cookies, tokens, sessions, or request headers.
 
+Remote Mac worker day-to-day usage should be low-friction:
+
+- First setup may require Mac command authorization, opening Mac Chrome, SSO,
+  two-factor checks, and Archives account confirmation.
+- Daily queries should not open a browser every time.
+- Daily queries should not require repeated command approvals.
+- Keep the Mac worker running when possible and let the remote main Agent call
+  only `service_base_url/actions/<action_name>`.
+- If login/confirmation expires, readiness/prewarm/ensure-ready first attempts
+  lightweight landing-flow activation. If password, 2FA, QR, or captcha appears,
+  the service returns `manual_login_required`.
+
 The service only does:
 
 - fixed action allowlist
@@ -190,6 +202,17 @@ validates allowlisted actions and typed params, and outputs only envelope
 summaries. It must not print full upstream body or ask the service to do risk
 judgment.
 
+Mac worker npm command helpers:
+
+- `npm run worker:start`
+- `npm run worker:status`
+- `npm run worker:stop`
+- `npm run worker:doctor`
+
+These commands reduce repeated remote command approvals by grouping common
+start/status/stop/diagnostic operations. They never delete profiles and never
+read or output authentication material.
+
 ## Deployment Modes
 
 ### Local Agent Mode
@@ -224,6 +247,17 @@ This is the recommended path for remote main Agents. It matches the successful
 rc-cli style flow: authentication and platform access happen on Mac, while the
 remote Agent only invokes bounded worker capabilities.
 
+For a lower-friction daily experience, keep the Mac worker running:
+
+```sh
+npm run worker:start
+npm run worker:status
+```
+
+Use `npm run worker:doctor` for profile lock, port, install, or readiness
+diagnostics. Use `npm run worker:stop` to stop the worker without deleting the
+profile or refresh state.
+
 ### Not Recommended: Mac Profile Copy To Linux Headless
 
 Joint testing showed that Mac profile bootstrap to Linux headless is not a
@@ -233,6 +267,16 @@ profiles to Linux as a normal workflow.
 
 See `LOCAL_WORKER_BRIDGE_PLAN.md`, `MAC_LOCAL_WORKER_GUIDE.md`, and
 `BROWSER_BACKED_SERVICE_COMMANDS.md`.
+
+### Auth State Transfer POC
+
+Auth State Transfer is a candidate POC, not a recommended mode yet. Its goal is
+to validate whether same-user bounded auth state can be activated on Mac and
+loaded by the main Agent machine without copying a full Chrome profile
+directory. It is not assumed to succeed or fail.
+
+Until that POC is proven, Mac Local Worker remains the stable remote-main-agent
+path. See `AUTH_STATE_TRANSFER_POC.md`.
 
 ## Local Setup
 
@@ -267,6 +311,15 @@ npm run refresh:daemon
 
 `refresh:daemon` refreshes immediately at startup and then every 4 hours by
 default. Override with `BROWSER_BACKED_REFRESH_INTERVAL_MS`.
+
+Mac worker helper commands:
+
+```sh
+npm run worker:start
+npm run worker:status
+npm run worker:doctor
+npm run worker:stop
+```
 
 ## Mock Mode
 
@@ -317,3 +370,4 @@ or captcha values. If manual factors appear, run `npm run open:profile`.
 - `LOCAL_WORKER_BRIDGE_PLAN.md`
 - `MAC_LOCAL_WORKER_GUIDE.md`
 - `BROWSER_BACKED_SERVICE_COMMANDS.md`
+- `AUTH_STATE_TRANSFER_POC.md`

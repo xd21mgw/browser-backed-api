@@ -75,7 +75,7 @@ Symptom:
 Recommended fix:
 
 - Use Remote Main Agent + Mac Local Worker Mode.
-- Run `npm run open:profile`, `npm run refresh:once`, and `npm run start:live`
+- Run `npm run open:profile`, `npm run refresh:once`, and `npm run worker:start`
   on the user's Mac.
 - Complete SSO, two-factor checks, and Archives account confirmation in Mac
   Chrome.
@@ -96,6 +96,30 @@ Why:
 - Joint testing showed that Track Analysis can be ready after profile copy, but
   RCP, Weapon, Login Logs, and Archives may trigger `two_factor_required` in
   Linux headless.
+
+## Mac Worker Daily Use Still Prompts Too Much
+
+Symptom:
+
+- The remote main Agent asks the user to approve many small Mac commands.
+- The browser opens for every query.
+
+Expected behavior:
+
+- First setup can require Mac command approval and browser login.
+- Daily use should reuse the running Mac worker.
+- Main Agent should call `service_base_url/actions/<action_name>` instead of
+  reinstalling, reopening profile, or restarting service each time.
+
+Fix:
+
+```sh
+npm run worker:start
+npm run worker:status
+```
+
+Keep the worker running for the test window. Use `npm run worker:doctor` for
+diagnostics and `npm run worker:stop` when done.
 
 ## Profile Does Not Exist
 
@@ -262,6 +286,12 @@ Fix:
 npm run start:live
 ```
 
+For the background Mac worker path:
+
+```sh
+npm run worker:start
+```
+
 For mock-only development:
 
 ```sh
@@ -291,6 +321,12 @@ You can check whether the local service is still running:
 
 ```sh
 lsof -ti tcp:8787
+```
+
+For fixed worker diagnostics:
+
+```sh
+npm run worker:doctor
 ```
 
 You can also inspect obvious local Chrome/Playwright processes without reading

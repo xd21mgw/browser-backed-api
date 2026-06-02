@@ -58,6 +58,31 @@ This matches the successful rc-cli style path: authentication and platform
 access remain local to Mac, while the remote Agent invokes bounded worker
 capabilities.
 
+## Daily User Experience
+
+First setup may require Mac command authorization, opening Mac Chrome, SSO,
+two-factor checks, and Archives account confirmation. After that, the Mac
+worker should stay running for the test window.
+
+Daily remote main Agent queries should:
+
+- call `service_base_url/actions/<action_name>`
+- reuse the existing Mac profile
+- avoid opening Chrome every time
+- avoid repeated ad hoc command approvals
+- return only passthrough envelope summaries
+
+Recommended fixed Mac worker commands:
+
+- `npm run worker:start`
+- `npm run worker:status`
+- `npm run worker:stop`
+- `npm run worker:doctor`
+
+If readiness expires, the service attempts lightweight landing-flow activation
+in refresh/prewarm/ensure-ready. If password, 2FA, QR, or captcha appears, it
+returns `manual_login_required`.
+
 ## Not Recommended: Profile Copy To Linux Headless
 
 Do not present Mac profile copy/bootstrap to Linux headless as a teammate
@@ -70,6 +95,16 @@ stable team deployment option.
 
 Do not ask teammates to copy Mac profiles to Linux, inject cookies, inject
 storageState, or run `sso_session.py` as a normal browser-backed service setup.
+
+## Auth State Transfer POC
+
+Auth State Transfer is a candidate POC, not the current recommended deployment.
+It should validate whether same-user bounded auth state can be activated on Mac
+and loaded on the main Agent machine without copying a full Chrome profile
+directory.
+
+Until that POC is proven, use Mac Local Worker for remote main Agents. If the
+POC succeeds, it can become a v1.6 focus area or a promoted deployment mode.
 
 ## Short-Term Bridge Options
 

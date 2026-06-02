@@ -51,10 +51,40 @@ npm run refresh:once
 Start live service:
 
 ```sh
-npm run start:live
+npm run worker:start
 ```
 
-Keep this terminal open while the remote main Agent is using the Mac worker.
+`worker:start` keeps the service running in the background. It prints
+`service_base_url=http://127.0.0.1:8787`, a pid file, and a log file. It does
+not read or output authentication material.
+
+For a foreground service during debugging, `npm run start:live` is still valid;
+keep that terminal open while the remote main Agent is using the Mac worker.
+
+## Daily Use
+
+After first setup, daily queries should not reopen the browser and should not
+ask for repeated command approvals.
+
+Recommended daily flow:
+
+```sh
+npm run worker:status
+npm run worker:start
+```
+
+- If service is already running, `worker:start` prints a health summary and does
+  not start a second service.
+- Main Agent calls `service_base_url/actions/<action_name>`.
+- The service reuses the existing Mac profile.
+- The service returns a passthrough transport envelope.
+- The service does not output full upstream body.
+
+If readiness expires, refresh/prewarm/ensure-ready attempts lightweight landing
+flow activation. If the page is only username prefilled plus `Next`,
+`Continue`, or `Confirm`, the service can handle it. If password, 2FA, QR, or
+captcha appears, the service returns `manual_login_required`; run
+`npm run open:profile` on the Mac.
 
 ## Check On Mac
 
@@ -71,6 +101,12 @@ Expected:
 - `auth_state=ready`, or the needed origin is ready
 - `action_count=19`
 - no credential material output
+
+Or use:
+
+```sh
+npm run worker:status
+```
 
 ## Main Agent Calling Pattern
 
@@ -130,7 +166,13 @@ token, user confirmation, or an equivalent deployment guard.
 
 ## Stop The Mac Service
 
-Stop the `npm run start:live` terminal with Ctrl+C.
+If started with `worker:start`:
+
+```sh
+npm run worker:stop
+```
+
+If started in the foreground, stop the `npm run start:live` terminal with Ctrl+C.
 
 Check whether port 8787 is still listening:
 
@@ -142,6 +184,14 @@ If a profile lock appears, check for existing service/refresh/open-profile
 processes before retrying. Do not delete the profile to fix a lock unless it is
 known disposable test data.
 
+Use:
+
+```sh
+npm run worker:doctor
+```
+
+for Node/npm, install, profile path, profile lock, and port diagnostics.
+
 ## Safety Rules
 
 - Do not copy the Mac profile to Linux as the team workflow.
@@ -152,3 +202,12 @@ known disposable test data.
 - Do not open arbitrary URL fetch.
 - Do not expose the Mac service directly to the public internet.
 - Do not let the Agent read profile files.
+
+## Auth State Transfer POC
+
+Auth State Transfer is a candidate POC, not the current recommended mode. It
+may reduce dependency on a long-running Mac worker if a same-user bounded state
+can be safely activated on Mac and loaded by the main Agent machine.
+
+This release does not implement the full Auth State Transfer runtime. Until the
+POC is proven, Mac Local Worker remains the stable remote-main-agent path.

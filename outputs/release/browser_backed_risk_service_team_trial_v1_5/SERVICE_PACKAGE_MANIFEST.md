@@ -17,6 +17,7 @@ Path: `service/`
 - `LOCAL_WORKER_BRIDGE_PLAN.md`
 - `MAC_LOCAL_WORKER_GUIDE.md`
 - `BROWSER_BACKED_SERVICE_COMMANDS.md`
+- `AUTH_STATE_TRANSFER_POC.md`
 
 ## Runtime
 
@@ -26,7 +27,7 @@ Run from `service/`:
 npm install
 npm run open:profile
 npm run refresh:once
-npm run start:live
+npm run worker:start
 ```
 
 Local Agent Mode uses:
@@ -47,7 +48,7 @@ BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>
 - `node_modules`
 - `.env`
 - Chrome profile directories
-- refresh-state files
+- refresh-state or auth-state files
 - raw HAR
 - run logs
 - Chrome storage or localStorage dumps

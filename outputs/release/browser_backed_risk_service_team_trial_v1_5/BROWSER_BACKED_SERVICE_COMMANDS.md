@@ -22,6 +22,8 @@ Steps:
    - Local Agent Mode: run local profile setup and service start.
    - Remote Main Agent Mode: run Mac Local Worker setup and configure
      `BROWSER_BACKED_SERVICE_BASE_URL`.
+   - For Mac worker daily use, prefer fixed worker commands over repeated
+     ad hoc shell snippets.
 
 Do not ask for cookies, tokens, sessions, request headers, storageState, or
 profile file contents.
@@ -35,15 +37,21 @@ Local Agent Mode:
 ```sh
 npm run open:profile
 npm run refresh:once
-npm run start:live
+npm run worker:start
 ```
 
 Remote Main Agent + Mac Local Worker Mode:
 
-1. Run those commands on the user's Mac.
+1. Run setup on the user's Mac.
 2. Let the user complete SSO, two-factor checks, and Archives account
    confirmation in Mac Chrome.
-3. Configure the main Agent's `service_base_url`:
+3. Start or reuse the Mac worker:
+
+```sh
+npm run worker:start
+```
+
+4. Configure the main Agent's `service_base_url`:
 
 ```sh
 BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>
@@ -61,6 +69,12 @@ Calls:
 ```txt
 GET {service_base_url}/health
 GET {service_base_url}/actions
+```
+
+When running directly on the Mac worker, the Skill may also use:
+
+```sh
+npm run worker:status
 ```
 
 Report:
@@ -133,8 +147,15 @@ Purpose: stop the local service safely.
 
 Steps:
 
-1. Ask the user to stop the `npm run start:live` terminal with Ctrl+C.
-2. If needed, check local port 8787:
+1. Prefer the fixed worker command:
+
+```sh
+npm run worker:stop
+```
+
+2. If the service was started in a foreground terminal, ask the user to stop the
+   `npm run start:live` terminal with Ctrl+C.
+3. If needed, check local port 8787:
 
 ```sh
 lsof -ti tcp:8787
@@ -156,5 +177,56 @@ Cover:
 - action not allowlisted
 - forbidden params rejected
 
+Use the fixed doctor command on Mac when available:
+
+```sh
+npm run worker:doctor
+```
+
 Recommended fix for remote main Agents: use Mac Local Worker Mode. Do not use
 Mac profile copy to Linux headless as the team workflow.
+
+## Mac Worker Fixed Commands
+
+These commands reduce repeated Mac node approvals by grouping common operations.
+
+### `npm run worker:start`
+
+- Checks whether port 8787 already has a reachable service.
+- If yes, prints a sanitized health summary.
+- If no, starts `SERVICE_MODE=live node src/server.js` in the background.
+- Writes a pid file and log file under `~/.dennis-browser-backed`.
+- Prints `service_base_url=http://127.0.0.1:8787`.
+- Does not delete profile/state.
+- Does not read or output cookie/token/session/header.
+
+### `npm run worker:status`
+
+- Calls `/health`.
+- Calls `/actions`.
+- Prints service mode, auth state, action count, and origin readiness.
+- Does not print full upstream body.
+
+### `npm run worker:stop`
+
+- Stops the worker process started by `worker:start`.
+- Does not delete profile/state.
+- If no pid file exists but the service is reachable, asks the user to stop the
+  owning terminal/process manually.
+
+### `npm run worker:doctor`
+
+- Checks Node.js and npm availability.
+- Checks whether `node_modules` exists.
+- Checks whether port 8787 is reachable.
+- Checks whether the configured profile path exists.
+- Checks whether obvious profile lock files exist.
+- Prints next-step suggestions.
+- Does not inspect profile contents or authentication material.
+
+## Auth State Transfer POC Command Policy
+
+Auth State Transfer is documented as a POC candidate, not a default command
+workflow. Do not run state transfer commands unless the team explicitly starts a
+controlled POC. The current Skill-managed workflow should prefer Mac Local
+Worker for remote main Agents.

@@ -21,5 +21,6 @@ Path: `skill/browser_backed_risk_service/`
 - Never send URL/path/header/cookie/token/session/raw_body/raw_query/secret.
 - Do not ask the service to create summaries, source cards, source quality,
   evidence cards, no-data interpretation, or risk judgments.
-- Do not propose Mac profile copy to Linux, cookie injection, storageState
-  injection, or `sso_session.py`.
+- Do not propose Chrome profile copy to Linux, cookie injection, storageState
+  injection, or `sso_session.py` as the standard path.
+- Treat Auth State Transfer only as a future POC until validated.

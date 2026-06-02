@@ -1,13 +1,12 @@
-# Browser-backed Risk Service Team Trial v1.4
+# Browser-backed Risk Service Team Trial v1.5
 
 This release packages the Browser-backed Risk Platform Access Service and its
-Agent Skill for a remote-main-agent trial.
+command-oriented Agent Skill for a remote-main-agent trial.
 
 It has two layers:
 
-- `service/` - code and docs for the user's local or Mac browser-backed worker.
-- `skill/browser_backed_risk_service/` - command-oriented Agent Skill rules and
-  action contract.
+- `service/` - local/Mac worker code and teammate docs.
+- `skill/browser_backed_risk_service/` - Skill rules and action contract.
 
 The service is a controlled transport service. It only does fixed action
 allowlist, typed params validation, fixed origin/path construction,
@@ -42,10 +41,25 @@ This is the recommended remote-main-agent path.
   controlled tunnel.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>`.
 
+Daily use should be low-friction. Keep the Mac worker running and let the
+remote main Agent call service APIs. Browsers should open only for first setup,
+periodic expiry recovery, or `manual_login_required`.
+
 Do not copy the Mac profile to Linux headless as the normal workflow. Joint
 testing showed RCP, Weapon, Login Logs, and Archives can trigger
 `two_factor_required` after profile copy. Do not use cookie injection,
 storageState injection, or `sso_session.py`.
+
+## Mac Worker Commands
+
+- `npm run worker:start`
+- `npm run worker:status`
+- `npm run worker:stop`
+- `npm run worker:doctor`
+
+These commands group common Mac worker operations and reduce repeated ad hoc
+command approvals. They do not delete profiles and do not read or output
+authentication material.
 
 ## Skill-Managed Workflow
 
@@ -63,6 +77,13 @@ The Skill resolves `service_base_url`, checks `/health`, lists `/actions`, and
 validates allowlisted actions before invoking them. It outputs only envelope
 summaries and does not print full upstream body.
 
+## Auth State Transfer POC
+
+Auth State Transfer is documented as a candidate POC. It is not a recommended
+team deployment yet and is not rejected as impossible. If it succeeds, it may
+become a v1.6 focus area. Until then, Mac Local Worker remains the stable remote
+main Agent path.
+
 ## First Local Commands
 
 ```sh
@@ -70,7 +91,7 @@ cd service
 npm install
 npm run open:profile
 npm run refresh:once
-npm run start:live
+npm run worker:start
 ```
 
 Then from another local terminal:
@@ -86,6 +107,6 @@ configure the Agent's `service_base_url` to the approved Mac worker/bridge URL.
 ## Safety
 
 This package does not include `node_modules`, `.env`, Chrome profiles, refresh
-state, raw HAR, run logs, Chrome storage, localStorage dumps, Playwright
-storageState, cookies, tokens, sessions, request headers, passwords, or private
-keys.
+state, auth-state files, raw HAR, run logs, Chrome storage, localStorage dumps,
+Playwright storageState, cookies, tokens, sessions, request headers, passwords,
+or private keys.

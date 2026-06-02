@@ -23,6 +23,7 @@ local internal testing.
    the terminal.
 5. Run `npm run refresh:once`.
 6. Run `npm run start:live`.
+   - For the Mac worker background path, prefer `npm run worker:start`.
 7. Check health:
 
 ```sh
@@ -67,6 +68,15 @@ The Agent Skill should guide teammates through these command-style intents:
 
 The Skill should check status before action calls, validate allowlisted actions
 and typed params, and output only envelope summaries.
+
+For Mac worker daily use, the Skill should prefer fixed worker commands:
+
+- `npm run worker:start`
+- `npm run worker:status`
+- `npm run worker:stop`
+- `npm run worker:doctor`
+
+This avoids repeated ad hoc command approvals during normal remote Agent use.
 
 ## Existing Local Profile
 
@@ -125,6 +135,9 @@ Remote Main Agent + Mac Local Worker Mode:
 - The bridge/tunnel must forward only service routes and must not expose
   arbitrary URL fetch, Chrome profile files, cookies, tokens, sessions, request
   headers, localStorage, or storageState.
+- Daily use should not reopen the browser or ask the user to repeatedly approve
+  command snippets. Keep the Mac worker running and let the remote main Agent
+  call `service_base_url/actions/<action_name>`.
 
 Not recommended:
 
@@ -132,6 +145,13 @@ Not recommended:
 - Do not use cookie injection, storageState injection, or `sso_session.py`.
 - Joint testing showed this path may trigger `two_factor_required` for RCP,
   Weapon, Login Logs, and Archives.
+
+Auth State Transfer POC:
+
+- Candidate only; not recommended yet and not rejected as impossible.
+- Same-user bounded auth state transfer may be validated separately.
+- Do not commit or print auth-state contents.
+- Until proven, Mac Local Worker remains the stable remote-main-agent path.
 
 Deployment priority:
 

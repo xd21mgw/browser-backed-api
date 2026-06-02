@@ -168,8 +168,11 @@ BROWSER_BACKED_REFRESH_INTERVAL_MS=14400000 npm run refresh:daemon
 ### 6. Start the local service
 
 ```sh
-npm run start:live
+npm run worker:start
 ```
+
+This starts or reuses a background worker and prints a sanitized health summary.
+For foreground debugging, `npm run start:live` is still valid.
 
 The service listens locally on:
 
@@ -201,6 +204,37 @@ POST {service_base_url}/actions/weapon_inventory
 Callers provide typed params only, such as `user_id`, `device_id`, safe time
 windows, or fixed enum values. They do not provide URLs, paths, cookies, tokens,
 sessions, headers, or raw request bodies.
+
+## Daily Mac Worker Use
+
+After first setup, keep the Mac worker running for lower-friction remote Agent
+queries.
+
+```sh
+npm run worker:status
+npm run worker:start
+```
+
+Daily use should not open Chrome every time and should not require repeated
+command approvals. The main Agent calls `service_base_url/actions/<action_name>`
+and receives a passthrough envelope.
+
+If auth/confirmation expires:
+
+- refresh/prewarm/ensure-ready attempts lightweight landing-flow activation
+  first.
+- If the page is username prefilled plus `下一步` / `继续` / `确认`, the service
+  can handle it.
+- If password, 2FA, QR, or captcha appears, the service returns
+  `manual_login_required`; run `npm run open:profile` on the Mac.
+
+Use:
+
+```sh
+npm run worker:doctor
+```
+
+for Node/npm, install, port, profile path, and profile lock diagnostics.
 
 You can list the 19 fixed actions with:
 
@@ -262,6 +296,9 @@ the envelope summary:
 | `BROWSER_BACKED_STATE_FILE` | Override the refresh-state file path. |
 | `BROWSER_BACKED_REFRESH_INTERVAL_MS` | Override refresh-daemon interval. Default is 4 hours. |
 | `BROWSER_BACKED_SERVICE_BASE_URL` | Agent-side service URL override. Local users normally do not need this; remote main Agents use it to point at a controlled local-worker bridge/tunnel. |
+| `BROWSER_BACKED_WORKER_RUNTIME_DIR` | Optional directory for worker pid/log files. Default is `~/.dennis-browser-backed`. |
+| `BROWSER_BACKED_WORKER_PID_FILE` | Optional worker pid file override. |
+| `BROWSER_BACKED_WORKER_LOG_FILE` | Optional worker log file override. |
 | `ENABLED_PLATFORMS` | Optional comma-separated origin scope for live mode. |
 | `RCP_ORIGIN`, `WEAPON_ORIGIN`, `LOGIN_LOGS_ORIGIN`, `TRACK_ANALYSIS_ORIGIN`, `ARCHIVES_ORIGIN` | Optional origin overrides. Most teammates should use defaults. |
 

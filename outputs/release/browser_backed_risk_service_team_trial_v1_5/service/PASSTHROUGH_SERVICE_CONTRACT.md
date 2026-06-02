@@ -180,6 +180,11 @@ trigger `two_factor_required` in Linux headless after profile copy. The service
 contract assumes either Local Agent Mode or Remote Main Agent + Mac Local Worker
 Mode.
 
+Auth State Transfer is a separate POC candidate, not a current recommended
+service deployment. It must not require the service to output authentication
+material, raw browser storage, request headers, or profile contents. Until the
+POC is validated, Mac Local Worker remains the stable remote-main-agent path.
+
 ## Output Boundary
 
 Allowed:

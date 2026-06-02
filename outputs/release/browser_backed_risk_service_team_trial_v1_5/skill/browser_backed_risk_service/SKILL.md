@@ -67,6 +67,17 @@ This matches the successful rc-cli style path: authentication and platform
 access happen locally on Mac, while the remote Agent only invokes bounded worker
 capabilities.
 
+Daily user experience should be low-friction:
+
+- First setup may need Mac command approval and a visible Mac Chrome login.
+- After setup, the Mac worker should stay running.
+- Daily action calls should not open a browser every time.
+- Daily action calls should not require repeated command approvals.
+- The remote main Agent should call service APIs through `service_base_url`.
+- If readiness expires, the service tries lightweight landing-flow activation in
+  refresh/prewarm/ensure-ready. If password, 2FA, QR, or captcha appears, return
+  `manual_login_required` and ask the user to open the Mac login page.
+
 Do not copy the Mac profile to Linux as a standard path. Joint testing showed
 that Track may become ready, but RCP, Weapon, Login Logs, and Archives can
 trigger `two_factor_required` in Linux headless. That historical path is not
@@ -74,6 +85,10 @@ recommended and should not be given to teammates as a normal workflow.
 
 The remote mode does not need cookie injection, storageState injection,
 `sso_session.py`, or profile bootstrap into Linux.
+
+Auth State Transfer is a separate POC candidate. Do not present it as the
+recommended workflow until it is validated. If validated, it may become a v1.6
+focus area; until then, prefer Mac Local Worker for remote main Agents.
 
 Bridge/tunnel safety boundary:
 
@@ -99,6 +114,8 @@ manual. Use these command intents.
 - Run `npm install`.
 - Run `npm run check`.
 - Tell the user the next step: local start or Mac Local Worker setup.
+- If Mac node approval is needed, group high-frequency operations into the
+  fixed worker commands instead of running many ad hoc shell commands.
 
 ### `/browser-backed-risk-service 启动`
 
@@ -107,7 +124,8 @@ manual. Use these command intents.
   - `npm run refresh:once`
   - `npm run start:live`
 - For Remote Main Agent Mode, prefer Mac Local Worker:
-  - run the service on the user's Mac
+  - run `npm run worker:start` on the user's Mac when available
+  - otherwise run the service on the user's Mac
   - let the user complete SSO, two-factor checks, and Archives account
     confirmation in Mac Chrome
   - configure `BROWSER_BACKED_SERVICE_BASE_URL` to the Mac worker/bridge URL
@@ -118,6 +136,7 @@ manual. Use these command intents.
 
 - Call `{service_base_url}/health`.
 - Call `{service_base_url}/actions`.
+- If running on the Mac worker directly, `npm run worker:status` is also valid.
 - Report only sanitized status:
   - `ok`
   - `service_mode`
@@ -147,6 +166,7 @@ manual. Use these command intents.
 ### `/browser-backed-risk-service 停止`
 
 - Guide the user to stop the service terminal with Ctrl+C.
+- If using the Mac worker helper, run `npm run worker:stop`.
 - If needed, identify the local process listening on 8787.
 - Do not delete profile directories.
 
@@ -161,11 +181,15 @@ Cover:
 - no GUI on the main Agent machine
 - `service_base_url` unreachable
 - bridge/tunnel unreachable
+- Mac worker status/doctor output
 - action not allowlisted
 - forbidden params rejected
 
 For remote main Agents, the preferred remediation is Mac Local Worker, not
 profile copy to Linux.
+
+If the Mac worker is available, run `npm run worker:doctor` before asking for
+manual profile reset. Do not delete the profile.
 
 ## Response Contract
 
