@@ -50,7 +50,7 @@ Auth State Transfer experiments must follow these rules:
 ## Success Criteria
 
 - `/health ok=true`
-- `action_count=19`
+- `action_count=37`
 - required origins ready for the target workflow
 - stable actions can be called through fixed action + typed params
 - no credential material output

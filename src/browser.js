@@ -809,13 +809,20 @@ function buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes) {
     return { ok: false, errorType: "json_array_path_not_found" };
   }
 
-  const maxRecords = clampPositiveInteger(responseBodyCap.maxRecords, 100, 200);
+  const maxRecords = clampPositiveInteger(responseBodyCap.maxRecords, 300, 300);
   const observedRecords = target.length;
   const targetRecords = Math.min(observedRecords, maxRecords);
   const best = fitJsonArrayCapToBytes(value, path, target, targetRecords, maxBytes);
   const returnedRecords = best.returnedRecords;
   const cappedText = best.text;
   const missingRecords = Math.max(observedRecords - returnedRecords, 0);
+  const capReason = missingRecords > 0
+    ? returnedRecords < targetRecords
+      ? "byte_limit"
+      : observedRecords > maxRecords
+        ? "record_limit"
+        : "response_too_large"
+    : null;
   return {
     ok: true,
     text: cappedText,
@@ -830,6 +837,7 @@ function buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes) {
       returnedRecords,
       missingRecords,
       maxRecords,
+      capReason,
       rawBodyHandling: missingRecords > 0 ? "json_array_capped" : "visible"
     }
   };

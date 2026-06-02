@@ -55,7 +55,7 @@ SERVICE_BASE_URL="${BROWSER_BACKED_SERVICE_BASE_URL:-http://127.0.0.1:8787}"
 curl "$SERVICE_BASE_URL/health"
 ```
 
-看到 `action_count=19`，并且 `auth_state=ready` 或你要用的 origin ready，即服务正常。
+看到 `action_count=37`，并且 `auth_state=ready` 或你要用的 origin ready，即服务正常。
 
 ## C. 最小试用接口
 
@@ -117,7 +117,7 @@ curl -X POST "$SERVICE_BASE_URL/actions/archives_private_message_search" \
 
 预期输出只应包含：
 
-- service 状态和 `action_count=19`
+- service 状态和 `action_count=37`
 - 每个 action 的 envelope 摘要
 - 每个 action 的 `live_status`
 - main agent 加工后的结构化观察

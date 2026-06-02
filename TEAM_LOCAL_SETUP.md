@@ -372,7 +372,7 @@ Good local readiness usually means:
 - `/health` returns `ok=true`
 - `service_mode=live`
 - `auth_state=ready`, or the origin needed by your action is ready
-- `action_count=19`
+- `action_count=37`
 - no credential material is printed
 
 ## Permission Model

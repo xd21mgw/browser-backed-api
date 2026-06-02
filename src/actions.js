@@ -9,18 +9,36 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "archives_user_analysis",
   "archives_user_profile",
   "archives_photo_search",
+  "archives_photo_profile",
+  "archives_photo_meta",
+  "archives_photo_report_aggregate",
+  "archives_photo_user_autonomy",
+  "archives_gallery_photo_list",
   "archives_related_users",
   "archives_private_message_search",
   "archives_past_four_items",
   "rcp_event_detail",
   "rcp_event_feature_list",
+  "rcp_event_tree_or_decision",
+  "rcp_fast_query_hbase",
+  "rcp_feature_info_by_keys",
+  "rcp_policy_basic_info",
+  "rcp_relation_policy_tree",
+  "rcp_policy_binding_info_list",
+  "rcp_policy_search",
+  "rcp_policy_blur_search",
+  "rcp_policy_all_version",
+  "rcp_pipeline_policy_versions_by_code",
   "rcp_policy_version_lookup",
   "rcp_policy_detail_lookup",
   "rcp_policy_release_record_lookup",
   "rcp_policy_tree_lookup",
   "rcp_node_policy_attribution",
   "rcp_node_bind_policy_attribution",
-  "track_analysis_check_data_ready"
+  "track_analysis_check_data_ready",
+  "track_analysis_product_list",
+  "track_sequence_dimension_list",
+  "track_data_type_list"
 ]);
 
 const ALLOWED_INPUT_KEYS = Object.freeze([
@@ -30,10 +48,16 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "filters",
   "limit",
   "max_records",
+  "currentPage",
+  "keyword",
+  "needFavorite",
   "cursor",
   "query",
   "severity",
   "recallSource",
+  "featureKeys",
+  "eventTypeCodes",
+  "isPolicyTreeExperiment",
   "from_timestamp",
   "to_timestamp",
   "product",
@@ -57,6 +81,7 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "sort",
   "status",
   "direction",
+  "photo_id",
   "info_type",
   "infoType",
   "markResult",
@@ -141,8 +166,8 @@ const LOGIN_LOGS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_LOGS_DEFAULT_LIMIT = 20;
 const LOGIN_LOGS_MAX_LIMIT = 100;
-const LOGIN_LOGS_DEFAULT_SERVICE_ROW_CAP = 100;
-const LOGIN_LOGS_MAX_SERVICE_ROW_CAP = 200;
+const LOGIN_LOGS_DEFAULT_SERVICE_ROW_CAP = 300;
+const LOGIN_LOGS_MAX_SERVICE_ROW_CAP = 300;
 const LOGIN_LOGS_JSON_CAP_PATH = Object.freeze(["data", "logSearchModels"]);
 const DEFAULT_RESPONSE_MODE = "passthrough";
 const RESPONSE_MODES = Object.freeze(["passthrough"]);
@@ -153,6 +178,9 @@ const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence
 const TRACK_ANALYSIS_PROFILE_PATH = "/dp/platform/app/analytics/v2/sequence/profile";
 const TRACK_ANALYSIS_DEVICE_IDS_PATH = "/dp/platform/app/analytics/v2/sequence/getDeviceIds";
 const TRACK_ANALYSIS_CHECK_DATA_READY_PATH = "/dp/platform/app/analytics/v2/sequence/checkDataReady";
+const TRACK_ANALYSIS_PRODUCT_LIST_PATH = "/dp/track-analysis/product/list/v2";
+const TRACK_SEQUENCE_DIMENSION_LIST_PATH = "/dp/platform/app/analytics/v2/sequence/dimension/list";
+const TRACK_DATA_TYPE_LIST_PATH = "/dp/platform/app/analytics/v2/track/getDataTypeList";
 const TRACK_ANALYSIS_APP_NAMES = Object.freeze(["KUAISHOU", "NEBULA"]);
 const TRACK_ANALYSIS_SUB_INTERFACES = Object.freeze(["getLastestDateTime", "getUseDuration", "profile", "getDeviceIds"]);
 const TRACK_ANALYSIS_FUNC_TYPE = "USER_PROFILE_QUERY";
@@ -161,6 +189,11 @@ const TRACK_ANALYSIS_DEFAULT_PRODUCT = "KUAISHOU";
 
 const ARCHIVES_USER_ANALYSIS_PATH = "/v3/user/log/coreLogs/fetch";
 const ARCHIVES_PHOTO_SEARCH_PATH = "/v4/archives/report/photo/search";
+const ARCHIVES_PHOTO_PROFILE_PATH = "/v3/photo/profile";
+const ARCHIVES_PHOTO_META_PATH = "/v3/photo/meta";
+const ARCHIVES_PHOTO_REPORT_AGGREGATE_PATH = "/v3/photo/report/aggregate";
+const ARCHIVES_PHOTO_USER_AUTONOMY_PATH = "/archives/photo/home/userAutonomy";
+const ARCHIVES_GALLERY_PHOTO_LIST_PATH = "/v3/user/gallery/photo/list";
 const ARCHIVES_USER_PROFILE_PATH = "/archives/user/home/info";
 const ARCHIVES_RELATED_USERS_PATH = "/archives/user/search/device";
 const ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH = "/archives/user/message/search";
@@ -194,6 +227,16 @@ const ARCHIVES_FOUR_INFO_TYPES = Object.freeze({
 
 const RCP_EVENT_DETAIL_PATH = "/v2/rest/event/rcpEventDetail";
 const RCP_EVENT_FEATURE_LIST_PATH = "/v2/rest/event/rcpEventFeatureList";
+const RCP_EVENT_TREE_OR_DECISION_PATH = "/v2/rest/event/rcpEventTreeOrDecision";
+const RCP_FAST_QUERY_HBASE_PATH = "/v2/rest/event/fastQueryHbase";
+const RCP_FEATURE_INFO_BY_KEYS_PATH = "/v2/rest/fc/getEventFeatureInfoByKeys";
+const RCP_POLICY_BASIC_INFO_PATH = "/v2/rest/pc/policyReview/getPolicyBasicInfo";
+const RCP_RELATION_POLICY_TREE_PATH = "/v2/rest/pc/policyReview/getRelationPolicyTree";
+const RCP_POLICY_BINDING_INFO_LIST_PATH = "/v2/rest/pro/policy/policyBindingInfoList";
+const RCP_POLICY_SEARCH_PATH = "/v2/rest/pro/policy/policySearch";
+const RCP_POLICY_BLUR_SEARCH_PATH = "/v2/rest/pro/policy/policyBlurSearch";
+const RCP_POLICY_ALL_VERSION_PATH = "/v2/rest/pro/policy/getPolicyAllVersion";
+const RCP_PIPELINE_POLICY_VERSIONS_BY_CODE_PATH = "/v2/rest/common/pipeline/getPolicyVersionsByCode";
 const RCP_POLICY_VERSION_LOOKUP_PATH = "/v2/rest/pc/policy/getPolicyVersionListByEvent";
 const RCP_POLICY_DETAIL_LOOKUP_PATH = "/v2/rest/pro/policy/getPolicyDetailByVersion";
 const RCP_POLICY_RELEASE_RECORD_PATH = "/v2/rest/common/pipeline/list";
@@ -288,7 +331,7 @@ export const ACTIONS = Object.freeze({
       to_timestamp: "optional epoch ms",
       recallSource: "optional string; default 2,0,1,3",
       limit: "optional positive integer <= 100; legacy service row target when max_records is absent",
-      max_records: "optional service-side JSON row target <= 200; defaults to as many as fit up to 100"
+      max_records: "optional service-side JSON row target <= 300; defaults to 300"
     },
     validateParams: validateLoginLogsInput,
     buildRequest: buildLoginLogsRequest,
@@ -373,6 +416,93 @@ export const ACTIONS = Object.freeze({
     validateParams: validateArchivesPhotoSearchInput,
     buildRequest: buildArchivesPhotoSearchRequest,
     mockData: mockArchivesPhotoSearchData
+  }),
+  archives_photo_profile: freezeAction({
+    name: "archives_photo_profile",
+    domainKey: "archives",
+    description: "Passthrough Archives Center photo profile for a typed photo id.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_PROFILE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      photo_id: "required decimal string; maps to photoId"
+    },
+    validateParams: validateArchivesPhotoIdInput("archives_photo_profile"),
+    buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_PROFILE_PATH),
+    mockData: mockArchivesPhotoProfileData
+  }),
+  archives_photo_meta: freezeAction({
+    name: "archives_photo_meta",
+    domainKey: "archives",
+    description: "Passthrough Archives Center photo metadata for a typed photo id.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_META_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      photo_id: "required decimal string; maps to photoId"
+    },
+    validateParams: validateArchivesPhotoIdInput("archives_photo_meta"),
+    buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_META_PATH),
+    mockData: mockArchivesPhotoMetaData
+  }),
+  archives_photo_report_aggregate: freezeAction({
+    name: "archives_photo_report_aggregate",
+    domainKey: "archives",
+    description: "Passthrough Archives Center photo report aggregate for a typed photo id.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_REPORT_AGGREGATE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      photo_id: "required decimal string; maps to photoId"
+    },
+    validateParams: validateArchivesPhotoIdInput("archives_photo_report_aggregate"),
+    buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_REPORT_AGGREGATE_PATH),
+    mockData: mockArchivesPhotoReportAggregateData
+  }),
+  archives_photo_user_autonomy: freezeAction({
+    name: "archives_photo_user_autonomy",
+    domainKey: "archives",
+    description: "Passthrough Archives Center photo autonomy status for a typed photo id.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_USER_AUTONOMY_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      photo_id: "required decimal string; maps to photoId"
+    },
+    validateParams: validateArchivesPhotoIdInput("archives_photo_user_autonomy"),
+    buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_USER_AUTONOMY_PATH),
+    mockData: mockArchivesPhotoUserAutonomyData
+  }),
+  archives_gallery_photo_list: freezeAction({
+    name: "archives_gallery_photo_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center user gallery photo list for typed user and bounded page params.",
+    method: "POST",
+    apiPath: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesGalleryPhotoListInput,
+    buildRequest: buildArchivesGalleryPhotoListRequest,
+    mockData: mockArchivesGalleryPhotoListData
   }),
   archives_related_users: freezeAction({
     name: "archives_related_users",
@@ -466,6 +596,201 @@ export const ACTIONS = Object.freeze({
     validateParams: validateRcpEventFeatureListInput,
     buildRequest: buildRcpEventFeatureListRequest,
     mockData: mockRcpEventFeatureListData
+  }),
+  rcp_event_tree_or_decision: freezeAction({
+    name: "rcp_event_tree_or_decision",
+    domainKey: "rcp",
+    description: "Passthrough RCP event tree/decision lookup for typed event identity params.",
+    method: "GET",
+    apiPath: RCP_EVENT_TREE_OR_DECISION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      queryTime: "required exact event time epoch ms",
+      region: "optional enum china|oversea|empty; default china",
+      isPolicyTreeExperiment: "optional false only; fixed HAR query value"
+    },
+    validateParams: validateRcpEventTreeOrDecisionInput,
+    buildRequest: buildRcpEventTreeOrDecisionRequest,
+    mockData: mockRcpEventTreeOrDecisionData
+  }),
+  rcp_fast_query_hbase: freezeAction({
+    name: "rcp_fast_query_hbase",
+    domainKey: "rcp",
+    description: "Passthrough RCP fast HBase event lookup for typed source/time params.",
+    method: "GET",
+    apiPath: RCP_FAST_QUERY_HBASE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      source_id: "required when sourceIds is absent; maps to sourceIds",
+      sourceIds: "required when source_id is absent; string or string[]",
+      startTime: "required epoch ms",
+      endTime: "required epoch ms",
+      eventTypeCodes: "optional comma-separated safe event type list; default empty",
+      limit: "optional positive integer <= 500; default 500"
+    },
+    validateParams: validateRcpFastQueryHbaseInput,
+    buildRequest: buildRcpFastQueryHbaseRequest,
+    mockData: mockRcpFastQueryHbaseData
+  }),
+  rcp_feature_info_by_keys: freezeAction({
+    name: "rcp_feature_info_by_keys",
+    domainKey: "rcp",
+    description: "Passthrough RCP feature info lookup for typed event identity and feature keys.",
+    method: "GET",
+    apiPath: RCP_FEATURE_INFO_BY_KEYS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string",
+      eventId: "required safe event id string",
+      queryTime: "required exact event time epoch ms",
+      featureKeys: "required safe feature key string or string[]",
+      region: "optional enum china|oversea|empty; default china"
+    },
+    validateParams: validateRcpFeatureInfoByKeysInput,
+    buildRequest: buildRcpFeatureInfoByKeysRequest,
+    mockData: mockRcpFeatureInfoByKeysData
+  }),
+  rcp_policy_basic_info: freezeAction({
+    name: "rcp_policy_basic_info",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy basic info lookup for typed policy and policy tree code.",
+    method: "GET",
+    apiPath: RCP_POLICY_BASIC_INFO_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code",
+      policyTreeCode: "required safe policy tree code"
+    },
+    validateParams: validateRcpPolicyBasicInfoInput,
+    buildRequest: buildRcpPolicyBasicInfoRequest,
+    mockData: mockRcpPolicyBasicInfoData
+  }),
+  rcp_relation_policy_tree: freezeAction({
+    name: "rcp_relation_policy_tree",
+    domainKey: "rcp",
+    description: "Passthrough RCP relation policy tree lookup for a typed policy code.",
+    method: "GET",
+    apiPath: RCP_RELATION_POLICY_TREE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code"
+    },
+    validateParams: validateRcpPolicyCodeOnlyInput("rcp_relation_policy_tree"),
+    buildRequest: buildRcpPolicyCodeOnlyGetRequest(RCP_RELATION_POLICY_TREE_PATH),
+    mockData: mockRcpRelationPolicyTreeData
+  }),
+  rcp_policy_binding_info_list: freezeAction({
+    name: "rcp_policy_binding_info_list",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy binding info list for typed policy code/version and bounded page params.",
+    method: "GET",
+    apiPath: RCP_POLICY_BINDING_INFO_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code",
+      policyVersion: "required positive integer",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicyBindingInfoListInput,
+    buildRequest: buildRcpPolicyBindingInfoListRequest,
+    mockData: mockRcpPolicyBindingInfoListData
+  }),
+  rcp_policy_search: freezeAction({
+    name: "rcp_policy_search",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy search using a fixed service-owned body and typed filters.",
+    method: "POST",
+    apiPath: RCP_POLICY_SEARCH_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "optional safe policy code",
+      policyTreeCode: "optional safe policy tree code",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicySearchInput,
+    buildRequest: buildRcpPolicySearchRequest,
+    mockData: mockRcpPolicySearchData
+  }),
+  rcp_policy_blur_search: freezeAction({
+    name: "rcp_policy_blur_search",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy blur search for typed policy filters and bounded page params.",
+    method: "GET",
+    apiPath: RCP_POLICY_BLUR_SEARCH_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "optional safe policy code",
+      policyTreeCode: "optional safe policy tree code",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicySearchInput,
+    buildRequest: buildRcpPolicyBlurSearchRequest,
+    mockData: mockRcpPolicyBlurSearchData
+  }),
+  rcp_policy_all_version: freezeAction({
+    name: "rcp_policy_all_version",
+    domainKey: "rcp",
+    description: "Passthrough RCP all-version policy lookup for a typed policy code.",
+    method: "GET",
+    apiPath: RCP_POLICY_ALL_VERSION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 50"
+    },
+    validateParams: validateRcpPolicyAllVersionInput,
+    buildRequest: buildRcpPolicyAllVersionRequest,
+    mockData: mockRcpPolicyAllVersionData
+  }),
+  rcp_pipeline_policy_versions_by_code: freezeAction({
+    name: "rcp_pipeline_policy_versions_by_code",
+    domainKey: "rcp",
+    description: "Passthrough RCP pipeline policy versions lookup for a typed policy code.",
+    method: "GET",
+    apiPath: RCP_PIPELINE_POLICY_VERSIONS_BY_CODE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyCode: "required safe policy code"
+    },
+    validateParams: validateRcpPolicyCodeOnlyInput("rcp_pipeline_policy_versions_by_code"),
+    buildRequest: buildRcpPolicyCodeOnlyGetRequest(RCP_PIPELINE_POLICY_VERSIONS_BY_CODE_PATH),
+    mockData: mockRcpPipelinePolicyVersionsByCodeData
   }),
   rcp_policy_version_lookup: freezeAction({
     name: "rcp_policy_version_lookup",
@@ -609,6 +934,63 @@ export const ACTIONS = Object.freeze({
     validateParams: validateTrackAnalysisCheckDataReadyInput,
     buildRequest: buildTrackAnalysisCheckDataReadyRequest,
     mockData: mockTrackAnalysisCheckDataReadyData
+  }),
+  track_analysis_product_list: freezeAction({
+    name: "track_analysis_product_list",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis product list for typed product/app and bounded page params.",
+    method: "POST",
+    apiPath: TRACK_ANALYSIS_PRODUCT_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      appName: "optional enum KUAISHOU|NEBULA; default KUAISHOU",
+      product: "optional enum KUAISHOU|NEBULA; default KUAISHOU",
+      currentPage: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 20",
+      keyword: "optional safe string <= 128 chars",
+      type: "optional positive integer; default 1",
+      needFavorite: "optional boolean; default true"
+    },
+    validateParams: validateTrackAnalysisProductListInput,
+    buildRequest: buildTrackAnalysisProductListRequest,
+    mockData: mockTrackAnalysisProductListData
+  }),
+  track_sequence_dimension_list: freezeAction({
+    name: "track_sequence_dimension_list",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis sequence dimension list for typed product params.",
+    method: "GET",
+    apiPath: TRACK_SEQUENCE_DIMENSION_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      product: "optional enum KUAISHOU|NEBULA; default KUAISHOU"
+    },
+    validateParams: validateTrackProductOnlyInput("track_sequence_dimension_list"),
+    buildRequest: buildTrackProductOnlyGetRequest(TRACK_SEQUENCE_DIMENSION_LIST_PATH),
+    mockData: mockTrackSequenceDimensionListData
+  }),
+  track_data_type_list: freezeAction({
+    name: "track_data_type_list",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis data type list for typed product params.",
+    method: "GET",
+    apiPath: TRACK_DATA_TYPE_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      product: "optional enum KUAISHOU|NEBULA; default KUAISHOU"
+    },
+    validateParams: validateTrackProductOnlyInput("track_data_type_list"),
+    buildRequest: buildTrackProductOnlyGetRequest(TRACK_DATA_TYPE_LIST_PATH),
+    mockData: mockTrackDataTypeListData
   })
 });
 
@@ -759,6 +1141,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     upstream.returned_records = jsonArrayCap.returnedRecords;
     upstream.missing_records = jsonArrayCap.missingRecords;
     upstream.missing_body_reason = "response_too_large";
+    upstream.cap_reason = jsonArrayCap.capReason || "response_too_large";
     upstream.capped_body = returnedBody.body;
   } else if (bodyPresent && bodyTruncated) {
     ok = false;
@@ -802,6 +1185,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     timeout: false,
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
     raw_body_handling: upstream.raw_body_handling,
+    cap_reason: upstream.cap_reason || null,
     upstream,
     ...(errorType ? { error_type: errorType } : {}),
     meta: {
@@ -1015,6 +1399,56 @@ function buildArchivesPhotoSearchRequest(input) {
       end: input.end,
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
+    }
+  };
+}
+
+function validateArchivesPhotoIdInput(actionName) {
+  return (input) => {
+    if (!isNonEmptyString(input.photo_id) || !/^\d+$/.test(input.photo_id.trim())) {
+      return {
+        message: `${actionName} requires photo_id as a decimal string`,
+        required: ["photo_id decimal string"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function buildArchivesPhotoIdRequest(fixedPath) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      photoId: input.photo_id.trim()
+    }
+  });
+}
+
+function validateArchivesGalleryPhotoListInput(input) {
+  const userError = validateDecimalUserId("archives_gallery_photo_list", input);
+  if (userError) {
+    return userError;
+  }
+  const pageError = validatePageControls("archives_gallery_photo_list", input, 100, 20);
+  if (pageError) {
+    return pageError;
+  }
+  return null;
+}
+
+function buildArchivesGalleryPhotoListRequest(input) {
+  return {
+    path: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
+    displayPath: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim(),
+      pageIndex: positiveIntegerParam(input, "pageIndex", 1),
+      pageSize: positiveIntegerParam(input, "pageSize", 20),
+      filters: {}
     }
   };
 }
@@ -1239,6 +1673,326 @@ function buildRcpEventFeatureListRequest(input) {
   return {
     path: `${RCP_EVENT_FEATURE_LIST_PATH}?${params.toString()}`,
     displayPath: `${RCP_EVENT_FEATURE_LIST_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpEventTreeOrDecisionInput(input) {
+  const eventError = validateRcpEventIdentityForAction("rcp_event_tree_or_decision", input);
+  if (eventError) {
+    return eventError;
+  }
+  const regionError = validateRcpRegion("rcp_event_tree_or_decision", input);
+  if (regionError) {
+    return regionError;
+  }
+  if (Object.hasOwn(input, "isPolicyTreeExperiment") && input.isPolicyTreeExperiment !== false) {
+    return {
+      message: "rcp_event_tree_or_decision isPolicyTreeExperiment must remain false",
+      required: ["isPolicyTreeExperiment=false"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpEventTreeOrDecisionRequest(input) {
+  const region = rcpRegion(input);
+  const params = new URLSearchParams({
+    region,
+    eventType: input.eventType.trim(),
+    eventId: input.eventId.trim(),
+    queryTime: String(input.queryTime),
+    isPolicyTreeExperiment: "false"
+  });
+  const displayParams = new URLSearchParams({
+    region,
+    eventType: input.eventType.trim(),
+    eventId: "[typed_event_id]",
+    queryTime: String(input.queryTime),
+    isPolicyTreeExperiment: "false"
+  });
+  return {
+    path: `${RCP_EVENT_TREE_OR_DECISION_PATH}?${params.toString()}`,
+    displayPath: `${RCP_EVENT_TREE_OR_DECISION_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpFastQueryHbaseInput(input) {
+  const sourceIds = rcpSourceIdsString(input);
+  if (!sourceIds || !validSafeCsv(sourceIds)) {
+    return {
+      message: "rcp_fast_query_hbase requires source_id or safe sourceIds",
+      required: ["source_id or sourceIds safe csv"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.startTime) || !validPositiveInteger(input.endTime) || input.endTime <= input.startTime) {
+    return {
+      message: "rcp_fast_query_hbase requires positive epoch startTime/endTime with endTime > startTime",
+      required: ["startTime/endTime positive epoch ms"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "limit") && (!validPositiveInteger(input.limit) || input.limit > 500)) {
+    return {
+      message: "rcp_fast_query_hbase limit must be a positive integer <= 500",
+      required: ["limit positive integer <= 500"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "eventTypeCodes") && !validSafeCsv(eventTypeCodesString(input))) {
+    return {
+      message: "rcp_fast_query_hbase eventTypeCodes must be a safe comma-separated string or string[]",
+      required: ["eventTypeCodes safe csv"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpFastQueryHbaseRequest(input) {
+  const sourceIds = rcpSourceIdsString(input);
+  const params = new URLSearchParams({
+    eventTypeCodes: eventTypeCodesString(input),
+    sourceIds,
+    startTime: String(input.startTime),
+    endTime: String(input.endTime),
+    limit: String(positiveIntegerParam(input, "limit", 500))
+  });
+  const displayParams = new URLSearchParams({
+    eventTypeCodes: eventTypeCodesString(input),
+    sourceIds: "[typed_source_ids]",
+    startTime: String(input.startTime),
+    endTime: String(input.endTime),
+    limit: String(positiveIntegerParam(input, "limit", 500))
+  });
+  return {
+    path: `${RCP_FAST_QUERY_HBASE_PATH}?${params.toString()}`,
+    displayPath: `${RCP_FAST_QUERY_HBASE_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpFeatureInfoByKeysInput(input) {
+  const eventError = validateRcpEventIdentityForAction("rcp_feature_info_by_keys", input);
+  if (eventError) {
+    return eventError;
+  }
+  const regionError = validateRcpRegion("rcp_feature_info_by_keys", input);
+  if (regionError) {
+    return regionError;
+  }
+  const featureKeys = safeCodeListString(input.featureKeys);
+  if (!featureKeys) {
+    return {
+      message: "rcp_feature_info_by_keys requires featureKeys as a safe string or string[]",
+      required: ["featureKeys safe string|string[]"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildRcpFeatureInfoByKeysRequest(input) {
+  const region = rcpRegion(input);
+  const params = new URLSearchParams({
+    eventId: input.eventId.trim(),
+    queryTime: String(input.queryTime),
+    isPolicyTreeExperiment: "false",
+    eventType: input.eventType.trim(),
+    region,
+    featureKeys: safeCodeListString(input.featureKeys)
+  });
+  const displayParams = new URLSearchParams({
+    eventId: "[typed_event_id]",
+    queryTime: String(input.queryTime),
+    isPolicyTreeExperiment: "false",
+    eventType: input.eventType.trim(),
+    region,
+    featureKeys: safeCodeListString(input.featureKeys)
+  });
+  return {
+    path: `${RCP_FEATURE_INFO_BY_KEYS_PATH}?${params.toString()}`,
+    displayPath: `${RCP_FEATURE_INFO_BY_KEYS_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyBasicInfoInput(input) {
+  if (!safeCode(input.policyCode)) {
+    return {
+      message: "rcp_policy_basic_info requires a safe policyCode",
+      required: ["policyCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_policy_basic_info requires a safe policyTreeCode",
+      required: ["policyTreeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildRcpPolicyBasicInfoRequest(input) {
+  const params = new URLSearchParams({
+    policyCode: input.policyCode.trim(),
+    policyTreeCode: input.policyTreeCode.trim()
+  });
+  return {
+    path: `${RCP_POLICY_BASIC_INFO_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_BASIC_INFO_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyCodeOnlyInput(actionName) {
+  return (input) => {
+    if (!safeCode(input.policyCode)) {
+      return {
+        message: `${actionName} requires a safe policyCode`,
+        required: ["policyCode"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function buildRcpPolicyCodeOnlyGetRequest(fixedPath) {
+  return (input) => {
+    const params = new URLSearchParams({ policyCode: input.policyCode.trim() });
+    return {
+      path: `${fixedPath}?${params.toString()}`,
+      displayPath: `${fixedPath}?${params.toString()}`,
+      method: "GET",
+      body: {}
+    };
+  };
+}
+
+function validateRcpPolicyBindingInfoListInput(input) {
+  const policyError = validateRcpPolicyIdentityForAction("rcp_policy_binding_info_list", input);
+  if (policyError) {
+    return policyError;
+  }
+  return validatePageControls("rcp_policy_binding_info_list", input, 100, 20, "page", "size");
+}
+
+function buildRcpPolicyBindingInfoListRequest(input) {
+  const params = new URLSearchParams({
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20)),
+    policyCode: input.policyCode.trim(),
+    policyVersion: String(input.policyVersion)
+  });
+  return {
+    path: `${RCP_POLICY_BINDING_INFO_LIST_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_BINDING_INFO_LIST_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicySearchInput(input) {
+  if (Object.hasOwn(input, "policyCode") && input.policyCode !== "" && !safeCode(input.policyCode)) {
+    return {
+      message: "rcp_policy_search policyCode must be safe when provided",
+      required: ["policyCode safe code"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "policyTreeCode") && input.policyTreeCode !== "" && !safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_policy_search policyTreeCode must be safe when provided",
+      required: ["policyTreeCode safe code"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return validatePageControls("rcp_policy_search", input, 100, 20, "page", "size");
+}
+
+function buildRcpPolicySearchRequest(input) {
+  return {
+    path: RCP_POLICY_SEARCH_PATH,
+    displayPath: RCP_POLICY_SEARCH_PATH,
+    method: "POST",
+    body: {
+      policySearchParam: {
+        policyCode: isNonEmptyString(input.policyCode) ? input.policyCode.trim() : "",
+        policyTreeCode: isNonEmptyString(input.policyTreeCode) ? input.policyTreeCode.trim() : "",
+        policyGroupCodes: "",
+        punishKey: "",
+        reason: "",
+        returnMessage: "",
+        status: "",
+        isProtect: "",
+        response: "",
+        errorCode: "",
+        priority: "",
+        createUser: "",
+        associated: "",
+        updateUser: "",
+        scenes: "",
+        showCollection: false,
+        showOwner: false,
+        showHideStatus: false,
+        desc: 0
+      },
+      page: positiveIntegerParam(input, "page", 1),
+      size: positiveIntegerParam(input, "size", 20)
+    }
+  };
+}
+
+function buildRcpPolicyBlurSearchRequest(input) {
+  const policyCode = isNonEmptyString(input.policyCode) ? input.policyCode.trim() : "";
+  const policyTreeCode = isNonEmptyString(input.policyTreeCode) ? input.policyTreeCode.trim() : "";
+  const params = new URLSearchParams({
+    policyCode,
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20)),
+    "formData[policyTreeCode]": policyTreeCode,
+    "formData[policyCode]": policyCode,
+    "formData[eventTypeAssociator]": "",
+    "formData[showCollection]": "false",
+    "formData[showOwner]": "false",
+    "formData[showHideStatus]": "false"
+  });
+  return {
+    path: `${RCP_POLICY_BLUR_SEARCH_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_BLUR_SEARCH_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyAllVersionInput(input) {
+  const policyError = validateRcpPolicyCodeOnlyInput("rcp_policy_all_version")(input);
+  if (policyError) {
+    return policyError;
+  }
+  return validatePageControls("rcp_policy_all_version", input, 100, 50, "page", "size");
+}
+
+function buildRcpPolicyAllVersionRequest(input) {
+  const params = new URLSearchParams({
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 50)),
+    policyCode: input.policyCode.trim()
+  });
+  return {
+    path: `${RCP_POLICY_ALL_VERSION_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_ALL_VERSION_PATH}?${params.toString()}`,
     method: "GET",
     body: {}
   };
@@ -1574,6 +2328,99 @@ function buildTrackAnalysisCheckDataReadyRequest(input) {
   };
 }
 
+function validateTrackAnalysisProductListInput(input) {
+  const productError = validateTrackProductFields("track_analysis_product_list", input);
+  if (productError) {
+    return productError;
+  }
+  const pageError = validatePageControls("track_analysis_product_list", input, 100, 20, "currentPage", "pageSize");
+  if (pageError) {
+    return pageError;
+  }
+  if (Object.hasOwn(input, "keyword") && !safeOptionalKeyword(input.keyword)) {
+    return {
+      message: "track_analysis_product_list keyword must be a safe string <= 128 chars",
+      required: ["keyword safe string <= 128 chars"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "type") && !validPositiveInteger(input.type)) {
+    return {
+      message: "track_analysis_product_list type must be a positive integer",
+      required: ["type positive integer"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "needFavorite") && typeof input.needFavorite !== "boolean") {
+    return {
+      message: "track_analysis_product_list needFavorite must be boolean",
+      required: ["needFavorite boolean"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildTrackAnalysisProductListRequest(input) {
+  const product = trackProduct(input);
+  const appName = isNonEmptyString(input.appName) ? input.appName.trim() : product;
+  const params = new URLSearchParams({ product, appName });
+  return {
+    path: `${TRACK_ANALYSIS_PRODUCT_LIST_PATH}?${params.toString()}`,
+    displayPath: `${TRACK_ANALYSIS_PRODUCT_LIST_PATH}?${params.toString()}`,
+    method: "POST",
+    body: {
+      currentPage: positiveIntegerParam(input, "currentPage", 1),
+      pageSize: positiveIntegerParam(input, "pageSize", 20),
+      keyword: isNonEmptyString(input.keyword) ? input.keyword.trim() : "",
+      type: positiveIntegerParam(input, "type", 1),
+      needFavorite: Object.hasOwn(input, "needFavorite") ? input.needFavorite : true
+    }
+  };
+}
+
+function validateTrackProductOnlyInput(actionName) {
+  return (input) => validateTrackProductFields(actionName, input);
+}
+
+function buildTrackProductOnlyGetRequest(fixedPath) {
+  return (input) => {
+    const params = new URLSearchParams({
+      product: trackProduct(input),
+      funcType: TRACK_ANALYSIS_FUNC_TYPE,
+      _t: String(Date.now())
+    });
+    return {
+      path: `${fixedPath}?${params.toString()}`,
+      displayPath: `${fixedPath}?${params.toString()}`,
+      method: "GET",
+      body: {}
+    };
+  };
+}
+
+function validateTrackProductFields(actionName, input) {
+  if (Object.hasOwn(input, "product") && !TRACK_ANALYSIS_APP_NAMES.includes(input.product)) {
+    return {
+      message: `${actionName} product must be KUAISHOU or NEBULA`,
+      required: ["product=KUAISHOU|NEBULA"],
+      errorType: "invalid_parameter"
+    };
+  }
+  if (Object.hasOwn(input, "appName") && !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
+    return {
+      message: `${actionName} appName must be KUAISHOU or NEBULA`,
+      required: ["appName=KUAISHOU|NEBULA"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function trackProduct(input) {
+  return isNonEmptyString(input.product) ? input.product.trim() : TRACK_ANALYSIS_DEFAULT_PRODUCT;
+}
+
 function validateDecimalUserId(actionName, input) {
   if (!isNonEmptyString(input.user_id) || !/^\d+$/.test(input.user_id.trim())) {
     return {
@@ -1672,8 +2519,45 @@ function safeCode(value) {
   return isNonEmptyString(value) && SAFE_CODE_PATTERN.test(value.trim());
 }
 
+function safeCodeListString(value) {
+  if (isNonEmptyString(value)) {
+    return validSafeCsv(value.trim()) ? value.trim() : "";
+  }
+  if (Array.isArray(value) && value.length > 0 && value.length <= 50 && value.every(safeCode)) {
+    return value.map((item) => item.trim()).join(",");
+  }
+  return "";
+}
+
+function eventTypeCodesString(input) {
+  return Object.hasOwn(input, "eventTypeCodes") ? safeCodeListString(input.eventTypeCodes) : "";
+}
+
+function validSafeCsv(value) {
+  return typeof value === "string" && value.split(",").every((item) => item === "" || safeCode(item));
+}
+
+function validateRcpRegion(actionName, input) {
+  if (Object.hasOwn(input, "region") && !["china", "oversea", ""].includes(input.region)) {
+    return {
+      message: `${actionName} region must be china, oversea, or empty string`,
+      required: ["region=china|oversea|empty"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function rcpRegion(input) {
+  return Object.hasOwn(input, "region") ? input.region : RCP_DEFAULT_REGION;
+}
+
 function safeOptionalShortString(value) {
   return typeof value === "string" && value.length <= 64 && /^[A-Za-z0-9_.:-]*$/.test(value);
+}
+
+function safeOptionalKeyword(value) {
+  return typeof value === "string" && value.length <= 128 && /^[\w\s.:-]*$/u.test(value);
 }
 
 function safeOptionalWorkflowCode(value) {
@@ -1735,7 +2619,7 @@ function sanitizeInput(input) {
   }
 
   if (typeof safe.limit === "number") {
-    safe.limit = Math.min(Math.max(Math.trunc(safe.limit), 1), 100);
+    safe.limit = Math.max(Math.trunc(safe.limit), 1);
   }
   if (!RESPONSE_MODES.includes(safe.response_mode)) {
     delete safe.response_mode;
@@ -1879,8 +2763,17 @@ function normalizeJsonArrayCap(value) {
     returnedRecords,
     missingRecords,
     maxRecords: safeNonNegativeInteger(value.maxRecords),
+    capReason: normalizeCapReason(value.capReason),
     errorType: typeof value.errorType === "string" ? value.errorType.slice(0, 128) : null
   };
+}
+
+function normalizeCapReason(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (["record_limit", "byte_limit", "response_too_large"].includes(text)) {
+    return text;
+  }
+  return null;
 }
 
 function safeNonNegativeInteger(value) {
@@ -3085,6 +3978,95 @@ function mockArchivesPhotoSearchData(input) {
   );
 }
 
+function mockArchivesPhotoProfileData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: "2871834924",
+      photoId: input.photo_id,
+      photoIp: "10.20.30.50",
+      photoMethod: "mock_publish_method",
+      uploadSource: "mock_upload_source",
+      photoStatus: "shape_only_present",
+      reviewStatus: "shape_only_present",
+      viewCount: 10,
+      likeCount: 1,
+      reportCount: 0,
+      riskTips: []
+    }
+  };
+}
+
+function mockArchivesPhotoMetaData(input) {
+  return {
+    code: 1,
+    data: {
+      photoId: input.photo_id,
+      userId: "2871834924",
+      photoMeta: {
+        uploadSource: "mock_upload_source",
+        finalType: "mock_video"
+      },
+      photoOrigin: "shape_only_present",
+      document: {
+        createTime: 1780000000000
+      },
+      finalType: "mock_final_type"
+    }
+  };
+}
+
+function mockArchivesPhotoReportAggregateData(input) {
+  return {
+    code: 1,
+    data: {
+      photoId: input.photo_id,
+      reportCount: 1,
+      reports: [
+        {
+          reportType: "shape_only_present",
+          count: 1
+        }
+      ]
+    }
+  };
+}
+
+function mockArchivesPhotoUserAutonomyData(input) {
+  return {
+    code: 1,
+    data: {
+      photoId: input.photo_id,
+      photoSatisfaction: "shape_only_present",
+      photoApproval: "shape_only_present"
+    }
+  };
+}
+
+function mockArchivesGalleryPhotoListData(input) {
+  const request = buildArchivesGalleryPhotoListRequest(input);
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          photoId: "197323059879",
+          caption: "shape_only_present",
+          type: 1,
+          deleted: false,
+          time: 1780000000000,
+          reviewInfo: {},
+          countStat: {}
+        }
+      ],
+      totalCount: 1,
+      pageIndex: request.body.pageIndex,
+      pageSize: request.body.pageSize
+    }
+  };
+}
+
 function mockArchivesRelatedUsersData(input) {
   const request = buildArchivesRelatedUsersRequest(input);
   return mockFixedActionData(
@@ -3202,6 +4184,155 @@ function mockRcpEventFeatureListData(input) {
       strategy_feature_snapshot_not_final_judgement: true
     }
   );
+}
+
+function mockRcpEventTreeOrDecisionData(input) {
+  return {
+    code: 0,
+    data: {
+      eventType: input.eventType,
+      eventId: input.eventId,
+      queryTime: input.queryTime,
+      region: rcpRegion(input),
+      isPolicyTreeExperiment: false,
+      decisionTree: {
+        policyTreeCode: "mock_tree",
+        nodes: []
+      }
+    }
+  };
+}
+
+function mockRcpFastQueryHbaseData(input) {
+  return {
+    code: 0,
+    data: {
+      sourceIds: rcpSourceIdsString(input),
+      startTime: input.startTime,
+      endTime: input.endTime,
+      limit: positiveIntegerParam(input, "limit", 500),
+      eventTypeCodes: eventTypeCodesString(input),
+      records: [
+        {
+          eventId: "mock_event_id",
+          eventType: "USER_REGISTER_NEW",
+          sourceId: rcpSourceIdsString(input).split(",")[0]
+        }
+      ]
+    }
+  };
+}
+
+function mockRcpFeatureInfoByKeysData(input) {
+  return {
+    code: 0,
+    data: safeCodeListString(input.featureKeys).split(",").map((featureKey) => ({
+      eventId: input.eventId,
+      eventType: input.eventType,
+      queryTime: input.queryTime,
+      featureKey,
+      featureName: `mock_${featureKey}`,
+      defaultFeatureValue: "shape_only_present"
+    }))
+  };
+}
+
+function mockRcpPolicyBasicInfoData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      policyTreeCode: input.policyTreeCode,
+      policyName: "mock_policy_basic_info",
+      status: "shape_only_present"
+    }
+  };
+}
+
+function mockRcpRelationPolicyTreeData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      relationPolicyTrees: [
+        {
+          policyTreeCode: "mock_relation_tree",
+          policyTreeVersion: 1
+        }
+      ]
+    }
+  };
+}
+
+function mockRcpPolicyBindingInfoListData(input) {
+  return {
+    code: 0,
+    data: {
+      list: [
+        {
+          policyCode: input.policyCode,
+          policyVersion: input.policyVersion,
+          bindingType: "shape_only_present"
+        }
+      ],
+      page: positiveIntegerParam(input, "page", 1),
+      size: positiveIntegerParam(input, "size", 20),
+      total: 1
+    }
+  };
+}
+
+function mockRcpPolicySearchData(input) {
+  return {
+    code: 0,
+    data: {
+      list: [
+        {
+          policyCode: isNonEmptyString(input.policyCode) ? input.policyCode : "mock_policy_code",
+          policyTreeCode: isNonEmptyString(input.policyTreeCode) ? input.policyTreeCode : "mock_policy_tree"
+        }
+      ],
+      page: positiveIntegerParam(input, "page", 1),
+      size: positiveIntegerParam(input, "size", 20),
+      total: 1
+    }
+  };
+}
+
+function mockRcpPolicyBlurSearchData(input) {
+  return mockRcpPolicySearchData(input);
+}
+
+function mockRcpPolicyAllVersionData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      versions: [
+        {
+          policyVersion: 1,
+          status: "shape_only_present"
+        }
+      ],
+      page: positiveIntegerParam(input, "page", 1),
+      size: positiveIntegerParam(input, "size", 50)
+    }
+  };
+}
+
+function mockRcpPipelinePolicyVersionsByCodeData(input) {
+  return {
+    code: 0,
+    data: {
+      policyCode: input.policyCode,
+      pipelineVersions: [
+        {
+          version: "mock_pipeline_version",
+          status: "shape_only_present"
+        }
+      ]
+    }
+  };
 }
 
 function mockRcpPolicyVersionLookupData(input) {
@@ -3347,6 +4478,50 @@ function mockTrackAnalysisCheckDataReadyData(input) {
       trace_id_value_suppressed: true
     }
   );
+}
+
+function mockTrackAnalysisProductListData(input) {
+  return {
+    code: 0,
+    data: {
+      list: [
+        {
+          appName: isNonEmptyString(input.appName) ? input.appName : TRACK_ANALYSIS_DEFAULT_PRODUCT,
+          product: trackProduct(input),
+          productName: "shape_only_present"
+        }
+      ],
+      currentPage: positiveIntegerParam(input, "currentPage", 1),
+      pageSize: positiveIntegerParam(input, "pageSize", 20),
+      total: 1
+    }
+  };
+}
+
+function mockTrackSequenceDimensionListData(input) {
+  return {
+    code: 0,
+    data: [
+      {
+        product: trackProduct(input),
+        funcType: TRACK_ANALYSIS_FUNC_TYPE,
+        dimension: "shape_only_present"
+      }
+    ]
+  };
+}
+
+function mockTrackDataTypeListData(input) {
+  return {
+    code: 0,
+    data: [
+      {
+        product: trackProduct(input),
+        funcType: TRACK_ANALYSIS_FUNC_TYPE,
+        dataType: "shape_only_present"
+      }
+    ]
+  };
 }
 
 function fixedMockTime() {

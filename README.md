@@ -66,7 +66,10 @@ quality scoring, risk judgments, no-data interpretation, next-step
 recommendations, DataAgent/Hive calls, permission bypass, or automatic upstream
 write/disposal actions.
 
-Current `action_count=19`.
+Current `action_count=37`.
+
+For Dennis-side parser and orchestration handoff, see
+[`DENNIS_ACTION_HANDOFF.md`](./DENNIS_ACTION_HANDOFF.md).
 
 ## Safety Boundary
 
@@ -80,9 +83,12 @@ The service must not read or output:
 - Playwright storage state
 - caller-provided URL/path/header/cookie/token/session/raw body/raw query
 
-The upstream response body is not returned raw. The service reports only
-transport metadata such as status, content type, body presence, truncation, byte
-count, elapsed time, and error type.
+The upstream business response body is visible to the caller when it fits within
+the configured passthrough cap. Large responses return bounded
+`upstream.body_snippet` or `upstream.capped_body` plus truncation metadata. The
+service still suppresses request/browser/service credential material and never
+returns request headers, `set-cookie`, Chrome profile files, localStorage, or
+Playwright storage state.
 
 ## Action Layers
 
@@ -100,11 +106,26 @@ to `passthrough`; legacy modes are rejected.
 | `archives_user_profile` | `archives` |
 | `archives_user_analysis` | `archives` |
 | `archives_photo_search` | `archives` |
+| `archives_photo_profile` | `archives` |
+| `archives_photo_meta` | `archives` |
+| `archives_photo_report_aggregate` | `archives` |
+| `archives_photo_user_autonomy` | `archives` |
+| `archives_gallery_photo_list` | `archives` |
 | `archives_related_users` | `archives` |
 | `archives_private_message_search` | `archives` |
 | `archives_past_four_items` | `archives` |
 | `rcp_event_detail` | `rcp` |
 | `rcp_event_feature_list` | `rcp` |
+| `rcp_event_tree_or_decision` | `rcp` |
+| `rcp_fast_query_hbase` | `rcp` |
+| `rcp_feature_info_by_keys` | `rcp` |
+| `rcp_policy_basic_info` | `rcp` |
+| `rcp_relation_policy_tree` | `rcp` |
+| `rcp_policy_binding_info_list` | `rcp` |
+| `rcp_policy_search` | `rcp` |
+| `rcp_policy_blur_search` | `rcp` |
+| `rcp_policy_all_version` | `rcp` |
+| `rcp_pipeline_policy_versions_by_code` | `rcp` |
 | `rcp_policy_version_lookup` | `rcp` |
 | `rcp_policy_detail_lookup` | `rcp` |
 | `rcp_policy_release_record_lookup` | `rcp` |
@@ -112,6 +133,9 @@ to `passthrough`; legacy modes are rejected.
 | `rcp_node_policy_attribution` | `rcp` |
 | `rcp_node_bind_policy_attribution` | `rcp` |
 | `track_analysis_check_data_ready` | `track_analysis` |
+| `track_analysis_product_list` | `track_analysis` |
+| `track_sequence_dimension_list` | `track_analysis` |
+| `track_data_type_list` | `track_analysis` |
 
 Excluded noise remains non-callable: telemetry, radar/misc/log collection,
 log-sdk traffic, JS/CSS/static assets, h5-fingerprint, mobile-device-info,
@@ -248,7 +272,7 @@ Optional smoke:
 Expected self-test output:
 
 - `service_ready`
-- `action_count=19`
+- `action_count=37`
 - per-action envelope summary
 - per-action `live_status`
 - main-agent observation summary such as `track_profile_observed`,

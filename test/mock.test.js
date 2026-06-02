@@ -58,6 +58,23 @@ const ACTION_INPUTS = Object.freeze({
     page: 1,
     count: 20
   },
+  archives_photo_profile: {
+    photo_id: "197323059879"
+  },
+  archives_photo_meta: {
+    photo_id: "197323059879"
+  },
+  archives_photo_report_aggregate: {
+    photo_id: "197323059879"
+  },
+  archives_photo_user_autonomy: {
+    photo_id: "197323059879"
+  },
+  archives_gallery_photo_list: {
+    user_id: "2871834924",
+    pageIndex: 1,
+    pageSize: 20
+  },
   archives_related_users: {
     user_id: "2871834924",
     relation_type: "same_device_registered"
@@ -85,6 +102,58 @@ const ACTION_INPUTS = Object.freeze({
     eventId: "mock_event_id",
     queryTime: 1780000000000,
     featureGroup: ""
+  },
+  rcp_event_tree_or_decision: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    queryTime: 1780000000000,
+    region: "china"
+  },
+  rcp_fast_query_hbase: {
+    source_id: "mock_source_id",
+    startTime: 1780000000000,
+    endTime: 1780086400000,
+    limit: 500
+  },
+  rcp_feature_info_by_keys: {
+    eventType: "USER_REGISTER_NEW",
+    eventId: "mock_event_id",
+    queryTime: 1780000000000,
+    featureKeys: ["deviceId", "phoneModel"],
+    region: "china"
+  },
+  rcp_policy_basic_info: {
+    policyCode: "mock_policy_code",
+    policyTreeCode: "USER_REGISTER_NEW"
+  },
+  rcp_relation_policy_tree: {
+    policyCode: "mock_policy_code"
+  },
+  rcp_policy_binding_info_list: {
+    policyCode: "mock_policy_code",
+    policyVersion: 5,
+    page: 1,
+    size: 20
+  },
+  rcp_policy_search: {
+    policyCode: "mock_policy_code",
+    policyTreeCode: "USER_REGISTER_NEW",
+    page: 1,
+    size: 20
+  },
+  rcp_policy_blur_search: {
+    policyCode: "mock_policy_code",
+    policyTreeCode: "USER_REGISTER_NEW",
+    page: 1,
+    size: 20
+  },
+  rcp_policy_all_version: {
+    policyCode: "mock_policy_code",
+    page: 1,
+    size: 50
+  },
+  rcp_pipeline_policy_versions_by_code: {
+    policyCode: "mock_policy_code"
   },
   rcp_policy_version_lookup: {
     eventType: "USER_REGISTER_NEW",
@@ -133,6 +202,21 @@ const ACTION_INPUTS = Object.freeze({
     event: [],
     appPlatform: [],
     metric: "pv"
+  },
+  track_analysis_product_list: {
+    appName: "KUAISHOU",
+    product: "KUAISHOU",
+    currentPage: 1,
+    pageSize: 20,
+    keyword: "",
+    type: 1,
+    needFavorite: true
+  },
+  track_sequence_dimension_list: {
+    product: "KUAISHOU"
+  },
+  track_data_type_list: {
+    product: "KUAISHOU"
   }
 });
 
@@ -287,7 +371,7 @@ test("origin registry and fixed action allowlist remain explicit", () => {
     assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
     assert.equal(origin.enabled, true);
   }
-  assert.equal(Object.keys(ACTIONS).length, 19);
+  assert.equal(Object.keys(ACTIONS).length, 37);
   assert.deepEqual(Object.keys(ACTIONS), ACTION_ALLOWLIST);
 });
 
@@ -372,7 +456,13 @@ test("fixed request builders keep typed params on fixed paths", () => {
   const defaultLoginInput = { ...ACTION_INPUTS.login_logs_search };
   delete defaultLoginInput.limit;
   const defaultLoginRequest = buildActionBody(ACTIONS.login_logs_search, defaultLoginInput);
-  assert.equal(defaultLoginRequest.responseBodyCap.maxRecords, 100);
+  assert.equal(defaultLoginRequest.responseBodyCap.maxRecords, 300);
+
+  const limitedLoginRequest = buildActionBody(ACTIONS.login_logs_search, {
+    ...ACTION_INPUTS.login_logs_search,
+    limit: 20
+  });
+  assert.equal(limitedLoginRequest.responseBodyCap.maxRecords, 20);
 
   const rcpRequest = buildActionBody(ACTIONS.rcp_snapshot, ACTION_INPUTS.rcp_snapshot);
   assert.equal(rcpRequest.method, "POST");
@@ -382,6 +472,23 @@ test("fixed request builders keep typed params on fixed paths", () => {
   const recoveredRequest = buildActionBody(ACTIONS.rcp_node_bind_policy_attribution, ACTION_INPUTS.rcp_node_bind_policy_attribution);
   assert.equal(recoveredRequest.method, "GET");
   assert.equal(recoveredRequest.path.startsWith("/v2/rest/pc/policy/nodeBindPolicyAttribution?"), true);
+
+  const photoProfileRequest = buildActionBody(ACTIONS.archives_photo_profile, ACTION_INPUTS.archives_photo_profile);
+  assert.equal(photoProfileRequest.method, "POST");
+  assert.equal(photoProfileRequest.path, "/v3/photo/profile");
+  assert.deepEqual(photoProfileRequest.body, { photoId: "197323059879" });
+
+  const photoMetaRequest = buildActionBody(ACTIONS.archives_photo_meta, ACTION_INPUTS.archives_photo_meta);
+  assert.equal(photoMetaRequest.path, "/v3/photo/meta");
+  assert.deepEqual(photoMetaRequest.body, { photoId: "197323059879" });
+
+  const rcpTreeDecisionRequest = buildActionBody(ACTIONS.rcp_event_tree_or_decision, ACTION_INPUTS.rcp_event_tree_or_decision);
+  assert.equal(rcpTreeDecisionRequest.method, "GET");
+  assert.equal(rcpTreeDecisionRequest.path.startsWith("/v2/rest/event/rcpEventTreeOrDecision?"), true);
+
+  const trackProductRequest = buildActionBody(ACTIONS.track_analysis_product_list, ACTION_INPUTS.track_analysis_product_list);
+  assert.equal(trackProductRequest.method, "POST");
+  assert.equal(trackProductRequest.path.startsWith("/dp/track-analysis/product/list/v2?"), true);
 });
 
 test("live response builder exposes small JSON upstream body and reports response size", () => {
@@ -500,7 +607,7 @@ test("login_logs_search large JSON returns structured row-capped passthrough bod
     ...body,
     data: {
       ...body.data,
-      logSearchModels: body.data.logSearchModels.slice(0, 100)
+      logSearchModels: body.data.logSearchModels.slice(0, 300)
     }
   };
   const cappedText = JSON.stringify(cappedBody);
@@ -517,9 +624,10 @@ test("login_logs_search large JSON returns structured row-capped passthrough bod
       ok: true,
       path: "data.logSearchModels",
       observedRecords: 334,
-      returnedRecords: 100,
-      missingRecords: 234,
-      maxRecords: 100
+      returnedRecords: 300,
+      missingRecords: 34,
+      maxRecords: 300,
+      capReason: "record_limit"
     }
   }, { latencyMs: 12 });
 
@@ -529,23 +637,25 @@ test("login_logs_search large JSON returns structured row-capped passthrough bod
   assert.equal(response.upstream.raw_body_handling, "json_array_capped");
   assert.equal(response.upstream.capped_json_path, "data.logSearchModels");
   assert.equal(response.upstream.observed_records, 334);
-  assert.equal(response.upstream.returned_records, 100);
-  assert.equal(response.upstream.missing_records, 234);
+  assert.equal(response.upstream.returned_records, 300);
+  assert.equal(response.upstream.missing_records, 34);
   assert.equal(response.upstream.missing_body_reason, "response_too_large");
-  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 100);
+  assert.equal(response.upstream.cap_reason, "record_limit");
+  assert.equal(response.cap_reason, "record_limit");
+  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 300);
   assert.equal(response.upstream.capped_body.data.logSearchModels[0].logContent.params.login_time, 1780000000000);
   assert.equal(Object.hasOwn(response.upstream, "body_snippet"), false);
   assertTransportEnvelope(response, "login_logs_search");
 });
 
 test("login_logs_search max_records controls structured row cap", () => {
-  const input = { ...ACTION_INPUTS.login_logs_search, max_records: 5 };
+  const input = { ...ACTION_INPUTS.login_logs_search, max_records: 20 };
   const body = buildLargeLoginLogsBody(334);
   const cappedBody = {
     ...body,
     data: {
       ...body.data,
-      logSearchModels: body.data.logSearchModels.slice(0, 5)
+      logSearchModels: body.data.logSearchModels.slice(0, 20)
     }
   };
   const response = buildLiveActionResponse(ACTIONS.login_logs_search, input, {}, {
@@ -561,21 +671,60 @@ test("login_logs_search max_records controls structured row cap", () => {
       ok: true,
       path: "data.logSearchModels",
       observedRecords: 334,
-      returnedRecords: 5,
-      missingRecords: 329,
-      maxRecords: 5
+      returnedRecords: 20,
+      missingRecords: 314,
+      maxRecords: 20,
+      capReason: "record_limit"
     }
   });
-  assert.equal(response.upstream.returned_records, 5);
-  assert.equal(response.upstream.missing_records, 329);
-  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 5);
+  assert.equal(response.upstream.returned_records, 20);
+  assert.equal(response.upstream.missing_records, 314);
+  assert.equal(response.upstream.cap_reason, "record_limit");
+  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 20);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search byte cap reports partial structured row cap", () => {
+  const input = { ...ACTION_INPUTS.login_logs_search };
+  delete input.limit;
+  const body = buildLargeLoginLogsBody(334);
+  const cappedBody = {
+    ...body,
+    data: {
+      ...body.data,
+      logSearchModels: body.data.logSearchModels.slice(0, 12)
+    }
+  };
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, input, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json",
+    bodyText: JSON.stringify(cappedBody),
+    bodyTruncated: true,
+    observedBytes: Buffer.byteLength(JSON.stringify(body)),
+    returnedBytes: Buffer.byteLength(JSON.stringify(cappedBody)),
+    jsonArrayCap: {
+      attempted: true,
+      ok: true,
+      path: "data.logSearchModels",
+      observedRecords: 334,
+      returnedRecords: 12,
+      missingRecords: 322,
+      maxRecords: 300,
+      capReason: "byte_limit"
+    }
+  });
+  assert.equal(response.upstream.returned_records, 12);
+  assert.equal(response.upstream.missing_records, 322);
+  assert.equal(response.upstream.cap_reason, "byte_limit");
+  assert.equal(response.upstream.capped_body.data.logSearchModels.length, 12);
   assertTransportEnvelope(response, "login_logs_search");
 });
 
 test("login_logs_search invalid max_records is rejected", async () => {
   const response = await createService().executeAction("login_logs_search", {
     ...ACTION_INPUTS.login_logs_search,
-    max_records: 201
+    max_records: 301
   });
   assert.equal(response.ok, false);
   assert.equal(response.error_type, "invalid_parameter");
@@ -681,7 +830,7 @@ test("health and refresh state expose auth readiness metadata only", () => {
   assert.equal(health.service_mode, "live");
   assert.equal(health.profile_dir_configured, true);
   assert.equal(health.state_file_configured, true);
-  assert.equal(health.action_count, 19);
+  assert.equal(health.action_count, 37);
 
   const state = updateOriginWarmState({}, config.domains.rcp, {
     status: "ready",

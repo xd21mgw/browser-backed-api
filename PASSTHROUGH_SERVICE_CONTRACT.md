@@ -146,6 +146,53 @@ Too-large response example:
 }
 ```
 
+Structured row-cap example for `login_logs_search`:
+
+```json
+{
+  "ok": false,
+  "action": "login_logs_search",
+  "response_mode": "passthrough",
+  "error_type": "response_too_large",
+  "body_present": true,
+  "body_truncated": true,
+  "raw_body_handling": "json_array_capped",
+  "cap_reason": "record_limit",
+  "upstream": {
+    "status": 200,
+    "content_type": "application/json",
+    "body_present": true,
+    "body_omitted": false,
+    "body_truncated": true,
+    "response_too_large": true,
+    "raw_body_handling": "json_array_capped",
+    "capped_json_path": "data.logSearchModels",
+    "observed_records": 334,
+    "returned_records": 300,
+    "missing_records": 34,
+    "missing_body_reason": "response_too_large",
+    "cap_reason": "record_limit",
+    "capped_body": {
+      "data": {
+        "logSearchModels": []
+      }
+    }
+  },
+  "safety": {
+    "credential_material_output": false,
+    "request_headers_output": false,
+    "browser_profile_material_output": false,
+    "transport_auth_material_output": false,
+    "upstream_business_body_visible": true
+  }
+}
+```
+
+For `login_logs_search`, the default service-side row cap is 300 records and
+the hard cap is 300 records. If the capped JSON still exceeds the byte cap, the
+service returns the largest complete leading record set that fits and sets
+`cap_reason=byte_limit`.
+
 ## Input Boundary
 
 Allowed:

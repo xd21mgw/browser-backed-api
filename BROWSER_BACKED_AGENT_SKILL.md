@@ -14,7 +14,7 @@ The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive
 calls, permission bypass, or platform writes.
 
-Current callable `action_count=19`. All actions are passthrough-only at the
+Current callable `action_count=37`. All actions are passthrough-only at the
 service layer.
 
 ## Service Base URL
@@ -38,7 +38,7 @@ POST {service_base_url}/actions/batch
 ```
 
 Before action calls, verify `/health` and `/actions`; `action_count` should be
-19.
+37.
 
 ## Deployment Modes
 
@@ -184,7 +184,7 @@ Before running:
 - Confirm `service_base_url`.
 - In Remote Main Agent + Mac Local Worker Mode, confirm the Mac node is
   connected and `{service_base_url}/health` is reachable.
-- Call `{service_base_url}/actions` and confirm `action_count=19`.
+- Call `{service_base_url}/actions` and confirm `action_count=37`.
 
 Default low-risk read-only action group:
 
@@ -381,11 +381,26 @@ service/browser credential material.
 | `archives_user_profile` | `archives` |
 | `archives_user_analysis` | `archives` |
 | `archives_photo_search` | `archives` |
+| `archives_photo_profile` | `archives` |
+| `archives_photo_meta` | `archives` |
+| `archives_photo_report_aggregate` | `archives` |
+| `archives_photo_user_autonomy` | `archives` |
+| `archives_gallery_photo_list` | `archives` |
 | `archives_related_users` | `archives` |
 | `archives_private_message_search` | `archives` |
 | `archives_past_four_items` | `archives` |
 | `rcp_event_detail` | `rcp` |
 | `rcp_event_feature_list` | `rcp` |
+| `rcp_event_tree_or_decision` | `rcp` |
+| `rcp_fast_query_hbase` | `rcp` |
+| `rcp_feature_info_by_keys` | `rcp` |
+| `rcp_policy_basic_info` | `rcp` |
+| `rcp_relation_policy_tree` | `rcp` |
+| `rcp_policy_binding_info_list` | `rcp` |
+| `rcp_policy_search` | `rcp` |
+| `rcp_policy_blur_search` | `rcp` |
+| `rcp_policy_all_version` | `rcp` |
+| `rcp_pipeline_policy_versions_by_code` | `rcp` |
 | `rcp_policy_version_lookup` | `rcp` |
 | `rcp_policy_detail_lookup` | `rcp` |
 | `rcp_policy_release_record_lookup` | `rcp` |
@@ -393,6 +408,9 @@ service/browser credential material.
 | `rcp_node_policy_attribution` | `rcp` |
 | `rcp_node_bind_policy_attribution` | `rcp` |
 | `track_analysis_check_data_ready` | `track_analysis` |
+| `track_analysis_product_list` | `track_analysis` |
+| `track_sequence_dimension_list` | `track_analysis` |
+| `track_data_type_list` | `track_analysis` |
 
 ## Forbidden Actions
 

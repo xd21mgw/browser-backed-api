@@ -128,7 +128,7 @@ Pre-check:
 2. For Remote Main Agent + Mac Local Worker Mode, confirm Mac node is connected.
 3. Call `{service_base_url}/health`.
 4. Call `{service_base_url}/actions`.
-5. Confirm `action_count=19`.
+5. Confirm `action_count=37`.
 
 Default action group:
 

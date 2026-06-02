@@ -8,7 +8,7 @@ local internal testing.
 - `git status --short` is clean.
 - `npm run check` passes.
 - `npm run test:mock` passes.
-- `ACTION_REGISTRY.md` shows callable `action_count=19`.
+- `ACTION_REGISTRY.md` shows callable `action_count=37`.
 - No `.env`, `node_modules`, Chrome profile directory, refresh state, HAR,
   screenshot, or temporary capture is committed.
 - `PASSTHROUGH_SERVICE_CONTRACT.md` is the service-layer contract for
@@ -125,7 +125,7 @@ Rules:
 - `/health` returns `ok=true`.
 - `service_mode=live`.
 - `auth_state=ready`, or the specific origin needed by the action is ready.
-- `action_count=19`.
+- `action_count=37`.
 - No credential material is output.
 - In Local Agent Mode, the service is listening on `127.0.0.1`.
 - In Remote Main Agent + Mac Local Worker Mode, the Agent uses a configured
@@ -203,11 +203,26 @@ Explicit actions:
 - `archives_user_profile`
 - `archives_user_analysis`
 - `archives_photo_search`
+- `archives_photo_profile`
+- `archives_photo_meta`
+- `archives_photo_report_aggregate`
+- `archives_photo_user_autonomy`
+- `archives_gallery_photo_list`
 - `archives_related_users`
 - `archives_private_message_search`
 - `archives_past_four_items`
 - `rcp_event_detail`
 - `rcp_event_feature_list`
+- `rcp_event_tree_or_decision`
+- `rcp_fast_query_hbase`
+- `rcp_feature_info_by_keys`
+- `rcp_policy_basic_info`
+- `rcp_relation_policy_tree`
+- `rcp_policy_binding_info_list`
+- `rcp_policy_search`
+- `rcp_policy_blur_search`
+- `rcp_policy_all_version`
+- `rcp_pipeline_policy_versions_by_code`
 - `rcp_policy_version_lookup`
 - `rcp_policy_detail_lookup`
 - `rcp_policy_release_record_lookup`
@@ -215,6 +230,9 @@ Explicit actions:
 - `rcp_node_policy_attribution`
 - `rcp_node_bind_policy_attribution`
 - `track_analysis_check_data_ready`
+- `track_analysis_product_list`
+- `track_sequence_dimension_list`
+- `track_data_type_list`
 
 Excluded-noise categories are never open:
 
