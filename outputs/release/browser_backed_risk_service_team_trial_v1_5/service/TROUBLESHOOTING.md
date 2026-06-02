@@ -56,6 +56,11 @@ Fix:
 
 - Keep the browser-backed service running on the teammate's computer.
 - Run browser-backed service on the user's Mac.
+- Keep the user's Mac powered on and online.
+- Keep MyFlicker / Mac node client, or the approved equivalent Mac worker
+  channel, online and connected.
+- Make sure the Chrome profile is not locked by another Chrome/Playwright
+  process.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL` or the Agent's equivalent setting
   to a controlled Mac worker/bridge/tunnel URL.
 - The bridge/tunnel should forward only `/health`, `/actions`,
@@ -64,6 +69,55 @@ Fix:
 - Do not expose the service directly to the public internet.
 - Do not forward or upload profile files, cookies, tokens, sessions, request
   headers, localStorage, or Playwright storageState.
+
+## mac_node_disconnected
+
+Symptom:
+
+- Remote main Agent cannot reach the Mac worker.
+- Local Mac service may still be healthy, but the remote channel is offline.
+- Skill status reports `mac_node_disconnected` or equivalent connectivity
+  failure.
+
+Meaning:
+
+- MyFlicker / Mac node client, or the approved equivalent worker channel, is not
+  connected.
+- The remote main Agent cannot call the Mac local worker until the Mac node is
+  online.
+
+Fix:
+
+- Open the MyFlicker Mac client.
+- Confirm node connected.
+- Confirm the browser/node permissions are normal.
+- Retry `/browser-backed-risk-service 状态`.
+- If needed, run on the Mac:
+
+```sh
+npm run worker:status
+npm run worker:start
+```
+
+Do not change to profile copy, cookie injection, storageState injection,
+`sso_session.py`, or arbitrary URL fetch.
+
+## service_not_running
+
+Symptom:
+
+- Mac node is connected, but `{service_base_url}/health` fails.
+- Local Mac `curl http://127.0.0.1:8787/health` fails.
+
+Fix:
+
+```sh
+npm run worker:status
+npm run worker:start
+```
+
+If the service was intentionally started in foreground mode, keep the
+`npm run start:live` terminal open.
 
 ## Main Agent Machine Has No GUI
 
@@ -328,6 +382,10 @@ For fixed worker diagnostics:
 ```sh
 npm run worker:doctor
 ```
+
+If the profile is locked, close the process using the same profile before
+running `worker:start`, `refresh:once`, or `open:profile`. Do not delete the
+profile as the first step.
 
 You can also inspect obvious local Chrome/Playwright processes without reading
 the profile contents:

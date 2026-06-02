@@ -28,13 +28,26 @@ Remote Mac worker day-to-day usage should be low-friction:
 
 - First setup may require Mac command authorization, opening Mac Chrome, SSO,
   two-factor checks, and Archives account confirmation.
+- The user's Mac must be powered on, online, and running the browser-backed
+  service.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay connected for remote main Agent calls.
+- Chrome profile must not be locked by another Chrome/Playwright process.
 - Daily queries should not open a browser every time.
 - Daily queries should not require repeated command approvals.
 - Keep the Mac worker running when possible and let the remote main Agent call
   only `service_base_url/actions/<action_name>`.
+- If MyFlicker / Mac node is offline, the remote main Agent cannot call the Mac
+  worker. Reconnect the Mac client instead of trying profile copy, cookie
+  injection, storageState injection, or `sso_session.py`.
 - If login/confirmation expires, readiness/prewarm/ensure-ready first attempts
   lightweight landing-flow activation. If password, 2FA, QR, or captcha appears,
   the service returns `manual_login_required`.
+
+MyFlicker / Mac node only provides a controlled way for the remote main Agent to
+run status/action calls on the Mac or reach the Mac worker `service_base_url`.
+It does not read authentication material and does not replace the
+browser-backed service.
 
 The service only does:
 
@@ -193,6 +206,7 @@ rc-cli workflow:
 - `/browser-backed-risk-service 启动`
 - `/browser-backed-risk-service 状态`
 - `/browser-backed-risk-service actions`
+- `/browser-backed-risk-service 自测用户 <user_id>`
 - `/browser-backed-risk-service 调用 <action> <params>`
 - `/browser-backed-risk-service 停止`
 - `/browser-backed-risk-service 排障`
@@ -201,6 +215,42 @@ The Skill resolves `service_base_url`, checks `/health`, lists `/actions`,
 validates allowlisted actions and typed params, and outputs only envelope
 summaries. It must not print full upstream body or ask the service to do risk
 judgment.
+
+`/browser-backed-risk-service 自测用户 <user_id>` is the recommended one-command
+user self-test. It lets a user run one real case, similar to an rc-cli flow,
+while keeping the service pure passthrough. The main Agent calls a safe default
+group of allowlisted actions:
+
+- `track_analysis_summary` with `sub_interface=profile`
+- `login_logs_search`
+- `weapon_inventory`
+- `archives_user_profile`
+
+Optional smoke:
+
+- `archives_private_message_search` with `direction=sent`, `page=1`,
+  `count=20`
+
+`rcp_snapshot` is not included by default because it is not a direct
+`user_id` lookup.
+
+Expected self-test output:
+
+- `service_ready`
+- `action_count=19`
+- per-action envelope summary
+- per-action `live_status`
+- main-agent observation summary such as `track_profile_observed`,
+  `login_records_observed`, `device_graph_observed`, and
+  `archives_profile_observed`
+- `missing_sources`
+- `credential_material_output=false`
+- `raw_upstream_body_printed=false`
+
+Any field extraction, table, evidence-package summary, missing-evidence list, or
+next-step suggestion belongs to the main Agent. The browser-backed service still
+does not produce summaries, evidence cards, source quality, no-data
+interpretation, or risk judgment.
 
 Mac worker npm command helpers:
 
@@ -237,6 +287,11 @@ Use this when the main Agent runs remotely or in a cloud environment.
 - Keep Chrome profile and refresh state on the teammate's Mac.
 - Let the teammate complete SSO, two-factor checks, and Archives account
   confirmation in Mac Chrome.
+- Keep the teammate's Mac powered on and online.
+- Keep MyFlicker / Mac node client, or the approved equivalent channel, online
+  and connected.
+- Keep browser-backed service running on the Mac.
+- Ensure the Chrome profile is not locked by another Chrome/Playwright process.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL`, or the Agent's equivalent
   setting, to a controlled Mac worker/bridge/tunnel URL.
 - Do not expose the service directly to the public internet.
@@ -257,6 +312,11 @@ npm run worker:status
 Use `npm run worker:doctor` for profile lock, port, install, or readiness
 diagnostics. Use `npm run worker:stop` to stop the worker without deleting the
 profile or refresh state.
+
+If the remote Agent reports `mac_node_disconnected`, open the MyFlicker Mac
+client, confirm the node is connected, and retry `/browser-backed-risk-service
+状态`. Do not switch to Chrome profile copy, cookie injection, storageState
+injection, or `sso_session.py`.
 
 ### Not Recommended: Mac Profile Copy To Linux Headless
 
@@ -339,6 +399,17 @@ curl -X POST "$SERVICE_BASE_URL/actions/login_logs_search" \
   -H 'content-type: application/json' \
   -d '{"user_id":"2871834924"}'
 ```
+
+Skill self-test example:
+
+```txt
+/browser-backed-risk-service 自测用户 403082302
+```
+
+Replace the sample user with a user you personally have permission to inspect
+and that may have platform data. The Skill should output envelope summaries,
+main-agent processing summaries, missing sources, and safety fields, not full
+upstream body.
 
 ## Archives Landing Flow
 

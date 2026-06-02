@@ -67,6 +67,22 @@ This matches the successful rc-cli style path: authentication and platform
 access happen locally on Mac, while the remote Agent only invokes bounded worker
 capabilities.
 
+Online dependency for remote calls:
+
+- The user's Mac must be powered on and connected to the network.
+- The browser-backed service must be running on the Mac.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay online and connected.
+- Chrome profile must not be locked by another Chrome/Playwright process.
+- If MyFlicker / Mac node is disconnected, do not switch to profile copy,
+  cookie injection, storageState injection, or `sso_session.py`; ask the user
+  to open the MyFlicker Mac client and reconnect the Mac node.
+
+MyFlicker / Mac node lets the remote main Agent execute controlled status/action
+calls on the Mac or reach the Mac worker `service_base_url`. It does not read
+cookies, tokens, sessions, request headers, profile files, or browser storage,
+and it does not replace the browser-backed service.
+
 Daily user experience should be low-friction:
 
 - First setup may need Mac command approval and a visible Mac Chrome login.
@@ -152,6 +168,121 @@ manual. Use these command intents.
 - Remind that service output is a transport envelope and raw upstream body is
   suppressed.
 
+### `/browser-backed-risk-service 自测用户 <user_id>`
+
+Purpose: validate service readiness, Mac worker connectivity, fixed action
+calls, and main-Agent post-processing on one real user case.
+
+This command does not ask the browser-backed service to summarize, score, or
+judge risk. The service still returns only passthrough transport envelopes. The
+main Agent may process returned business response bodies or body metadata when
+available and produce a clearly labeled main-agent observation summary.
+
+Before running:
+
+- Confirm `service_base_url`.
+- In Remote Main Agent + Mac Local Worker Mode, confirm the Mac node is
+  connected and `{service_base_url}/health` is reachable.
+- Call `{service_base_url}/actions` and confirm `action_count=19`.
+
+Default low-risk read-only action group:
+
+1. `track_analysis_summary`
+
+```json
+{
+  "response_mode": "passthrough",
+  "sub_interface": "profile",
+  "user_id": "<user_id>",
+  "appName": "KUAISHOU"
+}
+```
+
+2. `login_logs_search`
+
+```json
+{
+  "response_mode": "passthrough",
+  "user_id": "<user_id>"
+}
+```
+
+3. `weapon_inventory`
+
+```json
+{
+  "response_mode": "passthrough",
+  "user_id": "<user_id>"
+}
+```
+
+4. `archives_user_profile`
+
+```json
+{
+  "response_mode": "passthrough",
+  "user_id": "<user_id>"
+}
+```
+
+Optional sample action:
+
+```json
+{
+  "response_mode": "passthrough",
+  "user_id": "<user_id>",
+  "direction": "sent",
+  "page": 1,
+  "count": 20
+}
+```
+
+Use the optional sample for `archives_private_message_search` only when the
+user wants an Archives message smoke and accepts that results may be `no_data`
+or permission-limited.
+
+Do not include `rcp_snapshot` in the default user self-test group. It is not a
+direct `user_id` lookup and needs event/source/policy params.
+
+Recommended output:
+
+1. Service status:
+   - `service_base_url`
+   - `auth_state`
+   - `action_count`
+2. Action call table:
+   - `action_name`
+   - `ok`
+   - `upstream.status`
+   - `body_present`
+   - `body_omitted`
+   - `body_truncated`
+   - `observed_bytes`
+   - `error_type`
+   - `live_status`
+3. Main-agent observation summary:
+   - `track_profile_observed`
+   - `login_records_observed`
+   - `device_graph_observed`
+   - `archives_profile_observed`
+   - `private_message_sample_observed`
+4. Missing or blocked sources:
+   - `manual_login_required`
+   - `auth_required`
+   - `no_data`
+   - `response_too_large`
+   - `permission_denied`
+5. Safety:
+   - `credential_material_output=false`
+   - `raw_upstream_body_printed=false`
+   - `cookie/token/session/header_output=false`
+
+The main Agent may generate tables, field coverage summaries, missing-evidence
+lists, and next-step suggestions from the passthrough results. It must label
+that as main-Agent processing, not service output. It must not treat `no_data`
+as no risk, and must not treat one strategy hit or device-risk field as a final
+risk conclusion.
+
 ### `/browser-backed-risk-service 调用 <action> <params>`
 
 - Confirm `service_base_url`.
@@ -178,6 +309,7 @@ Cover:
 - `auth_state=auth_required`
 - `manual_login_required`
 - `two_factor_required`
+- MyFlicker / Mac node disconnected
 - no GUI on the main Agent machine
 - `service_base_url` unreachable
 - bridge/tunnel unreachable
@@ -190,6 +322,11 @@ profile copy to Linux.
 
 If the Mac worker is available, run `npm run worker:doctor` before asking for
 manual profile reset. Do not delete the profile.
+
+If the Mac node is disconnected, ask the user to open the MyFlicker Mac client,
+confirm the node is connected, and retry `/browser-backed-risk-service 状态`.
+Do not try profile copy, cookie injection, storageState injection, or
+`sso_session.py` as a workaround.
 
 ## Response Contract
 

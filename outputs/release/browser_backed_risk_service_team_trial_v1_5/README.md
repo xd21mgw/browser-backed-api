@@ -37,6 +37,11 @@ This is the recommended remote-main-agent path.
 - Chrome profile stays on the Mac.
 - User completes SSO, two-factor checks, and Archives account confirmation in
   Mac Chrome.
+- The user's Mac must be powered on, online, and running the browser-backed
+  service.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay online and connected.
+- Chrome profile must not be locked by another Chrome/Playwright process.
 - Main Agent calls the Mac service through Mac node, controlled bridge, or
   controlled tunnel.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>`.
@@ -44,6 +49,15 @@ This is the recommended remote-main-agent path.
 Daily use should be low-friction. Keep the Mac worker running and let the
 remote main Agent call service APIs. Browsers should open only for first setup,
 periodic expiry recovery, or `manual_login_required`.
+
+MyFlicker / Mac node lets the remote main Agent execute controlled status/action
+calls on the Mac or reach the Mac worker `service_base_url`. It does not read
+cookies, tokens, sessions, request headers, profile files, or browser storage,
+and it does not replace the browser-backed service.
+
+If MyFlicker / Mac node is offline, the remote main Agent cannot call the Mac
+worker. Reconnect the Mac client; do not switch to profile copy, cookie
+injection, storageState injection, or `sso_session.py`.
 
 Do not copy the Mac profile to Linux headless as the normal workflow. Joint
 testing showed RCP, Weapon, Login Logs, and Archives can trigger
@@ -69,6 +83,7 @@ The Skill supports rc-cli style command intents:
 - `/browser-backed-risk-service 启动`
 - `/browser-backed-risk-service 状态`
 - `/browser-backed-risk-service actions`
+- `/browser-backed-risk-service 自测用户 <user_id>`
 - `/browser-backed-risk-service 调用 <action> <params>`
 - `/browser-backed-risk-service 停止`
 - `/browser-backed-risk-service 排障`
@@ -76,6 +91,22 @@ The Skill supports rc-cli style command intents:
 The Skill resolves `service_base_url`, checks `/health`, lists `/actions`, and
 validates allowlisted actions before invoking them. It outputs only envelope
 summaries and does not print full upstream body.
+
+`/browser-backed-risk-service 自测用户 <user_id>` is the recommended one-command
+user self-test. The main Agent calls a default read-only action group:
+
+- `track_analysis_summary`
+- `login_logs_search`
+- `weapon_inventory`
+- `archives_user_profile`
+
+Optional:
+
+- `archives_private_message_search`
+
+The service remains pure passthrough. Field extraction, tables, evidence-package
+summaries, missing-source lists, and next-step suggestions are main-Agent
+processing over returned envelopes, not browser-backed service output.
 
 ## Auth State Transfer POC
 

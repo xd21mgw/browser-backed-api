@@ -17,9 +17,20 @@ Version: `browser_backed_risk_service_team_trial_v1_5`
   - 启动
   - 状态
   - actions
+  - 自测用户
   - 调用
   - 停止
   - 排障
+- Added `/browser-backed-risk-service 自测用户 <user_id>` as the one-command
+  user self-test workflow.
+- Clarified that main-Agent field extraction, tables, evidence-package
+  summaries, and next-step suggestions are main-Agent processing over returned
+  envelopes, not browser-backed service output.
+- Clarified Remote Main Agent + Mac Local Worker online dependencies:
+  - user Mac powered on and online
+  - browser-backed service running
+  - MyFlicker / Mac node connected
+  - Chrome profile not locked
 - Kept Local Agent Mode.
 - Removed Temporary Profile Bootstrap as a recommended path.
 - Added `AUTH_STATE_TRANSFER_POC.md`.

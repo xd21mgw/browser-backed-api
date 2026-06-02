@@ -29,6 +29,20 @@ service_base_url=<mac_worker_or_bridge_url>
 The remote value can be provided through `BROWSER_BACKED_SERVICE_BASE_URL` or
 the upper-layer Agent's equivalent configuration.
 
+Remote online dependency:
+
+- The user's Mac must be powered on.
+- The user's Mac must be online.
+- The browser-backed service must be running on the Mac.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay online and connected.
+- The Chrome profile must not be locked by another Chrome/Playwright process.
+
+MyFlicker / Mac node lets the remote main Agent execute controlled status/action
+calls on the Mac or reach the Mac local worker `service_base_url`. It does not
+read cookies, tokens, sessions, request headers, profile files, or browser
+storage. It also does not replace the browser-backed service.
+
 ## Supported Modes
 
 ### Local Agent Mode
@@ -68,6 +82,7 @@ Daily remote main Agent queries should:
 
 - call `service_base_url/actions/<action_name>`
 - reuse the existing Mac profile
+- require the Mac node/MyFlicker connection to stay online
 - avoid opening Chrome every time
 - avoid repeated ad hoc command approvals
 - return only passthrough envelope summaries
@@ -82,6 +97,11 @@ Recommended fixed Mac worker commands:
 If readiness expires, the service attempts lightweight landing-flow activation
 in refresh/prewarm/ensure-ready. If password, 2FA, QR, or captcha appears, it
 returns `manual_login_required`.
+
+If MyFlicker / Mac node disconnects, the remote main Agent cannot call the Mac
+worker. The correct fix is to ask the user to open the MyFlicker Mac client,
+confirm node connected, and retry status. Do not change to profile copy,
+cookie injection, storageState injection, or `sso_session.py`.
 
 ## Not Recommended: Profile Copy To Linux Headless
 
@@ -123,6 +143,9 @@ POC succeeds, it can become a v1.6 focus area or a promoted deployment mode.
    - A small deployment wrapper can start or reach the Mac service and expose a
      controlled worker URL to the remote main Agent.
    - The wrapper should route only approved browser-backed service paths.
+   - It must not read or forward browser authentication material.
+   - It should report a clear `mac_node_disconnected` style status when the Mac
+     client is offline.
 
 4. Local worker registration to a central gateway
    - The Mac local worker initiates an outbound connection to a central gateway.

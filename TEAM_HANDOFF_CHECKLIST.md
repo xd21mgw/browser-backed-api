@@ -62,12 +62,31 @@ The Agent Skill should guide teammates through these command-style intents:
 - `/browser-backed-risk-service 启动`
 - `/browser-backed-risk-service 状态`
 - `/browser-backed-risk-service actions`
+- `/browser-backed-risk-service 自测用户 <user_id>`
 - `/browser-backed-risk-service 调用 <action> <params>`
 - `/browser-backed-risk-service 停止`
 - `/browser-backed-risk-service 排障`
 
 The Skill should check status before action calls, validate allowlisted actions
 and typed params, and output only envelope summaries.
+
+`/browser-backed-risk-service 自测用户 <user_id>` is the preferred one-command
+teammate self-test. It should call the default read-only action group:
+
+- `track_analysis_summary`
+- `login_logs_search`
+- `weapon_inventory`
+- `archives_user_profile`
+
+Optional:
+
+- `archives_private_message_search`
+
+It should output service status, per-action envelope summaries, live status,
+main-agent processing summaries, missing/blocked sources, and safety fields.
+It must not print full upstream body. It must label any field extraction,
+evidence-package summary, or next-step suggestion as main-Agent processing, not
+browser-backed service output.
 
 For Mac worker daily use, the Skill should prefer fixed worker commands:
 
@@ -126,6 +145,11 @@ Remote Main Agent + Mac Local Worker Mode:
 - Main Agent runs remotely or in the cloud.
 - Browser-backed service runs on the teammate's Mac.
 - Chrome profile and refresh state stay on the Mac.
+- The teammate's Mac is powered on and online.
+- MyFlicker / Mac node client, or the approved equivalent channel, is online
+  and connected.
+- Browser-backed service is running on the Mac.
+- Chrome profile is not locked by another Chrome/Playwright process.
 - The teammate completes SSO, two-factor checks, and Archives account
   confirmation in Mac Chrome.
 - The remote Agent must not assume `127.0.0.1` points to the teammate's
@@ -138,6 +162,9 @@ Remote Main Agent + Mac Local Worker Mode:
 - Daily use should not reopen the browser or ask the user to repeatedly approve
   command snippets. Keep the Mac worker running and let the remote main Agent
   call `service_base_url/actions/<action_name>`.
+- If the Mac node is disconnected, ask the user to open the MyFlicker Mac
+  client, confirm node connected, and retry status. Do not use profile copy,
+  cookie injection, storageState injection, or `sso_session.py`.
 
 Not recommended:
 

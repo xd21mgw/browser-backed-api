@@ -60,6 +60,17 @@ BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>
 Do not propose Mac profile copy to Linux, cookie injection, storageState
 injection, or `sso_session.py`.
 
+Remote online requirement:
+
+- The user's Mac must be powered on and online.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay connected.
+- The browser-backed service must be running.
+- The Chrome profile must not be locked by another Chrome/Playwright process.
+- If Mac node is disconnected, ask the user to open the MyFlicker Mac client
+  and confirm node connectivity. Do not fall back to profile copy, cookie
+  injection, storageState injection, or `sso_session.py`.
+
 ## `/browser-backed-risk-service 状态`
 
 Purpose: check service readiness.
@@ -100,6 +111,79 @@ Behavior:
 - Show typed params.
 - State that service output is a transport envelope and raw upstream body is
   suppressed.
+
+## `/browser-backed-risk-service 自测用户 <user_id>`
+
+Purpose: run one real user case through service readiness, Mac worker
+connectivity, fixed action calls, and main-Agent post-processing.
+
+This is a user self-test workflow, not a service-side risk judgment. The
+browser-backed service remains pure passthrough. Any field extraction, table,
+evidence-package summary, or next-step suggestion is main-Agent processing over
+the returned envelopes and available business body metadata.
+
+Pre-check:
+
+1. Resolve `service_base_url`.
+2. For Remote Main Agent + Mac Local Worker Mode, confirm Mac node is connected.
+3. Call `{service_base_url}/health`.
+4. Call `{service_base_url}/actions`.
+5. Confirm `action_count=19`.
+
+Default action group:
+
+| action | params |
+| --- | --- |
+| `track_analysis_summary` | `{"response_mode":"passthrough","sub_interface":"profile","user_id":"<user_id>","appName":"KUAISHOU"}` |
+| `login_logs_search` | `{"response_mode":"passthrough","user_id":"<user_id>"}` |
+| `weapon_inventory` | `{"response_mode":"passthrough","user_id":"<user_id>"}` |
+| `archives_user_profile` | `{"response_mode":"passthrough","user_id":"<user_id>"}` |
+
+Optional action:
+
+| action | params |
+| --- | --- |
+| `archives_private_message_search` | `{"response_mode":"passthrough","user_id":"<user_id>","direction":"sent","page":1,"count":20}` |
+
+Do not include `rcp_snapshot` by default because it is not a direct `user_id`
+lookup. Use RCP actions only when the user provides event/source/policy params.
+
+Recommended output:
+
+1. Service status:
+   - `service_base_url`
+   - `auth_state`
+   - `action_count`
+2. Action call table:
+   - `action_name`
+   - `ok`
+   - `upstream.status`
+   - `body_present`
+   - `body_omitted`
+   - `body_truncated`
+   - `observed_bytes`
+   - `error_type`
+   - `live_status`
+3. Main-agent processing summary:
+   - `track_profile_observed`
+   - `login_records_observed`
+   - `device_graph_observed`
+   - `archives_profile_observed`
+   - `private_message_sample_observed`
+4. Missing or blocked:
+   - `manual_login_required`
+   - `auth_required`
+   - `no_data`
+   - `response_too_large`
+   - `permission_denied`
+5. Safety:
+   - `credential_material_output=false`
+   - `raw_upstream_body_printed=false`
+   - `cookie/token/session/header_output=false`
+
+Do not print full upstream body. Do not call this command `综合研判`; if the
+upper-layer main Agent continues with analysis, label it as main-Agent analysis,
+not browser-backed service output.
 
 ## `/browser-backed-risk-service 调用 <action> <params>`
 
@@ -172,6 +256,7 @@ Cover:
 - `manual_login_required`
 - `two_factor_required`
 - no GUI on the remote main Agent machine
+- MyFlicker / Mac node disconnected
 - `service_base_url` unreachable
 - bridge/tunnel unreachable
 - action not allowlisted
@@ -185,6 +270,10 @@ npm run worker:doctor
 
 Recommended fix for remote main Agents: use Mac Local Worker Mode. Do not use
 Mac profile copy to Linux headless as the team workflow.
+
+If `mac_node_disconnected` appears, ask the user to open the MyFlicker Mac
+client, confirm the node is connected, and retry `/browser-backed-risk-service
+状态`. Do not change deployment mode or attempt cookie/profile workarounds.
 
 ## Mac Worker Fixed Commands
 

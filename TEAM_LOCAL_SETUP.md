@@ -49,6 +49,12 @@ Use this only when the main Agent runs remotely or in the cloud.
 - The service runs on your Mac.
 - Your Mac acts as the local worker.
 - Chrome profile and refresh state stay on your Mac.
+- Your Mac must be powered on and connected to the network while the remote
+  main Agent is using it.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  must stay online and connected.
+- Browser-backed service must be running on your Mac.
+- The Chrome profile must not be locked by another Chrome/Playwright process.
 - You complete SSO, two-factor checks, and Archives account confirmation in Mac
   Chrome.
 - The remote main Agent must not assume its own `127.0.0.1` is your Mac.
@@ -66,6 +72,11 @@ storage, or `.env` files to the remote Agent.
 This is the recommended remote main Agent path. It matches the successful
 rc-cli style flow: authentication and platform access happen on Mac; the remote
 Agent only calls the bounded Mac worker.
+
+MyFlicker / Mac node lets the remote main Agent run controlled status/action
+calls on your Mac or reach your Mac worker `service_base_url`. It does not read
+cookies, tokens, sessions, request headers, profile files, or browser storage,
+and it does not replace the browser-backed service.
 
 ### Not Recommended: Mac Profile Copy To Linux
 
@@ -218,6 +229,39 @@ npm run worker:start
 Daily use should not open Chrome every time and should not require repeated
 command approvals. The main Agent calls `service_base_url/actions/<action_name>`
 and receives a passthrough envelope.
+
+If MyFlicker / Mac node is disconnected, the remote main Agent cannot reach the
+Mac worker. Open the MyFlicker Mac client, confirm node connected, then retry
+status. Do not switch to profile copy, cookie injection, storageState injection,
+or `sso_session.py`.
+
+## Skill User Self-Test
+
+For a one-command teammate trial through the Agent Skill:
+
+```txt
+/browser-backed-risk-service 自测用户 403082302
+```
+
+Replace the sample user with a `user_id` you personally have permission to
+inspect and that may have platform data.
+
+The Skill should call this default read-only action group:
+
+- `track_analysis_summary`
+- `login_logs_search`
+- `weapon_inventory`
+- `archives_user_profile`
+
+Optional:
+
+- `archives_private_message_search`
+
+The browser-backed service still returns only passthrough envelopes. The main
+Agent may extract non-sensitive business fields, build tables, list missing
+sources, and provide a structured observation summary, but that processing is
+main-Agent output, not service output. Do not print full upstream body, and do
+not ask the service to make a risk judgment.
 
 If auth/confirmation expires:
 

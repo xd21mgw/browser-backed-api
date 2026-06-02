@@ -14,6 +14,16 @@ Use Mac Local Worker Mode for remote/cloud/Linux main Agents.
 - User completes SSO, two-factor checks, and Archives account confirmation in
   the Mac GUI.
 - Main Agent calls the Mac service through Mac node, bridge, or tunnel.
+- The user's Mac stays powered on and connected to the network while the remote
+  main Agent is using the service.
+- MyFlicker / Mac node client, or the approved equivalent Mac worker channel,
+  stays online and connected.
+- The Chrome profile is not locked by another Chrome/Playwright process.
+
+MyFlicker / Mac node lets the remote main Agent run controlled status/action
+calls on the Mac or reach the Mac worker `service_base_url`. It does not read
+cookies, tokens, sessions, request headers, profile files, or browser storage,
+and it does not replace the browser-backed service.
 
 Do not use Mac profile copy to Linux headless as the normal workflow. Joint
 testing showed that RCP, Weapon, Login Logs, and Archives can trigger
@@ -24,7 +34,7 @@ testing showed that RCP, Weapon, Login Logs, and Archives can trigger
 Unpack the release on the Mac and enter the service directory:
 
 ```sh
-cd browser_backed_risk_service_team_trial_v1_4/service
+cd browser_backed_risk_service_team_trial_v1_5/service
 ```
 
 Install dependencies:
@@ -79,6 +89,10 @@ npm run worker:start
 - The service reuses the existing Mac profile.
 - The service returns a passthrough transport envelope.
 - The service does not output full upstream body.
+- MyFlicker / Mac node must remain connected. If it disconnects, the remote
+  main Agent cannot reach the Mac worker even when the local service is healthy.
+- If MyFlicker / Mac node disconnects, open the MyFlicker Mac client, confirm
+  node connected, and retry the Skill status command.
 
 If readiness expires, refresh/prewarm/ensure-ready attempts lightweight landing
 flow activation. If the page is only username prefilled plus `Next`,
@@ -125,6 +139,13 @@ For example:
 BROWSER_BACKED_SERVICE_BASE_URL=<bridge_or_mac_worker_url>
 ```
 
+Before action calls, the main Agent should verify:
+
+- Mac node connected.
+- `{service_base_url}/health` reachable.
+- `{service_base_url}/actions` returns `action_count=19`.
+- Required origin readiness is acceptable for the intended action.
+
 When recording smoke results, capture only envelope fields:
 
 - `http_status`
@@ -163,6 +184,10 @@ It must not expose:
 
 The bridge/tunnel should have access control such as internal ACL, temporary
 token, user confirmation, or an equivalent deployment guard.
+
+If the bridge, tunnel, MyFlicker client, or Mac node is offline, fix that
+connectivity first. Do not switch to Chrome profile copy to Linux, cookie
+injection, storageState injection, or `sso_session.py`.
 
 ## Stop The Mac Service
 
