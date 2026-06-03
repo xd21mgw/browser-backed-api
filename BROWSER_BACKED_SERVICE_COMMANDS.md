@@ -11,6 +11,14 @@ requiring users to manually study every registry file first.
 
 Purpose: prepare the release on the machine that will run the service.
 
+Before installing, read:
+
+- `SKILL.md`
+- `ACTION_REGISTRY.md`
+- `CAPABILITY_INDEX.yaml`
+- `PASSTHROUGH_CONTRACT.md`
+- `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`
+
 Steps:
 
 1. Check Node.js and npm.
@@ -28,6 +36,26 @@ Steps:
 
 Do not ask for cookies, tokens, sessions, request headers, storageState, or
 profile file contents.
+
+Remote Main Agent + Mac Local Worker package transfer must follow
+`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`:
+
+1. Linux/main-agent workspace has the release tarball.
+2. Linux/main-agent starts a temporary HTTP server in the release directory.
+3. Mac node downloads the release with `curl`.
+4. Mac extracts the release.
+5. Mac enters `service/`.
+6. Mac runs `npm install`.
+7. Mac runs `npm run worker:doctor`.
+8. Mac runs `npm run worker:start`.
+9. Mac runs `npm run worker:expose`.
+10. Use the printed `BROWSER_BACKED_SERVICE_BASE_URL`.
+
+Do not switch to base64 chunks, per-file writes, KCDN/ad hoc uploads, SSH/SCP
+guessing, profile copy, `sso_session.py`, cookie injection, storageState
+injection, arbitrary URL fetch, or profile/state/auth-state transfer. If the
+HTTP server is unreachable, report `release_transfer_failed` and stop. If Mac
+command approval times out, report `mac_command_approval_required` and stop.
 
 ## `/browser-backed-risk-service 启动`
 

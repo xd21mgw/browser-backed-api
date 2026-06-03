@@ -17,6 +17,14 @@ local internal testing.
 ## First-Time Teammate Steps
 
 1. Download the repo and enter the project directory.
+   - Remote transfer must follow `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`.
+   - If Linux HTTP server transfer fails, report `release_transfer_failed` and
+     stop.
+   - If Mac node command approval times out, report
+     `mac_command_approval_required` and stop.
+   - Do not use base64 chunks, per-file writes, KCDN/ad hoc uploads, SSH/SCP
+     guessing, profile copy, cookie injection, storageState injection, or
+     arbitrary URL fetch.
 2. Run `npm install`.
 3. Run `npm run worker:start`.
    - If manual login or account confirmation is required, the command opens the

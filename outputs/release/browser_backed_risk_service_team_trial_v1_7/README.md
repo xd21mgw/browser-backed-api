@@ -51,6 +51,13 @@ Remote Main Agent + Mac Local Worker Mode:
 Do not copy Mac profiles to Linux, inject cookies, inject storageState, use
 `sso_session.py`, expose arbitrary URLs, or print credential material.
 
+Install/transfer hard rule: use the Verified Install Transfer Path in
+`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`. If the Linux temporary HTTP server is
+unreachable, stop with `release_transfer_failed`. If Mac command approval times
+out, stop with `mac_command_approval_required`. Do not switch to base64 chunks,
+per-file writes, KCDN/ad hoc uploads, SSH/SCP guessing, profile copy, cookie
+injection, storageState injection, or arbitrary URL fetch.
+
 ## Capability Entry Points
 
 Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` instead of memorizing all

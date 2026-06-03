@@ -1,0 +1,155 @@
+version: 1
+service: browser_backed_risk_service
+action_count: 37
+contract_source: ACTION_REGISTRY.md
+positioning: fixed_action_typed_params_safe_passthrough
+
+capabilities:
+  - capability: user_profile
+    display_name: 用户画像
+    suitable_questions:
+      - 查用户基础画像、账号状态、档案中心画像和前端活跃画像
+    default_actions:
+      - archives_user_profile
+      - archives_user_analysis
+      - track_analysis_summary
+    actions:
+      - archives_user_profile
+      - archives_user_analysis
+      - track_analysis_summary
+
+  - capability: login_history
+    display_name: 登录历史
+    suitable_questions:
+      - 查统一登录日志、登录设备、登录方式和登录链路
+    default_actions:
+      - login_logs_search
+    actions:
+      - login_logs_search
+
+  - capability: device_graph
+    display_name: 设备图谱
+    suitable_questions:
+      - 查用户关联设备、设备风险标签和设备活跃
+    default_actions:
+      - weapon_inventory
+      - track_analysis_summary
+    actions:
+      - weapon_inventory
+      - track_analysis_summary
+      - archives_related_users
+
+  - capability: content_and_photo
+    display_name: 作品/内容
+    suitable_questions:
+      - 查作品列表、作品详情、视频 meta、举报聚合和用户作品锚点
+    default_actions:
+      - archives_photo_search
+      - archives_photo_profile
+      - archives_photo_meta
+    actions:
+      - archives_photo_search
+      - archives_photo_profile
+      - archives_photo_meta
+      - archives_photo_report_aggregate
+      - archives_photo_user_autonomy
+      - archives_gallery_photo_list
+
+  - capability: social_and_private_message
+    display_name: 私信/社交
+    suitable_questions:
+      - 查私信样本、关联用户和关系链线索
+    default_actions:
+      - archives_private_message_search
+    actions:
+      - archives_private_message_search
+      - archives_related_users
+
+  - capability: profile_change
+    display_name: 资料变更
+    suitable_questions:
+      - 查历史昵称、头像、简介、背景等过往四项资料变更
+    default_actions:
+      - archives_past_four_items
+    actions:
+      - archives_past_four_items
+
+  - capability: rcp_strategy_event
+    display_name: 策略事件/RCP
+    suitable_questions:
+      - 查策略事件入口、事件详情、特征、策略树、策略版本和归因链
+    default_actions:
+      - rcp_snapshot
+      - rcp_event_detail
+      - rcp_event_feature_list
+      - rcp_policy_tree_lookup
+    actions:
+      - rcp_snapshot
+      - rcp_event_detail
+      - rcp_event_feature_list
+      - rcp_event_tree_or_decision
+      - rcp_fast_query_hbase
+      - rcp_feature_info_by_keys
+      - rcp_policy_basic_info
+      - rcp_relation_policy_tree
+      - rcp_policy_binding_info_list
+      - rcp_policy_search
+      - rcp_policy_blur_search
+      - rcp_policy_all_version
+      - rcp_pipeline_policy_versions_by_code
+      - rcp_policy_version_lookup
+      - rcp_policy_detail_lookup
+      - rcp_policy_release_record_lookup
+      - rcp_policy_tree_lookup
+      - rcp_node_policy_attribution
+      - rcp_node_bind_policy_attribution
+
+  - capability: track_activity
+    display_name: 前端活跃/Track
+    suitable_questions:
+      - 查前端活跃、设备列表、数据就绪状态、产品和维度枚举
+    default_actions:
+      - track_analysis_summary
+      - track_analysis_check_data_ready
+    actions:
+      - track_analysis_summary
+      - track_analysis_check_data_ready
+      - track_analysis_product_list
+      - track_sequence_dimension_list
+      - track_data_type_list
+
+command_aliases:
+  用户画像:
+    capability: user_profile
+    required_params:
+      - user_id
+  登录历史:
+    capability: login_history
+    required_params:
+      - user_id
+  设备图谱:
+    capability: device_graph
+    required_params:
+      - user_id
+  作品查询:
+    capability: content_and_photo
+    required_params:
+      - user_id
+  私信样本:
+    capability: social_and_private_message
+    required_params:
+      - user_id
+  资料变更:
+    capability: profile_change
+    required_params:
+      - user_id
+  策略事件:
+    capability: rcp_strategy_event
+    required_params:
+      - eventType
+      - eventId
+  action:
+    capability: direct_action
+    required_params:
+      - action_name
+      - json_params

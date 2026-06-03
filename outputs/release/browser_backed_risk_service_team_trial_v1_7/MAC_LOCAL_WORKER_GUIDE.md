@@ -31,6 +31,15 @@ testing showed that RCP, Weapon, Login Logs, and Archives can trigger
 
 ## Start The Service On Mac
 
+If the release package must be transferred from a remote/Linux main-agent
+workspace, follow `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`. The verified fallback is
+Linux temporary HTTP server plus Mac `curl`; do not improvise base64 chunks,
+per-file writes, KCDN/ad hoc uploads, SSH/SCP guessing, profile copy,
+`sso_session.py`, cookie injection, storageState injection, arbitrary URL fetch,
+or profile/state/auth-state transfer. If the HTTP server is unreachable, report
+`release_transfer_failed` and stop. If Mac command approval times out, report
+`mac_command_approval_required` and stop.
+
 Unpack the release on the Mac and enter the service directory:
 
 ```sh

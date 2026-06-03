@@ -6,8 +6,8 @@ new service mode and not a platform-interface contract.
 
 ## Verified Install Transfer Path
 
-Use this when the remote/Linux main-agent workspace has the release package but
-there is no standard file-transfer API to the user's Mac.
+Use this mandatory path when the remote/Linux main-agent workspace has the
+release package but there is no reviewed file-transfer API to the user's Mac.
 
 1. Put the release tarball in the Linux/main-agent workspace.
 2. Start a temporary HTTP server in that workspace for the release tarball.
@@ -19,17 +19,30 @@ there is no standard file-transfer API to the user's Mac.
 8. Run `npm run worker:start`.
 
 This path is a verified fallback for package transfer only. It must not become
-a general remote-shell exploration workflow.
+a general remote-shell exploration workflow. If it fails, stop and report the
+blocking issue instead of inventing another transfer path.
 
 Do not use or propose these alternatives as the normal path:
 
 - base64 chunk transfer
+- writing files one by one
 - KCDN or ad hoc temporary uploads
 - self-designed SSH tunnel exploration
+- SCP guessing
 - Chrome profile copy to Linux
 - `sso_session.py`
 - cookie injection
 - storageState injection
+- transferring profile, state, auth-state, cookie, token, session, or header
+  material
+
+Failure behavior:
+
+- Linux HTTP server unreachable: report `release_transfer_failed` and stop.
+- Mac node command approval timeout: report `mac_command_approval_required` and
+  stop; ask the user to approve or manually run the fixed commands.
+- `service_base_url` unreachable after `worker:expose`: run the connection
+  workflow. Do not switch to profile/cookie/state workarounds.
 
 ## Verified Low-Approval Runtime Path
 

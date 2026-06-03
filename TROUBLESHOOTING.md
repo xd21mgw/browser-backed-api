@@ -71,6 +71,38 @@ Fix:
 - Do not forward or upload profile files, cookies, tokens, sessions, request
   headers, localStorage, or Playwright storageState.
 
+## release_transfer_failed
+
+Symptom:
+
+- The Linux/main-agent temporary HTTP server for the release tarball is not
+  reachable from the Mac.
+
+Fix:
+
+- Stop the install attempt.
+- Report `release_transfer_failed`.
+- Check the temporary HTTP server address, port, and network reachability.
+- Retry the verified install transfer path after the server is reachable.
+- Do not switch to base64 chunks, per-file writes, KCDN/ad hoc uploads,
+  SSH/SCP guessing, profile copy, cookie injection, storageState injection, or
+  arbitrary URL fetch.
+
+## mac_command_approval_required
+
+Symptom:
+
+- Mac node command approval times out or the user has not approved the fixed
+  install/start command.
+
+Fix:
+
+- Stop the install attempt.
+- Report `mac_command_approval_required`.
+- Ask the user to approve the Mac command or manually run the fixed command
+  sequence from `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`.
+- Do not invent another transfer or auth-state workaround.
+
 ## mac_node_disconnected
 
 Symptom:

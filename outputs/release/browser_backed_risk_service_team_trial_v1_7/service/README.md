@@ -79,6 +79,14 @@ Useful entry points:
 - Command workflow:
   [`BROWSER_BACKED_SERVICE_COMMANDS.md`](./BROWSER_BACKED_SERVICE_COMMANDS.md)
 
+Remote install/transfer hard rule: follow
+[`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`](./REMOTE_MAIN_AGENT_SUCCESS_PATHS.md).
+The main agent must not improvise base64 chunks, per-file writes, KCDN/ad hoc
+uploads, SSH/SCP guessing, profile copy, `sso_session.py`, cookie injection,
+storageState injection, arbitrary URL fetch, or profile/state/auth-state
+transfer. If the verified transfer path or Mac command approval fails, stop and
+report the blocking issue.
+
 ## Safety Boundary
 
 The service must not read or output:

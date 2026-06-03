@@ -74,6 +74,14 @@ browser-backed service。
 不要把 Mac profile 拷到 Linux headless 当作常规路径。联调显示该路径可能让 RCP /
 Weapon / Login Logs / Archives 触发 `two_factor_required`。
 
+安装传包必须按 `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md` 的 Verified Install
+Transfer Path 走：Linux 临时 HTTP server 暴露 release tar.gz，Mac 用 `curl`
+下载，Mac 解压后执行 `npm install`、`worker:doctor`、`worker:start`、
+`worker:expose`。如果 Linux HTTP server 不可达，停止并报告
+`release_transfer_failed`；如果 Mac node 审批超时，停止并报告
+`mac_command_approval_required`。不要改用 base64 分块、逐文件写入、KCDN、
+SSH/SCP 猜测、profile copy、cookie 注入、storageState 注入或任意 URL fetch。
+
 ### 1. 固定 action passthrough 示例
 
 ```sh

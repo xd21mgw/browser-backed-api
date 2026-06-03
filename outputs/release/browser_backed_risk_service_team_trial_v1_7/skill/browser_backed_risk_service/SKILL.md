@@ -1,3 +1,8 @@
+---
+name: browser-backed-risk-service
+description: Install, start, connect to, and call the Browser-backed Risk Service; use for Mac Local Worker setup, service_base_url checks, and capability commands for user profile, login history, device graph, content, private message, profile change, and RCP strategy-event passthrough reads.
+---
+
 # Browser-Backed Risk Service Skill
 
 ## Positioning
@@ -16,6 +21,8 @@ calls, permission bypass, or platform writes.
 
 Current callable `action_count=37`. All actions are passthrough-only at the
 service layer.
+
+This Skill is independent of any specific upper-layer agent.
 
 ## Service Base URL
 
@@ -126,6 +133,56 @@ Bridge/tunnel safety boundary:
 
 The Skill should behave like a command-oriented helper, not just a static
 manual. Use these command intents.
+
+Before installation or action calls, read these local contract files:
+
+- `SKILL.md`
+- `ACTION_REGISTRY.md`
+- `CAPABILITY_INDEX.yaml`
+- `PASSTHROUGH_CONTRACT.md`
+- `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`
+
+## Installation Transfer Policy
+
+Remote Main Agent + Mac Local Worker installs must use the verified transfer
+path unless the deployment environment provides a reviewed file-transfer API:
+
+1. Linux/main-agent workspace has the release tarball.
+2. Linux/main-agent starts a temporary HTTP server in the release directory.
+3. Mac node downloads the release with `curl`.
+4. Mac extracts the release.
+5. Mac enters `service/`.
+6. Mac runs `npm install`.
+7. Mac runs `npm run worker:doctor`.
+8. Mac runs `npm run worker:start`.
+9. Mac runs `npm run worker:expose`.
+10. `worker:expose` prints `BROWSER_BACKED_SERVICE_BASE_URL`.
+11. Later action calls use `service_base_url`; do not run a Mac node curl for
+    every action.
+
+Hard prohibitions during install/transfer:
+
+- no base64 chunk transfer
+- no逐文件写入 as an improvised package transfer
+- no KCDN or ad hoc upload fallback
+- no SSH tunnel self-exploration
+- no SCP guessing
+- no profile copy to Linux
+- no `sso_session.py`
+- no cookie injection
+- no storageState injection
+- no arbitrary URL fetch
+- no transfer of profile/state/auth-state/cookie/token/session/header material
+
+Failure behavior:
+
+- If the Linux temporary HTTP server is unreachable, report
+  `release_transfer_failed` and stop. Do not switch to another transfer method.
+- If Mac node command approval times out, report
+  `mac_command_approval_required` and stop. Ask the user to approve or manually
+  run the fixed command sequence.
+- If `service_base_url` is unreachable, run the status/connection workflow
+  first. Do not switch to profile, cookie, state, or storage workarounds.
 
 ### `/browser-backed-risk-service 安装`
 

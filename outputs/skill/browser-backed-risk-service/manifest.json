@@ -1,0 +1,11 @@
+{
+  "name": "browser-backed-risk-service",
+  "version": "1.7.0",
+  "ks-meta": {
+    "displayName": "Browser-backed 风控平台透传服务",
+    "platform": [
+      "MyFlicker-Work模式",
+      "MyFlicker-Code模式"
+    ]
+  }
+}

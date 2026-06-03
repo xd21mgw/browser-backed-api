@@ -138,18 +138,21 @@ The verified fallback and low-approval paths are recorded in
 `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`. Use that file before inventing ad hoc
 transfer or tunnel procedures.
 
-1. SSH port forward
-   - Useful for a small controlled pilot.
-   - Requires explicit user setup and access control.
-   - Should forward only the browser-backed service port and only for the test
-     window.
+Install transfer hard rule: use Linux temporary HTTP server plus Mac `curl`.
+If that server is unreachable, report `release_transfer_failed` and stop. If
+Mac command approval times out, report `mac_command_approval_required` and stop.
+Do not switch to base64 chunks, per-file writes, KCDN/ad hoc uploads, SSH/SCP
+guessing, profile copy, `sso_session.py`, cookie injection, storageState
+injection, arbitrary URL fetch, or profile/state/auth-state transfer.
 
-2. Internal tunnel
+1. Reviewed internal tunnel
    - Useful when teammates are on an internal network/VPN.
    - Must include access control and auditability.
    - Must not expose arbitrary local ports or URLs.
+   - Must be provided by the deployment owner; the main agent must not
+     self-explore SSH/SCP tunneling.
 
-3. Mac node worker
+2. Mac node worker
    - A small deployment wrapper can start or reach the Mac service and expose a
      controlled worker URL to the remote main Agent.
    - The wrapper should route only approved browser-backed service paths.
@@ -157,7 +160,7 @@ transfer or tunnel procedures.
    - It should report a clear `mac_node_disconnected` style status when the Mac
      client is offline.
 
-4. Local worker registration to a central gateway
+3. Local worker registration to a central gateway
    - The Mac local worker initiates an outbound connection to a central gateway.
    - Main Agent calls the gateway, which routes to the selected Mac worker.
    - This avoids exposing the Mac service directly to the public internet.
