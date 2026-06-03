@@ -391,6 +391,11 @@ test("actions endpoint exposes passthrough-only contract for every action", () =
   }
 });
 
+test("live body cap defaults to 5MB and remains env-overridable", () => {
+  assert.equal(createLiveConfig().browser.maxLiveBodyBytes, 5 * 1024 * 1024);
+  assert.equal(createLiveConfig({ MAX_LIVE_BODY_BYTES: "65536" }).browser.maxLiveBodyBytes, 65536);
+});
+
 test("mock actions return pure passthrough envelope with visible upstream body", async () => {
   const service = createService();
   for (const actionName of ACTION_ALLOWLIST) {

@@ -66,6 +66,7 @@ with `data.logSearchModels`, the service uses a structured row cap instead of a
 raw string-only cap.
 
 - expected upstream body: API JSON, not a front-end HTML/page shell
+- default service body cap: 5MB (`MAX_LIVE_BODY_BYTES` can override)
 - default `max_records`: `300`
 - hard `max_records`: `300`
 - explicit cap: caller may pass `max_records=20/50/100/300`
@@ -126,3 +127,6 @@ Dennis consumption rules:
   action contract repair, not as user evidence.
 - Dennis may create source quality, evidence chains, observations, summaries,
   and final review boundaries; the service must not.
+- Field projection, compact tables, and narrative summaries belong in Dennis.
+  The service only returns bounded upstream body or capped body plus transport
+  metadata.

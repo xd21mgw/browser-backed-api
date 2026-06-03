@@ -197,8 +197,11 @@ Example shape:
 ```
 
 The upstream business response body is visible by default when it fits within
-the passthrough size cap. Large responses return `upstream.body_snippet` or
+the passthrough size cap. The default body cap is 5MB and can be overridden with
+`MAX_LIVE_BODY_BYTES`. Large responses return `upstream.body_snippet` or
 `upstream.capped_body` with `raw_body_handling=capped` instead of a full body.
+Field projection and user-facing compact tables belong in Dennis/main agent,
+not in this service.
 Actions that expect API JSON do not treat front-end HTML as data. For example,
 `login_logs_search` returns `unexpected_html_response` /
 `api_contract_mismatch` if the fixed API call returns a workbench HTML page

@@ -130,8 +130,8 @@ Too-large response example:
     "body_omitted": false,
     "body_truncated": true,
     "response_too_large": true,
-    "observed_bytes": 65536,
-    "returned_bytes": 65536,
+    "observed_bytes": 7340032,
+    "returned_bytes": 5242880,
     "raw_body_handling": "capped",
     "body_snippet": "{\"data\":[",
     "error_type": "response_too_large"
@@ -192,6 +192,11 @@ For `login_logs_search`, the default service-side row cap is 300 records and
 the hard cap is 300 records. If the capped JSON still exceeds the byte cap, the
 service returns the largest complete leading record set that fits and sets
 `cap_reason=byte_limit`.
+
+The default service body cap is 5MB and can be overridden with
+`MAX_LIVE_BODY_BYTES`. The service does not do fixed-field projection or
+business summarization; Dennis/main agent should parse `upstream.body` or
+`upstream.capped_body` and decide how to compact fields for user-facing output.
 
 `login_logs_search` expects API JSON. If the fixed API call returns a front-end
 HTML/page shell instead, the service returns

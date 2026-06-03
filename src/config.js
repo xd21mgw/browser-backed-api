@@ -2,6 +2,8 @@ import fs from "node:fs";
 import { getProfileDir, getStateFile } from "./authState.js";
 import { ORIGIN_REGISTRY, listEnabledOriginKeys, listOriginDefinitions, listOriginKeys } from "./originRegistry.js";
 
+const DEFAULT_MAX_LIVE_BODY_BYTES = 5 * 1024 * 1024;
+
 export function loadConfig(env = process.env, options = {}) {
   const effectiveEnv = env === process.env ? loadLocalEnv(env) : env;
   const originRegistry = options.originRegistry || ORIGIN_REGISTRY;
@@ -35,7 +37,7 @@ export function loadConfig(env = process.env, options = {}) {
       headless: effectiveEnv.BROWSER_HEADLESS !== "false",
       channel: effectiveEnv.PLAYWRIGHT_CHANNEL || "chrome",
       requestTimeoutMs: parsePositiveInt(effectiveEnv.REQUEST_TIMEOUT_MS || "15000", "REQUEST_TIMEOUT_MS"),
-      maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || "65536", "MAX_LIVE_BODY_BYTES")
+      maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || String(DEFAULT_MAX_LIVE_BODY_BYTES), "MAX_LIVE_BODY_BYTES")
     },
     originRegistry,
     domains: buildDomainConfigs(originRegistry, effectiveEnv, enabledPlatformSet)
