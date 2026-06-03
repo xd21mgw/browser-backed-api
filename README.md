@@ -218,10 +218,11 @@ the passthrough size cap. The default body cap is 5MB and can be overridden with
 `upstream.capped_body` with `raw_body_handling=capped` instead of a full body.
 Field projection and user-facing compact tables belong in the calling main
 agent or downstream parser, not in this service.
-Actions that expect API JSON do not treat front-end HTML as data. For example,
-`login_logs_search` returns `unexpected_html_response` /
-`api_contract_mismatch` if the fixed API call returns a workbench HTML page
-instead of JSON `data.logSearchModels`.
+Fixed actions expect API JSON by default and do not treat front-end HTML as
+data. If a page-context fetch returns a workbench/app HTML shell, the service
+retries the same allowlisted fixed path through the browser-context request API.
+If the fixed API still returns HTML, the action returns
+`unexpected_html_response` / `api_contract_mismatch` instead of `no_data`.
 The service still never outputs request headers, response `set-cookie` headers,
 browser cookie jars, Chrome profile contents, localStorage/browser storage, or
 Playwright storage state.

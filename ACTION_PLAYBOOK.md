@@ -51,8 +51,9 @@ curl -sS -X POST "{service_base_url}/actions/login_logs_search" \
   -d '{"response_mode":"passthrough","user_id":"<user_id>","max_records":300}'
 ```
 
-Notes: the service expects API JSON. If a page shell is returned, the action
-reports `unexpected_html_response` / `api_contract_mismatch`. Large JSON uses
+Notes: fixed actions expect API JSON. If a page shell is returned, the service
+retries the same fixed API through browser-context request before reporting
+`unexpected_html_response` / `api_contract_mismatch`. Large JSON uses
 `json_array_capped`; `missing_records` must be treated as incomplete evidence.
 
 ## 设备图谱

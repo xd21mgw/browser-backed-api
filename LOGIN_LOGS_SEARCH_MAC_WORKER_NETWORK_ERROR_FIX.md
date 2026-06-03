@@ -46,10 +46,20 @@ When `login_logs_search` page-context fetch fails with `network_error`, the
 service now retries the same fixed request through the Playwright browser
 context request API.
 
+Follow-up hardening: fixed actions now default to expected JSON API responses.
+If a page-context fetch completes but returns a front-end HTML shell
+(`unexpected_html_response`) instead of the expected JSON API body, the service
+retries the same fixed request through the same browser-context request path
+before returning the contract-mismatch envelope. This closes the case where the
+old fallback did not run because no network exception was thrown, and applies
+the same protection to other simple fixed JSON actions without adding arbitrary
+URL access.
+
 The fallback remains bounded:
 
-- only applies to allowlisted `login_logs_search`
-- uses the action's fixed `login_logs` origin
+- only applies to allowlisted fixed JSON actions
+- skips multi-step follow-up actions so chained action semantics are not changed
+- uses the action's fixed origin
 - uses the action's fixed same-origin relative path
 - uses typed params already validated by `src/actions.js`
 - does not accept caller-provided URL/path/header/cookie/token/session

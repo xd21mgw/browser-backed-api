@@ -198,11 +198,12 @@ The default service body cap is 5MB and can be overridden with
 business summarization; the caller/main agent should parse `upstream.body` or
 `upstream.capped_body` and decide how to compact fields for user-facing output.
 
-`login_logs_search` expects API JSON. If the fixed API call returns a front-end
-HTML/page shell instead, the service returns
-`error_type=unexpected_html_response` with
-`platform_error=api_contract_mismatch` and omits the HTML body. This is not
-`no_data` and not login-log evidence; it means the fixed API contract or bound
+Fixed actions expect API JSON by default. If a page-context fixed action call
+returns a front-end HTML/page shell instead, the service retries the same
+allowlisted fixed path through the browser-context request API. If the fixed API
+still returns HTML, the service returns `error_type=unexpected_html_response`
+with `platform_error=api_contract_mismatch` and omits the HTML body. This is not
+`no_data` and not source evidence; it means the fixed API contract or bound
 page context needs repair.
 
 ## Input Boundary

@@ -658,6 +658,128 @@ test("login_logs_search prefers page-context API fetch before context fallback",
   assertTransportEnvelope(response, "login_logs_search");
 });
 
+test("login_logs_search retries context request when page-context returns HTML shell", async () => {
+  const config = createLiveConfig();
+  let contextFallbackCalled = false;
+  const html = "<!doctype html><html><head><title>Workbench</title></head><body>app shell</body></html>";
+  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [{ id: "context_record" }] } });
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async (action, actionRequest) => {
+      assert.equal(action.name, "login_logs_search");
+      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
+      return {
+        ok: true,
+        status: 200,
+        contentType: "text/html;charset=UTF-8",
+        bodyText: html,
+        observedBytes: Buffer.byteLength(html),
+        returnedBytes: Buffer.byteLength(html),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      contextFallbackCalled = true;
+      assert.equal(action.name, "login_logs_search");
+      assert.equal(actionRequest.method, "GET");
+      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin
+  });
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(contextFallbackCalled, true);
+  assert.equal(response.ok, true);
+  assert.equal(response.error_type, undefined);
+  assert.equal(response.upstream.body.data.logSearchModels[0].id, "context_record");
+  assert.equal(response.safety.credential_material_output, false);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("JSON fixed actions retry context request when page-context returns HTML shell", async () => {
+  const config = createLiveConfig();
+  let contextFallbackCalled = false;
+  const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
+  const bodyText = JSON.stringify({ result: 1, data: { userId: "2871834924" } });
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "archives_user_profile",
+      expected_origin: config.domains.archives.origin,
+      bound_page_origin: config.domains.archives.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async (action, actionRequest) => {
+      assert.equal(action.name, "archives_user_profile");
+      assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
+      return {
+        ok: true,
+        status: 200,
+        contentType: "text/html;charset=UTF-8",
+        bodyText: html,
+        observedBytes: Buffer.byteLength(html),
+        returnedBytes: Buffer.byteLength(html),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      contextFallbackCalled = true;
+      assert.equal(action.name, "archives_user_profile");
+      assert.equal(actionRequest.method, "GET");
+      assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("archives", {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.archives.origin
+  });
+
+  const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+  assert.equal(contextFallbackCalled, true);
+  assert.equal(response.ok, true);
+  assert.equal(response.error_type, undefined);
+  assert.equal(response.upstream.body.data.userId, "2871834924");
+  assert.equal(response.safety.credential_material_output, false);
+  assertTransportEnvelope(response, "archives_user_profile");
+});
+
 test("login_logs_search treats HTML page shell as API contract mismatch", () => {
   const html = "<!doctype html><html><head><title>Workbench</title></head><body>app shell</body></html>";
   const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
@@ -684,6 +806,29 @@ test("login_logs_search treats HTML page shell as API contract mismatch", () => 
   assert.equal(Object.hasOwn(response.upstream, "capped_body"), false);
   assert.equal(response.safety.upstream_business_body_visible, false);
   assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("JSON fixed action response builder treats HTML page shell as API contract mismatch", () => {
+  const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
+  const response = buildLiveActionResponse(ACTIONS.archives_user_profile, ACTION_INPUTS.archives_user_profile, {}, {
+    ok: true,
+    status: 200,
+    contentType: "text/html;charset=UTF-8",
+    bodyText: html,
+    observedBytes: Buffer.byteLength(html),
+    returnedBytes: Buffer.byteLength(html),
+    bodyTruncated: false
+  }, { latencyMs: 8 });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "unexpected_html_response");
+  assert.equal(response.platform_error, "api_contract_mismatch");
+  assert.equal(response.raw_body_handling, "omitted");
+  assert.equal(response.upstream.body_present, true);
+  assert.equal(response.upstream.body_omitted, true);
+  assert.equal(response.upstream.response_body_kind, "html_page");
+  assert.equal(Object.hasOwn(response.upstream, "body"), false);
+  assertTransportEnvelope(response, "archives_user_profile");
 });
 
 test("response too large returns capped passthrough body without summary fallback", () => {

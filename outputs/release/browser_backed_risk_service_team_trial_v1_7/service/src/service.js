@@ -249,14 +249,29 @@ export class BrowserBackedApiService {
 
     try {
       const fetchResult = await this.browserClient.runAction(action, actionRequest);
-      return buildLiveActionResponse(action, input, this.config, fetchResult, {
+      const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
         ...lazyMeta
       });
+
+      if (shouldUseContextRequestResponseFallback(action, actionRequest, response, this.browserClient)) {
+        try {
+          const fallbackResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
+          return buildLiveActionResponse(action, input, this.config, fallbackResult, {
+            latencyMs: Date.now() - startedAt,
+            authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
+            ...lazyMeta
+          });
+        } catch {
+          return response;
+        }
+      }
+
+      return response;
     } catch (error) {
       const errorType = classifyError(error);
-      if (shouldUseContextRequestFallback(action, errorType, this.browserClient)) {
+      if (shouldUseContextRequestFallback(action, actionRequest, errorType, this.browserClient)) {
         try {
           const fetchResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
           return buildLiveActionResponse(action, input, this.config, fetchResult, {
@@ -1007,10 +1022,25 @@ function shouldLazyRewarm(actionDiagnostics) {
   );
 }
 
-function shouldUseContextRequestFallback(action, errorType, browserClient) {
+function shouldUseContextRequestFallback(action, actionRequest, errorType, browserClient) {
   return Boolean(
-    action?.name === "login_logs_search" &&
+    isContextRequestFallbackEligible(action, actionRequest, browserClient) &&
       errorType === "network_error" &&
+      action?.name === "login_logs_search"
+  );
+}
+
+function shouldUseContextRequestResponseFallback(action, actionRequest, response, browserClient) {
+  return Boolean(
+    isContextRequestFallbackEligible(action, actionRequest, browserClient) &&
+      response?.error_type === "unexpected_html_response"
+  );
+}
+
+function isContextRequestFallbackEligible(action, actionRequest, browserClient) {
+  return Boolean(
+    action?.expectedContentType === "json" &&
+      !actionRequest?.followUp &&
       typeof browserClient?.runActionWithContextRequest === "function"
   );
 }

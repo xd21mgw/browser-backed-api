@@ -2616,7 +2616,10 @@ function responseModeContractText(responseModes, defaultResponseMode) {
 
 function freezeAction(action) {
   normalizeRelativePath(action.apiPath, `${action.name}.apiPath`);
-  return Object.freeze(action);
+  return Object.freeze({
+    expectedContentType: "json",
+    ...action
+  });
 }
 
 function sanitizeInput(input) {
