@@ -1,0 +1,51 @@
+# Release Notes
+
+Version: `browser_backed_risk_service_team_trial_v1_7`
+
+## Changes Since v1.6
+
+- Added `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`.
+- Added `ACTION_PLAYBOOK.md`.
+- Added `CAPABILITY_INDEX.yaml`.
+- Added `npm run worker:expose` for the verified low-approval Mac worker path.
+- Skill workflow now supports capability-oriented commands:
+  - 用户画像
+  - 登录历史
+  - 设备图谱
+  - 作品查询
+  - 私信样本
+  - 资料变更
+  - 策略事件
+  - direct `action`
+- Remote Main Agent + Mac Local Worker Mode now documents two verified paths:
+  - install transfer through a temporary release HTTP server
+  - daily runtime through Mac `worker:expose`
+- The low-approval proxy forwards only `/health`, `/actions`, and
+  `/actions/<allowlisted_action>`.
+- Kept `action_count=37`.
+- Kept pure passthrough service positioning.
+
+## Unchanged Safety Boundary
+
+- No summary.
+- No source card.
+- No source quality.
+- No evidence card.
+- No risk judgment.
+- No DataAgent/Hive calls.
+- No arbitrary URL fetch.
+- No write actions.
+- No Chrome profile, cookie, token, session, authorization, password, request
+  header, localStorage, browser storage, or Playwright storageState output.
+
+## Not Recommended
+
+Do not use these as the normal team path:
+
+- Chrome profile copy to Linux.
+- Cookie injection.
+- storageState injection.
+- `sso_session.py`.
+- Base64 chunk transfer.
+- Ad hoc KCDN uploads.
+- Self-designed tunnel exploration outside the reviewed worker path.
