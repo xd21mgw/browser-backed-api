@@ -65,6 +65,7 @@ be treated as direct risk evidence or default final-risk-chain inputs.
 with `data.logSearchModels`, the service uses a structured row cap instead of a
 raw string-only cap.
 
+- expected upstream body: API JSON, not a front-end HTML/page shell
 - default `max_records`: `300`
 - hard `max_records`: `300`
 - explicit cap: caller may pass `max_records=20/50/100/300`
@@ -75,6 +76,10 @@ raw string-only cap.
 - fallback: if JSON parse fails, the service falls back to bounded
   `upstream.body_snippet`, `raw_body_handling=capped`, and
   `json_array_cap_error_type=json_parse_error`
+- HTML/page shell guard: if the fixed API call returns HTML, the service returns
+  `error_type=unexpected_html_response` and
+  `platform_error=api_contract_mismatch`; Dennis must not parse it as login
+  logs or classify it as no-data.
 
 Structured cap fields:
 
@@ -117,5 +122,7 @@ Dennis consumption rules:
 - Do not treat returned rows as the full login history.
 - Do not treat `no_data`, `body_truncated`, `byte_limit`, or
   `response_too_large` as proof of no risk.
+- Treat `unexpected_html_response` as a service/API contract issue that needs
+  action contract repair, not as user evidence.
 - Dennis may create source quality, evidence chains, observations, summaries,
   and final review boundaries; the service must not.

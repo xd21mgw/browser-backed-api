@@ -248,9 +248,7 @@ export class BrowserBackedApiService {
     }
 
     try {
-      const fetchResult = shouldUseContextRequestForAction(action, this.browserClient)
-        ? await this.browserClient.runActionWithContextRequest(action, actionRequest)
-        : await this.browserClient.runAction(action, actionRequest);
+      const fetchResult = await this.browserClient.runAction(action, actionRequest);
       return buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
@@ -1013,13 +1011,6 @@ function shouldUseContextRequestFallback(action, errorType, browserClient) {
   return Boolean(
     action?.name === "login_logs_search" &&
       errorType === "network_error" &&
-      typeof browserClient?.runActionWithContextRequest === "function"
-  );
-}
-
-function shouldUseContextRequestForAction(action, browserClient) {
-  return Boolean(
-    action?.name === "login_logs_search" &&
       typeof browserClient?.runActionWithContextRequest === "function"
   );
 }

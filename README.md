@@ -199,6 +199,10 @@ Example shape:
 The upstream business response body is visible by default when it fits within
 the passthrough size cap. Large responses return `upstream.body_snippet` or
 `upstream.capped_body` with `raw_body_handling=capped` instead of a full body.
+Actions that expect API JSON do not treat front-end HTML as data. For example,
+`login_logs_search` returns `unexpected_html_response` /
+`api_contract_mismatch` if the fixed API call returns a workbench HTML page
+instead of JSON `data.logSearchModels`.
 The service still never outputs request headers, response `set-cookie` headers,
 browser cookie jars, Chrome profile contents, localStorage/browser storage, or
 Playwright storage state.

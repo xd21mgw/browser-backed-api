@@ -324,6 +324,7 @@ export const ACTIONS = Object.freeze({
     description: "Return a bounded online login log shape summary for a typed user and time window.",
     method: "GET",
     apiPath: LOGIN_LOGS_SEARCH_PATH,
+    expectedContentType: "json",
     inputContract: {
       user_id: "required string",
       time_window: "optional { from_timestamp, to_timestamp } epoch ms; default recent 7 days",
@@ -1128,8 +1129,20 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   let errorType = classifyHttpStatus(httpStatus) || null;
   let platformError = errorType;
   let transportError = null;
+  const unexpectedHtml = detectUnexpectedHtmlApiResponse(action, contentType, bodyText);
 
-  if (bodyPresent && bodyTruncated && jsonArrayCap?.ok) {
+  if (unexpectedHtml) {
+    ok = false;
+    errorType = "unexpected_html_response";
+    platformError = "api_contract_mismatch";
+    upstream.body_omitted = true;
+    upstream.response_too_large = false;
+    upstream.error_type = errorType;
+    upstream.raw_body_handling = "omitted";
+    upstream.expected_content_type = "application/json";
+    upstream.api_contract_mismatch = true;
+    upstream.response_body_kind = "html_page";
+  } else if (bodyPresent && bodyTruncated && jsonArrayCap?.ok) {
     ok = false;
     errorType = "response_too_large";
     platformError = null;
@@ -2745,6 +2758,18 @@ function buildReturnedUpstreamBody(bodyText, contentType, { truncated = false } 
     body: text,
     returnedBytes
   };
+}
+
+function detectUnexpectedHtmlApiResponse(action, contentType, bodyText) {
+  if (action?.expectedContentType !== "json") {
+    return false;
+  }
+  const type = String(contentType || "").toLowerCase();
+  if (type.includes("text/html")) {
+    return true;
+  }
+  const text = typeof bodyText === "string" ? bodyText.trimStart().slice(0, 512).toLowerCase() : "";
+  return text.startsWith("<!doctype html") || text.startsWith("<html") || /<html[\s>]/i.test(text);
 }
 
 function normalizeJsonArrayCap(value) {

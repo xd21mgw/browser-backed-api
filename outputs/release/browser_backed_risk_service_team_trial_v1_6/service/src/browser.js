@@ -571,7 +571,7 @@ export class BrowserBackedClient {
     }
 
     return page.evaluate(
-      async ({ path, method, body, timeoutMs, maxBodyBytes }) => {
+      async ({ path, method, body, timeoutMs, maxBodyBytes, responseBodyCap }) => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -587,27 +587,67 @@ export class BrowserBackedClient {
             signal: controller.signal
           });
 
-          const readResult = await readCappedText(response, maxBodyBytes);
+          const contentType = response.headers.get("content-type") || null;
+          const readResult = await readCappedText(response, maxBodyBytes, responseBodyCap, contentType);
           return {
             completed: true,
             ok: response.ok,
             status: response.status,
-            contentType: response.headers.get("content-type") || null,
+            contentType,
             bodyText: readResult.text,
             bodyTruncated: readResult.truncated,
-            observedBytes: readResult.observedBytes
+            observedBytes: readResult.observedBytes,
+            returnedBytes: readResult.returnedBytes,
+            jsonArrayCap: readResult.jsonArrayCap || null
           };
         } finally {
           clearTimeout(timeout);
         }
 
-        async function readCappedText(response, maxBytes) {
+        async function readCappedText(response, maxBytes, cap, contentType) {
+          if (cap && cap.kind === "json_array" && /\bjson\b/i.test(String(contentType || ""))) {
+            const text = await response.text();
+            const observedBytes = byteLength(text);
+            const capped = buildJsonArrayCappedText(text, cap, maxBytes);
+            if (capped.ok) {
+              return capped;
+            }
+            if (observedBytes <= maxBytes) {
+              return {
+                text,
+                truncated: false,
+                observedBytes,
+                returnedBytes: observedBytes,
+                jsonArrayCap: {
+                  attempted: true,
+                  ok: false,
+                  errorType: capped.errorType || "json_array_path_not_found",
+                  path: cap.pathLabel || String(cap.path || "")
+                }
+              };
+            }
+            const snippet = text.slice(0, maxBytes);
+            return {
+              text: snippet,
+              truncated: true,
+              observedBytes,
+              returnedBytes: byteLength(snippet),
+              jsonArrayCap: {
+                attempted: true,
+                ok: false,
+                errorType: capped.errorType || "json_parse_error",
+                path: cap.pathLabel || String(cap.path || "")
+              }
+            };
+          }
+
           if (!response.body) {
             const text = await response.text();
             return {
               text: text.slice(0, maxBytes),
               truncated: text.length > maxBytes,
-              observedBytes: Math.min(text.length, maxBytes)
+              observedBytes: text.length,
+              returnedBytes: Math.min(text.length, maxBytes)
             };
           }
 
@@ -639,7 +679,113 @@ export class BrowserBackedClient {
           }
 
           const text = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("") + decoder.decode();
-          return { text, truncated, observedBytes };
+          return { text, truncated, observedBytes, returnedBytes: byteLength(text) };
+        }
+
+        function buildJsonArrayCappedText(text, cap, maxBytes) {
+          let value;
+          try {
+            value = JSON.parse(text);
+          } catch {
+            return { ok: false, errorType: "json_parse_error" };
+          }
+
+          const path = Array.isArray(cap.path) ? cap.path : [];
+          const target = valueAtPath(value, path);
+          if (!Array.isArray(target)) {
+            return { ok: false, errorType: "json_array_path_not_found" };
+          }
+
+          const maxRecords = clampPositiveInteger(cap.maxRecords, 300, 300);
+          const observedRecords = target.length;
+          const targetRecords = Math.min(observedRecords, maxRecords);
+          const best = fitJsonArrayCapToBytes(value, path, target, targetRecords, maxBytes);
+          const returnedRecords = best.returnedRecords;
+          const missingRecords = Math.max(observedRecords - returnedRecords, 0);
+          const capReason = missingRecords > 0
+            ? returnedRecords < targetRecords
+              ? "byte_limit"
+              : observedRecords > maxRecords
+                ? "record_limit"
+                : "response_too_large"
+            : null;
+          return {
+            ok: true,
+            text: best.text,
+            truncated: missingRecords > 0,
+            observedBytes: byteLength(text),
+            returnedBytes: byteLength(best.text),
+            jsonArrayCap: {
+              attempted: true,
+              ok: true,
+              path: cap.pathLabel || path.join("."),
+              observedRecords,
+              returnedRecords,
+              missingRecords,
+              maxRecords,
+              capReason,
+              rawBodyHandling: missingRecords > 0 ? "json_array_capped" : "visible"
+            }
+          };
+        }
+
+        function fitJsonArrayCapToBytes(value, path, records, targetRecords, maxBytes) {
+          let low = 0;
+          let high = targetRecords;
+          let best = buildCappedJsonText(value, path, records, 0);
+
+          while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            const candidate = buildCappedJsonText(value, path, records, mid);
+            if (byteLength(candidate) <= maxBytes || mid === 0) {
+              best = candidate;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
+          }
+
+          return {
+            text: best,
+            returnedRecords: valueAtPath(JSON.parse(best), path).length
+          };
+        }
+
+        function buildCappedJsonText(value, path, records, count) {
+          const cappedValue = JSON.parse(JSON.stringify(value));
+          setValueAtPath(cappedValue, path, records.slice(0, count));
+          return JSON.stringify(cappedValue);
+        }
+
+        function valueAtPath(value, path) {
+          let cursor = value;
+          for (const key of path) {
+            if (!cursor || typeof cursor !== "object" || Array.isArray(cursor) || !Object.prototype.hasOwnProperty.call(cursor, key)) {
+              return undefined;
+            }
+            cursor = cursor[key];
+          }
+          return cursor;
+        }
+
+        function setValueAtPath(value, path, nextValue) {
+          let cursor = value;
+          for (const key of path.slice(0, -1)) {
+            cursor = cursor[key];
+          }
+          cursor[path[path.length - 1]] = nextValue;
+        }
+
+        function clampPositiveInteger(value, fallback, max) {
+          const number = Number(value);
+          if (!Number.isFinite(number) || number <= 0) {
+            return fallback;
+          }
+          return Math.min(Math.trunc(number), max);
+        }
+
+        function byteLength(text) {
+          return new TextEncoder().encode(String(text || "")).byteLength;
         }
       },
       {
@@ -647,7 +793,8 @@ export class BrowserBackedClient {
         method: actionRequest.method,
         body: actionRequest.body,
         timeoutMs: this.config.browser.requestTimeoutMs,
-        maxBodyBytes: this.config.browser.maxLiveBodyBytes
+        maxBodyBytes: this.config.browser.maxLiveBodyBytes,
+        responseBodyCap: actionRequest.responseBodyCap || null
       }
     );
   }
@@ -755,18 +902,24 @@ function readBoundedBuffer(buffer, maxBytes, responseBodyCap, contentType) {
   const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
   if (responseBodyCap?.kind === "json_array" && /\bjson\b/i.test(String(contentType || ""))) {
     const text = bytes.toString("utf8");
+    const capped = buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes);
+    if (capped.ok) {
+      return capped;
+    }
+
     if (bytes.byteLength <= maxBytes) {
       return {
         text,
         truncated: false,
         observedBytes: bytes.byteLength,
-        returnedBytes: bytes.byteLength
+        returnedBytes: bytes.byteLength,
+        jsonArrayCap: {
+          attempted: true,
+          ok: false,
+          errorType: capped.errorType || "json_array_path_not_found",
+          path: responseBodyCap.pathLabel || String(responseBodyCap.path || "")
+        }
       };
-    }
-
-    const capped = buildJsonArrayCappedTextForNode(text, responseBodyCap, maxBytes);
-    if (capped.ok) {
-      return capped;
     }
 
     const snippet = bytes.subarray(0, maxBytes).toString("utf8");

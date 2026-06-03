@@ -336,13 +336,13 @@ function assertTransportEnvelope(response, actionName) {
   assert.equal(["visible", "capped", "json_array_capped", "omitted"].includes(response.raw_body_handling), true);
   assert.ok(response.upstream);
   assert.equal(response.upstream.raw_body_handling, response.raw_body_handling);
-  assert.equal(response.upstream.body_omitted, response.body_present ? false : true);
-  if (response.body_present && !response.body_truncated) {
+  assert.equal(typeof response.upstream.body_omitted, "boolean");
+  if (response.body_present && !response.body_truncated && !response.upstream.body_omitted) {
     assert.equal(Object.hasOwn(response.upstream, "body"), true, `${actionName} must expose small upstream body`);
     assert.equal(response.upstream.raw_body_handling, "visible");
     assert.equal(typeof response.upstream.returned_bytes, "number");
   }
-  if (response.body_present && response.body_truncated) {
+  if (response.body_present && response.body_truncated && !response.upstream.body_omitted) {
     assert.equal(
       Object.hasOwn(response.upstream, "body_snippet") || Object.hasOwn(response.upstream, "capped_body"),
       true,
@@ -358,7 +358,7 @@ function assertTransportEnvelope(response, actionName) {
     request_headers_output: false,
     browser_profile_material_output: false,
     transport_auth_material_output: false,
-    upstream_business_body_visible: Boolean(response.body_present)
+    upstream_business_body_visible: Boolean(response.body_present && !response.upstream.body_omitted)
   });
   assertNoOldBusinessFields(response);
   assertNoCredentialMaterial(response);
@@ -578,6 +578,81 @@ test("login_logs_search falls back to context request when page fetch fails", as
   assert.equal(response.upstream.body_omitted, false);
   assert.deepEqual(response.upstream.body, { code: 0, data: { logSearchModels: [] } });
   assert.equal(response.error_type, undefined);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search prefers page-context API fetch before context fallback", async () => {
+  const config = createLiveConfig();
+  let contextFallbackCalled = false;
+  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [{ id: "page_context_record" }] } });
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async (action, actionRequest) => {
+      assert.equal(action.name, "login_logs_search");
+      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      contextFallbackCalled = true;
+      throw new Error("context fallback should not be used");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin
+  });
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(contextFallbackCalled, false);
+  assert.equal(response.ok, true);
+  assert.equal(response.upstream.body.data.logSearchModels[0].id, "page_context_record");
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search treats HTML page shell as API contract mismatch", () => {
+  const html = "<!doctype html><html><head><title>Workbench</title></head><body>app shell</body></html>";
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
+    ok: true,
+    status: 200,
+    contentType: "text/html;charset=UTF-8",
+    bodyText: html.slice(0, 64),
+    observedBytes: Buffer.byteLength(html),
+    returnedBytes: 64,
+    bodyTruncated: true
+  }, { latencyMs: 8 });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "unexpected_html_response");
+  assert.equal(response.platform_error, "api_contract_mismatch");
+  assert.equal(response.raw_body_handling, "omitted");
+  assert.equal(response.upstream.body_present, true);
+  assert.equal(response.upstream.body_omitted, true);
+  assert.equal(response.upstream.response_too_large, false);
+  assert.equal(response.upstream.api_contract_mismatch, true);
+  assert.equal(response.upstream.response_body_kind, "html_page");
+  assert.equal(Object.hasOwn(response.upstream, "body"), false);
+  assert.equal(Object.hasOwn(response.upstream, "body_snippet"), false);
+  assert.equal(Object.hasOwn(response.upstream, "capped_body"), false);
+  assert.equal(response.safety.upstream_business_body_visible, false);
   assertTransportEnvelope(response, "login_logs_search");
 });
 

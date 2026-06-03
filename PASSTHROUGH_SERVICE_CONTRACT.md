@@ -193,6 +193,13 @@ the hard cap is 300 records. If the capped JSON still exceeds the byte cap, the
 service returns the largest complete leading record set that fits and sets
 `cap_reason=byte_limit`.
 
+`login_logs_search` expects API JSON. If the fixed API call returns a front-end
+HTML/page shell instead, the service returns
+`error_type=unexpected_html_response` with
+`platform_error=api_contract_mismatch` and omits the HTML body. This is not
+`no_data` and not login-log evidence; it means the fixed API contract or bound
+page context needs repair.
+
 ## Input Boundary
 
 Allowed:
