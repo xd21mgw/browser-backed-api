@@ -249,6 +249,226 @@ Map capability commands through `CAPABILITY_INDEX.yaml`, then use
 `ACTION_REGISTRY.md` for fixed paths and typed params. Do not require users to
 memorize action names.
 
+### Quick Capability Routing
+
+Use this table before selecting actions. It is a usage map, not a risk
+judgment rule. `ACTION_REGISTRY.md` remains the exact interface contract.
+
+| Observation area | Representative actions | Default role | Anchor / params to prepare |
+| --- | --- | --- | --- |
+| 账号域 / 行为域 / 处置域 | `archives_user_profile`, `archives_user_analysis`, `archives_review_logs`, `archives_user_label`, `archives_past_four_items` | first hop / drilldown | `user_id`; time window for logs/analysis |
+| 设备域 / 团伙候选 | `weapon_inventory` | first hop | `user_id` or `device_id` |
+| 网络/登录行为域 | `login_logs_search` | first hop | `user_id`; recent 7-day window; `max_records=300` |
+| 内容域 / 社交域 | `archives_photo_search`, `archives_gallery_photo_list`, `archives_photo_meta`, `archives_live_gallery`, `archives_collect_photo_list`, `archives_moment_list` | first hop / anchor drilldown | `user_id`; derive `photo_id` / `live_stream_id` before detail actions |
+| 社交域 / 关系扩散 | `archives_fans_list`, `archives_follow_list`, `archives_comment_search`, `archives_related_users`, `archives_private_message_search` | anchor drilldown | `user_id`; `direction` for private message; page cap |
+| 反馈域 / 处置域 | `archives_user_report_search`, `archives_punish_status` | drilldown / validation | `user_id` or `photo_id` / `live_stream_id` |
+| 策略域 / 治理域 | `rcp_snapshot`, `rcp_fast_query_hbase`, `rcp_event_detail`, `rcp_policy_tree_lookup`, `rcp_node_policy_attribution` | first hop / governance | recent event seed from `rcp_snapshot`; then `eventType`, `eventId`, `queryTime`, policy/tree fields |
+| 行为域 / 前端活跃 | `track_analysis_summary`, `track_sequence_get_device_ids`, `track_sequence_profile`, `track_analysis_check_data_ready` | first hop / validation / parameter discovery | `user_id` first; derive `device_id` before device readiness/use-duration |
+
+Default roles:
+
+- `first_hop_candidate`: safe to try early for a user/entity case.
+- `first_or_drilldown`: can start a case, but may need time/page bounds.
+- `anchor_triggered_drilldown`: call only after an anchor such as `photo_id`,
+  `live_stream_id`, `eventId`, `policyCode`, or `device_id` is known.
+- `governance_only` / `parameter_only`: helper or strategy-governance actions;
+  do not put them into an ordinary user risk chain by default.
+- `validation_only`: use to validate readiness or parameter availability, not
+  as direct evidence.
+
+Hard usage limits:
+
+- Do not treat labels, strategy hits, device co-occurrence, no-data, or partial
+  capped rows as final conclusions.
+- Do not expand relation/fans/follow/comment/private-message lists without a
+  page cap.
+- Do not print private-message/comment/raw upstream bodies to users by default.
+- For RCP follow-ups, do not use stale HAR `eventId` / `queryTime`; get a
+  recent event anchor from `rcp_snapshot` first.
+
+### Default Param Recipes
+
+These payloads are safe starting points. Replace placeholders with the current
+case entity. Always call `{service_base_url}/health` and `/actions` first.
+
+User first-hop bundle:
+
+```json
+[
+  {
+    "action": "track_analysis_summary",
+    "params": {
+      "response_mode": "passthrough",
+      "sub_interface": "profile",
+      "user_id": "<user_id>",
+      "appName": "KUAISHOU"
+    }
+  },
+  {
+    "action": "login_logs_search",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "recallSource": "2,0,1,3",
+      "max_records": 300
+    }
+  },
+  {
+    "action": "weapon_inventory",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "include_risk_data": true,
+      "max_device_ids": 5
+    }
+  },
+  {
+    "action": "archives_user_profile",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>"
+    }
+  }
+]
+```
+
+Archives content seed and photo drilldown:
+
+```json
+[
+  {
+    "action": "archives_photo_search",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "begin": "<recent_30d_epoch_ms>",
+      "end": "<now_epoch_ms>",
+      "page": 1,
+      "count": 20
+    }
+  },
+  {
+    "action": "archives_gallery_photo_list",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "pageIndex": 1,
+      "pageSize": 20
+    }
+  },
+  {
+    "action": "archives_photo_meta",
+    "params": {
+      "response_mode": "passthrough",
+      "photo_id": "<photo_id_from_seed>"
+    }
+  }
+]
+```
+
+Archives social drilldown:
+
+```json
+[
+  {
+    "action": "archives_private_message_search",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "direction": "sent",
+      "page": 1,
+      "count": 20
+    }
+  },
+  {
+    "action": "archives_fans_list",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "pageIndex": 1,
+      "pageSize": 20
+    }
+  },
+  {
+    "action": "archives_follow_list",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "pageIndex": 1,
+      "pageSize": 20
+    }
+  }
+]
+```
+
+RCP recent-event seed and follow-up:
+
+```json
+[
+  {
+    "action": "rcp_snapshot",
+    "params": {
+      "response_mode": "passthrough",
+      "eventType": "USER_REGISTER_NEW",
+      "startTime": "<recent_5_to_15m_YYYY-MM-DD HH:mm:ss>",
+      "endTime": "<now_YYYY-MM-DD HH:mm:ss>",
+      "pageIndex": 1,
+      "pageSize": 20,
+      "selected_columns": [
+        "sourceId",
+        "eventId",
+        "_occurTime",
+        "hitFusePolicyCode",
+        "deviceId"
+      ]
+    }
+  },
+  {
+    "action": "rcp_event_feature_list",
+    "params": {
+      "response_mode": "passthrough",
+      "eventType": "<eventType_from_seed>",
+      "eventId": "<eventId_from_seed>",
+      "queryTime": "<_occurTime_or_queryTime_from_seed>"
+    }
+  },
+  {
+    "action": "rcp_event_tree_or_decision",
+    "params": {
+      "response_mode": "passthrough",
+      "eventType": "<eventType_from_seed>",
+      "eventId": "<eventId_from_seed>",
+      "queryTime": "<_occurTime_or_queryTime_from_seed>"
+    }
+  }
+]
+```
+
+Track device seed and validation:
+
+```json
+[
+  {
+    "action": "track_sequence_get_device_ids",
+    "params": {
+      "response_mode": "passthrough",
+      "user_id": "<user_id>",
+      "appName": "KUAISHOU"
+    }
+  },
+  {
+    "action": "track_analysis_check_data_ready",
+    "params": {
+      "response_mode": "passthrough",
+      "device_id": "<device_id_from_seed>",
+      "appName": "KUAISHOU",
+      "startTime": "<recent_24h_epoch_ms>",
+      "endTime": "<now_epoch_ms>"
+    }
+  }
+]
+```
+
 ### `/browser-backed-risk-service 自测用户 <user_id>`
 
 Purpose: validate service readiness, Mac worker connectivity, fixed action

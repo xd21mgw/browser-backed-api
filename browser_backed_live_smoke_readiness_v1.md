@@ -1,5 +1,11 @@
 # Browser-Backed Live Smoke Readiness V1
 
+Historical note: this file records an early 12-action readiness pass and keeps
+the old source-quality vocabulary for traceability. It is not the current
+70-action smoke plan. Use
+[`CONTROLLED_LIVE_SMOKE_PLAN_V1_7.md`](./CONTROLLED_LIVE_SMOKE_PLAN_V1_7.md)
+for current live-smoke execution.
+
 Date: 2026-05-30
 
 Scope: second-stage fixed browser-backed actions plus the already-promoted

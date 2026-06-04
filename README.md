@@ -73,6 +73,8 @@ Useful entry points:
 - Interface truth: [`ACTION_REGISTRY.md`](./ACTION_REGISTRY.md)
 - Capability map: [`CAPABILITY_INDEX.yaml`](./CAPABILITY_INDEX.yaml)
 - User playbook: [`ACTION_PLAYBOOK.md`](./ACTION_PLAYBOOK.md)
+- Controlled live smoke plan:
+  [`CONTROLLED_LIVE_SMOKE_PLAN_V1_7.md`](./CONTROLLED_LIVE_SMOKE_PLAN_V1_7.md)
 - Remote success paths:
   [`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`](./REMOTE_MAIN_AGENT_SUCCESS_PATHS.md)
 - Mac worker guide: [`MAC_LOCAL_WORKER_GUIDE.md`](./MAC_LOCAL_WORKER_GUIDE.md)

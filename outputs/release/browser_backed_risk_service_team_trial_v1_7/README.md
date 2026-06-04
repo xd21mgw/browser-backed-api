@@ -22,6 +22,8 @@ Current callable `action_count=70`.
 - `skill/browser_backed_risk_service/` - command-oriented Skill package.
 - `ACTION_PLAYBOOK.md` - user-facing capability playbook.
 - `CAPABILITY_INDEX.yaml` - capability-to-action mapping.
+- `CONTROLLED_LIVE_SMOKE_PLAN_V1_7.md` - current live-smoke plan using recent
+  seeds and dependent identifier discovery.
 - `REMOTE_MAIN_AGENT_SUCCESS_PATHS.md` - verified remote-main-agent paths.
 - `MAC_LOCAL_WORKER_GUIDE.md` - Mac Local Worker setup and operation guide.
 - `BROWSER_BACKED_SERVICE_COMMANDS.md` - rc-cli style command workflow.
