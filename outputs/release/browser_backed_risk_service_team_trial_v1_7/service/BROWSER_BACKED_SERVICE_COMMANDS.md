@@ -346,11 +346,11 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - If the dedicated browser-backed profile is actively locked, stops with
   `dedicated_profile_live_lock`; it asks for user action and does not kill the
   browser.
-- If the dedicated profile has stale lock files, stops with
-  `stale_profile_lock`; cleanup requires an explicit doctor command.
-  The JSON includes `service_ready=false`, `lock_type=stale_profile_lock`,
-  `pid_exists=false` when the recorded PID is gone, and
-  `dennis_should_continue_live=false`.
+- If the dedicated profile has stale lock files and the recorded PID is gone,
+  clears only those dedicated stale lock files, records
+  `stale_lock_auto_cleared=true`, and continues refresh/start.
+- If stale lock auto-clear fails, or if the lock is daily/live/unknown, stops
+  with `service_ready=false` and a blocking issue.
 - If service is missing or auth is not ready, runs `refresh:once`.
 - If refresh succeeds, starts `SERVICE_MODE=live node src/server.js` in the
   background when needed.
@@ -365,17 +365,16 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - Does not automatically close or kill `Google Chrome`, `Chromium`, or browser
   processes.
 
-For `stale_profile_lock`, ask the user to confirm the dedicated profile is not
-open, then run exactly:
+For a dedicated stale lock, ordinary users should rerun the same command:
 
 ```sh
-npm run worker:doctor -- --clear-stale-lock
 npm run worker:start
 ```
 
-Dennis / main-agent runners must stop when `worker:start` returns
-`service_ready=false` or `blocking_issue=stale_profile_lock`; they must not
-continue live source calls against `127.0.0.1:8787`.
+`worker:start` performs the stale-lock cleanup only for the dedicated profile
+and never kills Chrome. If it returns `service_ready=false`, Dennis /
+main-agent runners must stop and must not continue live source calls against
+`127.0.0.1:8787`.
 
 ### `npm run worker:status`
 
@@ -426,7 +425,8 @@ continue live source calls against `127.0.0.1:8787`.
   `no_lock`.
 - Prints next-step suggestions.
 - Does not inspect profile contents or authentication material.
-- Does not kill Chrome or delete lock files by default.
+- Does not kill Chrome. It only deletes dedicated stale lock files when
+  `--clear-stale-lock` is explicitly supplied.
 
 Optional inspect-only flags:
 

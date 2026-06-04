@@ -441,14 +441,15 @@ Lock classifications:
   remnant. The agent does not kill it; ask the user to close the browser-backed
   profile window or stop the owning worker.
 - `stale_profile_lock`: lock files exist under the dedicated profile but the
-  recorded PID is not live. The default `worker:start` does not delete them.
-  It returns `service_ready=false`, `lock_type=stale_profile_lock`,
-  `pid_exists=false`, `dennis_should_continue_live=false`, and a recovery
-  `next_step`. Clear only with the explicit command below.
+  recorded PID is not live. `worker:start` automatically clears only these
+  dedicated stale lock files, then continues refresh/start. If auto-clear
+  fails, it returns `service_ready=false`, `lock_type=stale_profile_lock`, and a
+  recovery `next_step`.
 - `unknown_lock`: the profile source or PID state cannot be trusted. Stop and
   ask the user to inspect. Do not delete files or kill Chrome.
 
-Explicit stale-lock cleanup is allowed only for stale locks under the dedicated
+The explicit stale-lock cleanup command remains available for diagnosis or
+manual recovery. It is allowed only for stale locks under the dedicated
 browser-backed profile:
 
 ```sh
@@ -456,8 +457,9 @@ npm run worker:doctor -- --clear-stale-lock
 npm run worker:start
 ```
 
-`stale_profile_lock` is a safety stop, not a service bug. Dennis and other
-runners must not continue live source calls while `service_ready=false`.
+`stale_profile_lock` is recoverable only when it is the dedicated stale-lock
+case. Dennis and other runners must not continue live source calls while
+`service_ready=false`.
 
 You can also inspect obvious local Chrome/Playwright processes without reading
 the profile contents:

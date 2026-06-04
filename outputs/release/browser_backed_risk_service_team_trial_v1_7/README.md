@@ -83,10 +83,11 @@ npm run worker:start
 npm run worker:status
 ```
 
-If `worker:start` returns `service_ready=false` with
-`blocking_issue=stale_profile_lock`, stop live source calls. After user
-confirmation, run `npm run worker:doctor -- --clear-stale-lock`, then
-`npm run worker:start`. The worker never kills Chrome or deletes the profile.
+If the dedicated profile has stale lock files and the recorded PID is gone,
+`worker:start` automatically clears those stale lock files and continues
+refresh/start. If it returns `service_ready=false`, stop live source calls and
+inspect with `npm run worker:doctor -- --explain-lock`. The worker never kills
+Chrome or deletes the profile.
 
 For remote main-agent use:
 

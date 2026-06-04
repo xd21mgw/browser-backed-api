@@ -415,20 +415,16 @@ Profile lock safety:
 
 - Main agents and Skills must not automatically close or kill daily Chrome,
   `Google Chrome`, `Chromium`, or browser processes.
-- `worker:start` stops on unsafe profile locks and prints a blocking issue
-  instead of killing or deleting anything.
+- `worker:start` stops on unsafe live/daily/unknown profile locks and prints a
+  blocking issue instead of killing Chrome or deleting the profile.
 - `worker:doctor` classifies locks as `daily_chrome_profile_in_use`,
   `dedicated_profile_live_lock`, `stale_profile_lock`, or `unknown_lock`.
-- Stale lock cleanup is explicit only:
-  `npm run worker:doctor -- --clear-stale-lock`.
-- The explicit cleanup applies only to stale lock files in
-  `~/.dennis-browser-backed/profile`.
-- When `worker:start` returns `service_ready=false` with
-  `blocking_issue=stale_profile_lock`, this is a safety stop, not a service
-  bug. Dennis / runners must not continue live source calls. After user
-  confirmation, recover with:
-  `npm run worker:doctor -- --clear-stale-lock` and then
-  `npm run worker:start`.
+- `worker:start` automatically clears stale lock files only when they are under
+  the dedicated profile `~/.dennis-browser-backed/profile` and the recorded PID
+  is not live, then continues refresh/start.
+- If stale lock auto-clear fails, or if the lock is daily/live/unknown, the
+  worker returns `service_ready=false`; Dennis / runners must not continue live
+  source calls.
 
 If the remote Agent reports `mac_node_disconnected`, open the MyFlicker Mac
 client, confirm the node is connected, and retry `/browser-backed-risk-service

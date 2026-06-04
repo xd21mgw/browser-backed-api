@@ -253,13 +253,11 @@ for Node/npm, install, profile path, profile lock, and port diagnostics.
 - Daily Chrome profile: do not close daily Chrome; fix `BROWSER_BACKED_PROFILE_DIR`.
 - Dedicated live lock: ask the user to close the browser-backed profile window
   or stop the owning worker.
-- Stale dedicated lock: clear only with
-  `npm run worker:doctor -- --clear-stale-lock`, then rerun
-  `npm run worker:start`.
-  `worker:start` reports `service_ready=false`,
-  `blocking_issue=stale_profile_lock`, and
-  `dennis_should_continue_live=false`; remote runners must stop instead of
-  calling live sources.
+- Stale dedicated lock: `worker:start` automatically clears stale lock files
+  only when they are under `~/.dennis-browser-backed/profile` and the recorded
+  PID is not live, then continues refresh/start.
+- If stale auto-clear fails, `worker:start` reports `service_ready=false` and a
+  blocking issue; remote runners must stop instead of calling live sources.
 - Unknown lock: stop and ask the user to inspect.
 
 Do not delete the profile. Do not run `killall Chrome`, `pkill Chrome`, or

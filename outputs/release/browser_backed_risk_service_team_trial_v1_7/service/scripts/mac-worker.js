@@ -127,10 +127,11 @@ export function planWorkerStart({ serviceReachable, authState, refreshSummary, p
   if (serviceReachable && authState === "ready") {
     return ["return_ready"];
   }
-  if (!serviceReachable && blockingProfileLockStatus(profileLockStatus)) {
+  const autoClearStaleLock = !serviceReachable && profileLockStatus === "stale_profile_lock";
+  if (!serviceReachable && blockingProfileLockStatus(profileLockStatus) && !autoClearStaleLock) {
     return ["profile_lock_blocked"];
   }
-  const steps = ["refresh_once"];
+  const steps = autoClearStaleLock ? ["clear_stale_profile_lock", "refresh_once"] : ["refresh_once"];
   if (refreshSummary && needsManualLogin(refreshSummary)) {
     steps.push("open_profile", "refresh_once_after_open_profile");
     if (postOpenRefreshSummary?.ok) {
@@ -161,6 +162,46 @@ export function canClearStaleProfileLock(profileLock) {
   return profileLock?.status === "stale_profile_lock" && profileLock?.clear_stale_lock_allowed === true;
 }
 
+export function clearDedicatedStaleProfileLock(profileLock, targetProfileDir = profileDir) {
+  if (!canClearStaleProfileLock(profileLock)) {
+    return {
+      ok: false,
+      stale_lock_cleared: false,
+      stale_lock_clear_error: "clear-stale-lock is allowed only for stale locks in the dedicated browser-backed profile",
+      cleared_lock_files: [],
+      auto_kill_chrome: false,
+      profile_deleted: false,
+      credential_material_output: false
+    };
+  }
+
+  const lockFiles = listProfileLockFiles(targetProfileDir);
+  try {
+    for (const file of lockFiles) {
+      fs.rmSync(file.path, { force: true, recursive: false });
+    }
+    return {
+      ok: true,
+      stale_lock_cleared: true,
+      stale_lock_clear_error: null,
+      cleared_lock_files: lockFiles.map((file) => file.name),
+      auto_kill_chrome: false,
+      profile_deleted: false,
+      credential_material_output: false
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stale_lock_cleared: false,
+      stale_lock_clear_error: sanitizeMessage(error),
+      cleared_lock_files: [],
+      auto_kill_chrome: false,
+      profile_deleted: false,
+      credential_material_output: false
+    };
+  }
+}
+
 export function buildProfileLockBlockedStartOutput(lockDiagnosis) {
   const lockPids = Array.isArray(lockDiagnosis?.lock_pids) ? lockDiagnosis.lock_pids : [];
   const pidExists = lockPids.some((item) => item?.pid_exists === true);
@@ -181,7 +222,7 @@ export function buildProfileLockBlockedStartOutput(lockDiagnosis) {
     auto_kill_chrome: false,
     auto_delete_lock: false,
     next_step: isStaleProfileLock
-      ? "Run npm run worker:doctor -- --clear-stale-lock, then npm run worker:start"
+      ? "Dedicated stale lock auto-clear failed or did not resolve the lock. Run npm run worker:doctor -- --explain-lock before retrying worker:start."
       : lockDiagnosis?.next_step || "Run npm run worker:doctor and resolve the profile lock before retrying worker:start.",
     credential_material_output: false
   };
@@ -283,6 +324,7 @@ export function needsManualLogin(summary) {
 
 async function startWorker() {
   const existing = await fetchHealth();
+  let profileLockRecovery = null;
   if (existing.ok && existing.body?.auth_state === "ready") {
     printJson({
       ok: true,
@@ -296,9 +338,34 @@ async function startWorker() {
   }
 
   if (!existing.ok) {
-    const lockDiagnosis = diagnoseProfileLock();
+    let lockDiagnosis = diagnoseProfileLock();
+    if (lockDiagnosis.status === "stale_profile_lock" && canClearStaleProfileLock(lockDiagnosis)) {
+      const clearResult = clearDedicatedStaleProfileLock(lockDiagnosis);
+      profileLockRecovery = {
+        stale_lock_auto_clear_attempted: true,
+        stale_lock_auto_cleared: Boolean(clearResult.ok),
+        cleared_lock_files: clearResult.cleared_lock_files || [],
+        stale_lock_clear_error: clearResult.stale_lock_clear_error || null,
+        auto_kill_chrome: false,
+        profile_deleted: false,
+        credential_material_output: false
+      };
+      if (!clearResult.ok) {
+        printJson({
+          ...buildProfileLockBlockedStartOutput(lockDiagnosis),
+          blocking_issue: "stale_profile_lock_clear_failed",
+          profile_lock_recovery: profileLockRecovery
+        });
+        process.exitCode = 1;
+        return;
+      }
+      lockDiagnosis = diagnoseProfileLock();
+    }
     if (blockingProfileLockStatus(lockDiagnosis.status)) {
-      printJson(buildProfileLockBlockedStartOutput(lockDiagnosis));
+      printJson({
+        ...buildProfileLockBlockedStartOutput(lockDiagnosis),
+        profile_lock_recovery: profileLockRecovery
+      });
       process.exitCode = 1;
       return;
     }
@@ -317,6 +384,8 @@ async function startWorker() {
         open_profile_attempted: true,
         open_profile_ok: openProfile.ok,
         pending_manual_login: true,
+        profile_lock_recovery: profileLockRecovery,
+        stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
         refresh_summary: sanitizeWorkerRefreshSummary(secondRefresh.summary || firstRefresh.summary),
         next_step: "Complete manual login in open:profile, then run npm run worker:start again.",
         credential_material_output: false
@@ -328,7 +397,8 @@ async function startWorker() {
       serviceAlreadyReachable: existing.ok,
       authRecoveryAttempted: true,
       openProfileAttempted: true,
-      refreshSummary: secondRefresh.summary
+      refreshSummary: secondRefresh.summary,
+      profileLockRecovery
     });
     return;
   }
@@ -341,6 +411,8 @@ async function startWorker() {
       auth_recovery_attempted: true,
       open_profile_attempted: false,
       pending_manual_login: false,
+      profile_lock_recovery: profileLockRecovery,
+      stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
       refresh_summary: sanitizeWorkerRefreshSummary(firstRefresh.summary),
       next_step: "Run npm run worker:doctor. If auth is required, run npm run worker:start again to enter open:profile.",
       credential_material_output: false
@@ -353,11 +425,12 @@ async function startWorker() {
     serviceAlreadyReachable: existing.ok,
     authRecoveryAttempted: true,
     openProfileAttempted: false,
-    refreshSummary: firstRefresh.summary
+    refreshSummary: firstRefresh.summary,
+    profileLockRecovery
   });
 }
 
-async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttempted, openProfileAttempted, refreshSummary }) {
+async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttempted, openProfileAttempted, refreshSummary, profileLockRecovery = null }) {
   const postRefreshHealth = await fetchHealth();
   if (postRefreshHealth.ok && postRefreshHealth.body?.auth_state === "ready") {
     printJson({
@@ -367,6 +440,10 @@ async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttemp
       auth_recovery_attempted: Boolean(authRecoveryAttempted),
       open_profile_attempted: Boolean(openProfileAttempted),
       service_base_url: localBaseUrl,
+      profile_lock_recovery: profileLockRecovery,
+      stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
+      auto_kill_chrome: false,
+      profile_deleted: false,
       refresh_summary: sanitizeWorkerRefreshSummary(refreshSummary),
       health: summarizeHealth(postRefreshHealth.body),
       next_step: "Service is ready. Call allowlisted actions through service_base_url.",
@@ -397,6 +474,10 @@ async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttemp
     service_base_url: localBaseUrl,
     pid_file: pidFile,
     log_file: logFile,
+    profile_lock_recovery: profileLockRecovery,
+    stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
+    auto_kill_chrome: false,
+    profile_deleted: false,
     refresh_summary: sanitizeWorkerRefreshSummary(refreshSummary),
     health: health.ok ? summarizeHealth(health.body) : null,
     next_step: health.ok ? "Use worker:status or call service actions." : "Check worker:doctor and log_file."
@@ -610,18 +691,9 @@ async function doctor() {
   let staleLockCleared = false;
   let staleLockClearError = null;
   if (clearStaleLock) {
-    if (canClearStaleProfileLock(profileLock)) {
-      try {
-        for (const file of listProfileLockFiles(profileDir)) {
-          fs.rmSync(file.path, { force: true, recursive: false });
-        }
-        staleLockCleared = true;
-      } catch (error) {
-        staleLockClearError = sanitizeMessage(error);
-      }
-    } else {
-      staleLockClearError = "clear-stale-lock is allowed only for stale locks in the dedicated browser-backed profile";
-    }
+    const clearResult = clearDedicatedStaleProfileLock(profileLock);
+    staleLockCleared = Boolean(clearResult.stale_lock_cleared);
+    staleLockClearError = clearResult.stale_lock_clear_error;
   }
   const postClearProfileLock = staleLockCleared ? diagnoseProfileLock() : profileLock;
 
@@ -757,7 +829,7 @@ function suggestNextSteps({ healthOk, packageInstalled, profileExists, profileLo
     return ["The dedicated browser-backed profile is in use. Ask the user to close the browser-backed profile window or stop the owning worker; do not kill Chrome automatically."];
   }
   if (profileLock?.status === "stale_profile_lock" && !healthOk) {
-    return ["Dedicated profile has stale lock files. Inspect with npm run worker:doctor -- --explain-lock; clear only with npm run worker:doctor -- --clear-stale-lock."];
+    return ["Dedicated profile has stale lock files. Run npm run worker:start to auto-clear dedicated stale locks and continue; use npm run worker:doctor -- --explain-lock if auto-clear fails."];
   }
   if (profileLock?.status === "unknown_lock" && !healthOk) {
     return ["Profile lock source is unknown. Stop and ask the user to inspect profile ownership; do not delete locks or kill Chrome."];
@@ -987,7 +1059,7 @@ function profileLockNextStep(status) {
     return "Ask the user to close the browser-backed dedicated profile window or stop the owning worker; do not kill Chrome automatically.";
   }
   if (status === "stale_profile_lock") {
-    return "Inspect with npm run worker:doctor -- --explain-lock; clear only with npm run worker:doctor -- --clear-stale-lock.";
+    return "Run npm run worker:start to auto-clear dedicated stale locks and continue; use npm run worker:doctor -- --explain-lock if auto-clear fails.";
   }
   if (status === "unknown_lock") {
     return "Stop and ask the user to inspect the profile lock. Do not delete lock files or kill Chrome.";

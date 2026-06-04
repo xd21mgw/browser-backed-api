@@ -23,6 +23,7 @@ import {
   buildProfileLockBlockedStartOutput,
   buildExposeSummary,
   canClearStaleProfileLock,
+  clearDedicatedStaleProfileLock,
   classifyProfileLockState,
   classifyProxyRequest,
   extractUserDataDir,
@@ -1313,8 +1314,17 @@ test("worker:start plan blocks on unsafe profile lock before refresh", () => {
   assert.deepEqual(planWorkerStart({
     serviceReachable: false,
     authState: null,
-    profileLockStatus: "stale_profile_lock"
+    profileLockStatus: "unknown_lock"
   }), ["profile_lock_blocked"]);
+});
+
+test("worker:start plan auto-clears dedicated stale lock before refresh", () => {
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: false,
+    authState: null,
+    profileLockStatus: "stale_profile_lock",
+    refreshSummary: { ok: true, auth_state: "ready" }
+  }), ["clear_stale_profile_lock", "refresh_once", "start_service"]);
 });
 
 test("profile lock classifier protects daily Chrome profile", () => {
@@ -1350,7 +1360,7 @@ test("profile lock classifier reports dedicated profile live lock without kill p
   assertNoCredentialMaterial(result);
 });
 
-test("profile lock classifier marks dedicated stale lock as explicit-clear only", () => {
+test("profile lock classifier marks dedicated stale lock as auto-clear eligible", () => {
   const dedicated = path.join(os.homedir(), ".dennis-browser-backed", "profile");
   const result = classifyProfileLockState({
     profileDir: dedicated,
@@ -1366,7 +1376,7 @@ test("profile lock classifier marks dedicated stale lock as explicit-clear only"
   assertNoCredentialMaterial(result);
 });
 
-test("worker:start stale profile lock output blocks Dennis live continuation", () => {
+test("worker:start stale profile lock blocked output is only used after auto-clear failure", () => {
   const dedicated = path.join(os.homedir(), ".dennis-browser-backed", "profile");
   const lockDiagnosis = classifyProfileLockState({
     profileDir: dedicated,
@@ -1388,7 +1398,7 @@ test("worker:start stale profile lock output blocks Dennis live continuation", (
   assert.equal(output.auto_delete_lock, false);
   assert.equal(
     output.next_step,
-    "Run npm run worker:doctor -- --clear-stale-lock, then npm run worker:start"
+    "Dedicated stale lock auto-clear failed or did not resolve the lock. Run npm run worker:doctor -- --explain-lock before retrying worker:start."
   );
   assertNoCredentialMaterial(output);
 });
@@ -1411,6 +1421,29 @@ test("clear-stale-lock helper rejects live and daily Chrome profile locks", () =
   assert.equal(canClearStaleProfileLock({ status: "dedicated_profile_live_lock", clear_stale_lock_allowed: false }), false);
   assert.equal(canClearStaleProfileLock({ status: "daily_chrome_profile_in_use", clear_stale_lock_allowed: false }), false);
   assert.equal(canClearStaleProfileLock({ status: "unknown_lock", clear_stale_lock_allowed: false }), false);
+  const rejected = clearDedicatedStaleProfileLock({ status: "daily_chrome_profile_in_use", clear_stale_lock_allowed: false }, os.tmpdir());
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.auto_kill_chrome, false);
+  assert.equal(rejected.profile_deleted, false);
+  assertNoCredentialMaterial(rejected);
+});
+
+test("clear-stale-lock helper clears only explicit dedicated stale lock files", () => {
+  const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), "bbrs-stale-lock-"));
+  const lockPath = path.join(tempProfile, "SingletonLock");
+  fs.writeFileSync(lockPath, "MacBook-Air.local-444");
+  const result = clearDedicatedStaleProfileLock({
+    status: "stale_profile_lock",
+    clear_stale_lock_allowed: true
+  }, tempProfile);
+  assert.equal(result.ok, true);
+  assert.equal(result.stale_lock_cleared, true);
+  assert.deepEqual(result.cleared_lock_files, ["SingletonLock"]);
+  assert.equal(fs.existsSync(lockPath), false);
+  assert.equal(result.auto_kill_chrome, false);
+  assert.equal(result.profile_deleted, false);
+  assertNoCredentialMaterial(result);
+  fs.rmSync(tempProfile, { recursive: true, force: true });
 });
 
 test("profile lock parser extracts user-data-dir without exposing raw command paths", () => {
