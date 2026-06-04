@@ -4,7 +4,7 @@ This is the controlled passthrough action registry for the local
 browser-backed service. It describes service-callable fixed actions, fixed
 platform origin/path, typed params, mock/live status, and safety boundary.
 
-Current callable action count: 37.
+Current callable action count: 70.
 
 This file is service-layer documentation only. It does not define how an
 upper-layer Agent interprets returned transport status or any platform data.
@@ -52,7 +52,7 @@ JavaScript context.
 
 Current runtime fetch modes:
 
-- `context_request`: 36 fixed actions. The browser context supplies the local
+- `context_request`: 69 fixed actions. The browser context supplies the local
   login state while the service calls the allowlisted fixed origin/path directly.
 - `page_followup`: `weapon_inventory` only. This action chains the
   service-owned `graphData -> riskData` fixed paths and remains on
@@ -75,6 +75,28 @@ Current runtime fetch modes:
 | `archives_photo_report_aggregate` | Archives Center / `archives` | `POST` | `/v3/photo/report/aggregate` | `photo_id` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed photo identifier body only. |
 | `archives_photo_user_autonomy` | Archives Center / `archives` | `POST` | `/archives/photo/home/userAutonomy` | `photo_id` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed photo identifier body only. |
 | `archives_gallery_photo_list` | Archives Center / `archives` | `POST` | `/v3/user/gallery/photo/list` | `user_id`, optional `pageIndex`, `pageSize`, `filters` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed gallery list body only. |
+| `archives_photo_gallery_top` | Archives Center / `archives` | `POST` | `/v3/user/gallery/photo/top` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user body only. |
+| `archives_negative_report` | Archives Center / `archives` | `POST` | `/v3/user/negative/report` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user body only. |
+| `archives_negative_uninterested` | Archives Center / `archives` | `POST` | `/v3/user/negative/unInterested` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user body only. |
+| `archives_risk_info` | Archives Center / `archives` | `GET` | `/v3/user/risk/info` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user query only. |
+| `archives_user_label` | Archives Center / `archives` | `POST` | `/archives/user/home/getUserLabel` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user body only. |
+| `archives_user_shop_info` | Archives Center / `archives` | `GET` | `/archives/user/home/getUserShopInfo` | `user_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user query only. |
+| `archives_punish_status` | Archives Center / `archives` | `POST` | `/archives/draco/getPunishStatus` | `photo_id` or `live_stream_id`; optional `target_id` + `target_type` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed PHOTO/LIVE_STREAM targets only; no user-level punish guessing. |
+| `archives_review_logs` | Archives Center / `archives` | `POST` | `/v3/user/log/reviewLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user/time/page body only. |
+| `archives_user_analyze_summary` | Archives Center / `archives` | `POST` | `/v3/user/analyze/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user/time/page body only. |
+| `archives_live_gallery` | Archives Center / `archives` | `POST` | `/v4/archives/gallery/live/list` | `user_id`, optional `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live gallery body only. |
+| `archives_fans_list` | Archives Center / `archives` | `POST` | `/v3/user/profile/relation/fans/list` | `user_id`, optional `pageIndex`, `pageSize` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed fans list body only. |
+| `archives_follow_list` | Archives Center / `archives` | `POST` | `/v3/user/profile/relation/follow/list` | `user_id`, optional `pageIndex`, `pageSize` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed follow list body only. |
+| `archives_collect_photo_list` | Archives Center / `archives` | `POST` | `/v3/user/collect/photo/list` | `user_id`, optional `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed collected-photo body only. |
+| `archives_collection_list` | Archives Center / `archives` | `POST` | `/archives/photo/collection/getCollectionList` | `user_id`, optional `page`, `size` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed collection-list body only. |
+| `archives_comment_search` | Archives Center / `archives` | `POST` | `/archives/photo/comment/search` | exactly one of `user_id` or `photo_id`, optional `containsPhotoInfo`, `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed comment search body only. |
+| `archives_livestream_home_info` | Archives Center / `archives` | `POST` | `/archives/livestream/home/info` | `live_stream_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live stream id body only. |
+| `archives_livestream_home_meta` | Archives Center / `archives` | `POST` | `/archives/livestream/home/meta` | `live_stream_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live stream id body only. |
+| `archives_livestream_home_log` | Archives Center / `archives` | `POST` | `/archives/livestream/home/log` | `live_stream_id`, optional `beginTime`, `endTime`, `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live log body only. |
+| `archives_livestream_comment_statistics` | Archives Center / `archives` | `POST` | `/archives/livestream/comment/statistics` | `live_stream_id` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live comment statistics body only. |
+| `archives_livestream_comment_detail` | Archives Center / `archives` | `POST` | `/archives/livestream/comment/detail` | `live_stream_id`, optional `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed live comment detail body only. |
+| `archives_user_report_search` | Archives Center / `archives` | `POST` | `/v4/archives/report/user/search` | `user_id`, optional `begin`, `end`, `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed user report body only. |
+| `archives_moment_list` | Archives Center / `archives` | `POST` | `/archives/user/gallery/momentList` | `user_id`, optional `page`, `count` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed moment list body only. |
 | `archives_related_users` | Archives Center / `archives` | `POST` | `/archives/user/search/device` | `user_id`, optional `relation_type` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed relation enum only. |
 | `archives_private_message_search` | Archives Center / `archives` | `POST` | `/archives/user/message/search` | `user_id`, `direction`, optional page/filter controls | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed private-message search body. |
 | `archives_past_four_items` | Archives Center / `archives` | `POST` | `/v4/audit/user/fourinfo/log/search` | `user_id`, optional info type/page/filter controls | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed four-info search body. |
@@ -90,6 +112,14 @@ Current runtime fetch modes:
 | `rcp_policy_blur_search` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/policyBlurSearch` | optional `policyCode`, `policyTreeCode`, `page`, `size` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed policy blur-search query only. |
 | `rcp_policy_all_version` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyAllVersion` | `policyCode`, optional `page`, `size` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed policy version-list query only. |
 | `rcp_pipeline_policy_versions_by_code` | RCP / `rcp` | `GET` | `/v2/rest/common/pipeline/getPolicyVersionsByCode` | `policyCode` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed pipeline policy-version query only. |
+| `rcp_policy_tree_list` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/policyTreeList` | optional `policyTreeCode`, `policyCode`, `eventTypeAssociator`, `page`, `size` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed policy-tree list query only. |
+| `rcp_policy_tree_node_binding` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/queryBindingByNodeCode` | `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode`, optional `policyCode`, page controls | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed resolved-node query only. |
+| `rcp_policy_tree_policy_codes` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/getAllPolicyCodeByPage` | `policyTreeCode`, `policyTreeVersion`, optional `code`, page controls | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed policy-code list query only. |
+| `rcp_policy_tree_max_version` | RCP / `rcp` | `GET` | `/v2/rest/pro/policyTree/getMaxPolicyTreeVersion` | `policyTreeCode`, optional `treeSnapshot` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed max-version query only. |
+| `rcp_event_type_list` | RCP / `rcp` | `GET` | `/v2/rest/basicInfo/getEventTypeListByPage` | optional `keyWord`/`keyword`, `page`, `size` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed event-type option query only. |
+| `rcp_realtime_op_list` | RCP / `rcp` | `GET` | `/v2/rest/event/realTimeOpList` | `eventType` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed realtime-op query only. |
+| `rcp_event_query_max_duration` | RCP / `rcp` | `GET` | `/v2/rest/event/eventQueryMaxDurationGet` | `eventType` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed event duration helper query only. |
+| `rcp_event_save_ratios` | RCP / `rcp` | `GET` | `/v2/rest/event/getEventSaveRatios` | `eventType` mapped to `eventTypeCode` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed save-ratio query only. |
 | `rcp_policy_version_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pc/policy/getPolicyVersionListByEvent` | `eventType`, `eventId`, `policyCode`, `policyVersion`, `queryTime` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed policy-version query. |
 | `rcp_policy_detail_lookup` | RCP / `rcp` | `GET` | `/v2/rest/pro/policy/getPolicyDetailByVersion` | `policyCode`, `policyVersion` | passthrough only | bounded | yes | yes | `live_pass` | `open_explicit` | Fixed policy-detail query. |
 | `rcp_policy_release_record_lookup` | RCP / `rcp` | `POST` | `/v2/rest/common/pipeline/list` | `policyCode`, optional `statusCode`, `page`, `size` | passthrough only | bounded | yes | yes | `live_no_data` | `open_explicit` | Fixed release-record body. |
@@ -100,6 +130,9 @@ Current runtime fetch modes:
 | `track_analysis_product_list` | Track Analysis / `track_analysis` | `POST` | `/dp/track-analysis/product/list/v2` | optional `product`, `appName`, `currentPage`, `pageSize`, `keyword`, `needFavorite` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed product-list body only. |
 | `track_sequence_dimension_list` | Track Analysis / `track_analysis` | `GET` | `/dp/platform/app/analytics/v2/sequence/dimension/list` | optional `product` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed sequence-dimension query only. |
 | `track_data_type_list` | Track Analysis / `track_analysis` | `GET` | `/dp/platform/app/analytics/v2/track/getDataTypeList` | optional `product` | passthrough only | bounded | yes | yes | not run; mock only | `open_explicit` | Fixed data-type query only. |
+| `track_sequence_get_device_ids` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/getDeviceIds` | exactly one of `user_id` or `device_id`, `appName` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed sequence device-id body only. |
+| `track_sequence_get_use_duration` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/getUseDuration` | exactly one of `user_id` or `device_id`, `appName` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed use-duration body only. |
+| `track_sequence_profile` | Track Analysis / `track_analysis` | `POST` | `/dp/platform/app/analytics/v2/sequence/profile` | exactly one of `user_id` or `device_id`, `appName`, optional `time_window` | passthrough only | bounded | yes | yes | mock only | `open_explicit` | Fixed sequence profile body only. |
 
 ## Excluded Noise
 

@@ -18,6 +18,10 @@ Use `{service_base_url}` for every request. Local default is
 - 适用问题：查用户基础画像、账号状态、档案中心画像、前端活跃画像。
 - 推荐 action：`archives_user_profile`, `archives_user_analysis`,
   `track_analysis_summary`
+- 补充 action：`archives_negative_report`,
+  `archives_negative_uninterested`, `archives_risk_info`,
+  `archives_user_label`, `archives_user_shop_info`, `archives_review_logs`,
+  `archives_user_analyze_summary`
 - 必填参数：`user_id`
 - 可选参数：`beginTime`, `endTime`, `pageIndex`, `pageSize`, `appName`,
   `sub_interface`
@@ -83,6 +87,15 @@ judgment.
 - 适用问题：查作品列表、作品详情、视频 meta、举报聚合、用户作品锚点。
 - 推荐 action：`archives_photo_search`, `archives_photo_profile`,
   `archives_photo_meta`
+- 补充 action：`archives_photo_report_aggregate`,
+  `archives_photo_user_autonomy`, `archives_gallery_photo_list`,
+  `archives_photo_gallery_top`, `archives_collect_photo_list`,
+  `archives_collection_list`, `archives_live_gallery`,
+  `archives_livestream_home_info`, `archives_livestream_home_meta`,
+  `archives_livestream_home_log`,
+  `archives_livestream_comment_statistics`,
+  `archives_livestream_comment_detail`, `archives_user_report_search`,
+  `archives_moment_list`, `archives_punish_status`
 - 必填参数：`user_id` for search/list; `photo_id` for profile/meta/report.
 - 可选参数：`begin`, `end`, `page`, `count`, `pageIndex`, `pageSize`
 - 常见下一跳：用户画像、设备图谱、策略事件。
@@ -101,8 +114,10 @@ the service.
 
 ## 私信/社交
 
-- 适用问题：查私信样本、关联用户、关系链线索。
+- 适用问题：查私信样本、粉丝、关注、评论、关联用户、关系链线索。
 - 推荐 action：`archives_private_message_search`
+- 补充 action：`archives_fans_list`, `archives_follow_list`,
+  `archives_comment_search`, `archives_related_users`
 - 必填参数：`user_id`, `direction`
 - 可选参数：`page`, `count`, `beginTime`, `endTime`
 - 常见下一跳：用户画像、设备图谱。
@@ -142,6 +157,10 @@ curl -sS -X POST "{service_base_url}/actions/archives_past_four_items" \
   `rcp_policy_version_lookup`, `rcp_policy_detail_lookup`,
   `rcp_policy_release_record_lookup`, `rcp_node_policy_attribution`,
   `rcp_node_bind_policy_attribution`
+- 补充 action：`rcp_policy_tree_list`, `rcp_policy_tree_node_binding`,
+  `rcp_policy_tree_policy_codes`, `rcp_policy_tree_max_version`,
+  `rcp_event_type_list`, `rcp_realtime_op_list`,
+  `rcp_event_query_max_duration`, `rcp_event_save_ratios`
 - 必填参数：depends on action; common params include `eventType`, `eventId`,
   `queryTime`, `policyCode`, `policyVersion`, `policyTreeCode`,
   `policyTreeVersion`, `policyTreeNodeCode`
@@ -164,6 +183,10 @@ judgments.
 
 - 适用问题：查前端活跃、设备列表、数据就绪状态、产品和维度枚举。
 - 推荐 action：`track_analysis_summary`, `track_analysis_check_data_ready`
+- 补充 action：`track_sequence_get_device_ids`,
+  `track_sequence_get_use_duration`, `track_sequence_profile`,
+  `track_analysis_product_list`, `track_sequence_dimension_list`,
+  `track_data_type_list`
 - 必填参数：`user_id` or `device_id` for user/device queries; `device_id` for
   check-data-ready.
 - 可选参数：`appName`, `sub_interface`, `startTime`, `endTime`, `product`

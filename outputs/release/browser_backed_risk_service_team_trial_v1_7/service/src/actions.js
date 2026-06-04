@@ -14,6 +14,28 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "archives_photo_report_aggregate",
   "archives_photo_user_autonomy",
   "archives_gallery_photo_list",
+  "archives_photo_gallery_top",
+  "archives_negative_report",
+  "archives_negative_uninterested",
+  "archives_risk_info",
+  "archives_user_label",
+  "archives_user_shop_info",
+  "archives_punish_status",
+  "archives_review_logs",
+  "archives_user_analyze_summary",
+  "archives_live_gallery",
+  "archives_fans_list",
+  "archives_follow_list",
+  "archives_collect_photo_list",
+  "archives_collection_list",
+  "archives_comment_search",
+  "archives_livestream_home_info",
+  "archives_livestream_home_meta",
+  "archives_livestream_home_log",
+  "archives_livestream_comment_statistics",
+  "archives_livestream_comment_detail",
+  "archives_user_report_search",
+  "archives_moment_list",
   "archives_related_users",
   "archives_private_message_search",
   "archives_past_four_items",
@@ -29,6 +51,14 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "rcp_policy_blur_search",
   "rcp_policy_all_version",
   "rcp_pipeline_policy_versions_by_code",
+  "rcp_policy_tree_list",
+  "rcp_policy_tree_node_binding",
+  "rcp_policy_tree_policy_codes",
+  "rcp_policy_tree_max_version",
+  "rcp_event_type_list",
+  "rcp_realtime_op_list",
+  "rcp_event_query_max_duration",
+  "rcp_event_save_ratios",
   "rcp_policy_version_lookup",
   "rcp_policy_detail_lookup",
   "rcp_policy_release_record_lookup",
@@ -38,7 +68,10 @@ export const ACTION_ALLOWLIST = Object.freeze([
   "track_analysis_check_data_ready",
   "track_analysis_product_list",
   "track_sequence_dimension_list",
-  "track_data_type_list"
+  "track_data_type_list",
+  "track_sequence_get_device_ids",
+  "track_sequence_get_use_duration",
+  "track_sequence_profile"
 ]);
 
 const ALLOWED_INPUT_KEYS = Object.freeze([
@@ -113,6 +146,17 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
   "policyTreeVersion",
   "policyTreeNodeCode",
   "targetPolicyCode",
+  "target_id",
+  "target_type",
+  "live_stream_id",
+  "comment_direction",
+  "containsPhotoInfo",
+  "policyType",
+  "treeSnapshot",
+  "code",
+  "keyWord",
+  "order",
+  "eventTypeAssociator",
   "statusCode",
   "size",
   "region"
@@ -196,7 +240,29 @@ const ARCHIVES_PHOTO_META_PATH = "/v3/photo/meta";
 const ARCHIVES_PHOTO_REPORT_AGGREGATE_PATH = "/v3/photo/report/aggregate";
 const ARCHIVES_PHOTO_USER_AUTONOMY_PATH = "/archives/photo/home/userAutonomy";
 const ARCHIVES_GALLERY_PHOTO_LIST_PATH = "/v3/user/gallery/photo/list";
+const ARCHIVES_PHOTO_GALLERY_TOP_PATH = "/v3/user/gallery/photo/top";
 const ARCHIVES_USER_PROFILE_PATH = "/archives/user/home/info";
+const ARCHIVES_NEGATIVE_REPORT_PATH = "/v3/user/negative/report";
+const ARCHIVES_NEGATIVE_UNINTERESTED_PATH = "/v3/user/negative/unInterested";
+const ARCHIVES_RISK_INFO_PATH = "/v3/user/risk/info";
+const ARCHIVES_USER_LABEL_PATH = "/archives/user/home/getUserLabel";
+const ARCHIVES_USER_SHOP_INFO_PATH = "/archives/user/home/getUserShopInfo";
+const ARCHIVES_PUNISH_STATUS_PATH = "/archives/draco/getPunishStatus";
+const ARCHIVES_REVIEW_LOGS_PATH = "/v3/user/log/reviewLogs/fetch";
+const ARCHIVES_USER_ANALYZE_SUMMARY_PATH = "/v3/user/analyze/fetch";
+const ARCHIVES_LIVE_GALLERY_PATH = "/v4/archives/gallery/live/list";
+const ARCHIVES_FANS_LIST_PATH = "/v3/user/profile/relation/fans/list";
+const ARCHIVES_FOLLOW_LIST_PATH = "/v3/user/profile/relation/follow/list";
+const ARCHIVES_COLLECT_PHOTO_LIST_PATH = "/v3/user/collect/photo/list";
+const ARCHIVES_COLLECTION_LIST_PATH = "/archives/photo/collection/getCollectionList";
+const ARCHIVES_COMMENT_SEARCH_PATH = "/archives/photo/comment/search";
+const ARCHIVES_LIVESTREAM_HOME_INFO_PATH = "/archives/livestream/home/info";
+const ARCHIVES_LIVESTREAM_HOME_META_PATH = "/archives/livestream/home/meta";
+const ARCHIVES_LIVESTREAM_HOME_LOG_PATH = "/archives/livestream/home/log";
+const ARCHIVES_LIVESTREAM_COMMENT_STATISTICS_PATH = "/archives/livestream/comment/statistics";
+const ARCHIVES_LIVESTREAM_COMMENT_DETAIL_PATH = "/archives/livestream/comment/detail";
+const ARCHIVES_USER_REPORT_SEARCH_PATH = "/v4/archives/report/user/search";
+const ARCHIVES_MOMENT_LIST_PATH = "/archives/user/gallery/momentList";
 const ARCHIVES_RELATED_USERS_PATH = "/archives/user/search/device";
 const ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH = "/archives/user/message/search";
 const ARCHIVES_PAST_FOUR_ITEMS_PATH = "/v4/audit/user/fourinfo/log/search";
@@ -246,6 +312,11 @@ const RCP_POLICY_TREE_LOOKUP_PATH = "/v2/rest/pro/policyTree/queryProPolicyTree"
 const RCP_POLICY_TREE_LIST_PATH = "/v2/rest/pro/policyTree/policyTreeList";
 const RCP_POLICY_TREE_BINDING_BY_NODE_PATH = "/v2/rest/pro/policyTree/queryBindingByNodeCode";
 const RCP_POLICY_TREE_ALL_POLICY_CODE_PATH = "/v2/rest/pro/policyTree/getAllPolicyCodeByPage";
+const RCP_POLICY_TREE_MAX_VERSION_PATH = "/v2/rest/pro/policyTree/getMaxPolicyTreeVersion";
+const RCP_EVENT_TYPE_LIST_PATH = "/v2/rest/basicInfo/getEventTypeListByPage";
+const RCP_REALTIME_OP_LIST_PATH = "/v2/rest/event/realTimeOpList";
+const RCP_EVENT_QUERY_MAX_DURATION_PATH = "/v2/rest/event/eventQueryMaxDurationGet";
+const RCP_EVENT_SAVE_RATIOS_PATH = "/v2/rest/event/getEventSaveRatios";
 const RCP_NODE_POLICY_ATTRIBUTION_PATH = "/v2/rest/pc/policy/nodePolicyAttribution";
 const RCP_NODE_BIND_POLICY_ATTRIBUTION_PATH = "/v2/rest/pc/policy/nodeBindPolicyAttribution";
 const SAFE_CODE_PATTERN = /^[A-Za-z0-9_:-]{1,128}$/;
@@ -507,6 +578,417 @@ export const ACTIONS = Object.freeze({
     validateParams: validateArchivesGalleryPhotoListInput,
     buildRequest: buildArchivesGalleryPhotoListRequest,
     mockData: mockArchivesGalleryPhotoListData
+  }),
+  archives_photo_gallery_top: freezeAction({
+    name: "archives_photo_gallery_top",
+    domainKey: "archives",
+    description: "Passthrough Archives Center top photo gallery for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_PHOTO_GALLERY_TOP_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_photo_gallery_top"),
+    buildRequest: buildArchivesUserIdPostRequest(ARCHIVES_PHOTO_GALLERY_TOP_PATH),
+    mockData: mockArchivesPhotoGalleryTopData
+  }),
+  archives_negative_report: freezeAction({
+    name: "archives_negative_report",
+    domainKey: "archives",
+    description: "Passthrough Archives Center negative report modules for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_NEGATIVE_REPORT_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_negative_report"),
+    buildRequest: buildArchivesUserIdPostRequest(ARCHIVES_NEGATIVE_REPORT_PATH),
+    mockData: mockArchivesNegativeReportData
+  }),
+  archives_negative_uninterested: freezeAction({
+    name: "archives_negative_uninterested",
+    domainKey: "archives",
+    description: "Passthrough Archives Center uninterested/negative status for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_NEGATIVE_UNINTERESTED_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_negative_uninterested"),
+    buildRequest: buildArchivesUserIdPostRequest(ARCHIVES_NEGATIVE_UNINTERESTED_PATH),
+    mockData: mockArchivesNegativeUninterestedData
+  }),
+  archives_risk_info: freezeAction({
+    name: "archives_risk_info",
+    domainKey: "archives",
+    description: "Passthrough Archives Center risk info for a typed user.",
+    method: "GET",
+    apiPath: ARCHIVES_RISK_INFO_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_risk_info"),
+    buildRequest: buildArchivesUserIdGetRequest(ARCHIVES_RISK_INFO_PATH),
+    mockData: mockArchivesRiskInfoData
+  }),
+  archives_user_label: freezeAction({
+    name: "archives_user_label",
+    domainKey: "archives",
+    description: "Passthrough Archives Center user labels for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_USER_LABEL_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_user_label"),
+    buildRequest: buildArchivesUserIdPostRequest(ARCHIVES_USER_LABEL_PATH),
+    mockData: mockArchivesUserLabelData
+  }),
+  archives_user_shop_info: freezeAction({
+    name: "archives_user_shop_info",
+    domainKey: "archives",
+    description: "Passthrough Archives Center shop info for a typed user.",
+    method: "GET",
+    apiPath: ARCHIVES_USER_SHOP_INFO_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId"
+    },
+    validateParams: validateDecimalUserIdAction("archives_user_shop_info"),
+    buildRequest: buildArchivesUserIdGetRequest(ARCHIVES_USER_SHOP_INFO_PATH),
+    mockData: mockArchivesUserShopInfoData
+  }),
+  archives_punish_status: freezeAction({
+    name: "archives_punish_status",
+    domainKey: "archives",
+    description: "Passthrough Archives Center punish status for typed photo/live targets only.",
+    method: "POST",
+    apiPath: ARCHIVES_PUNISH_STATUS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      photo_id: "required when live_stream_id and target_id are absent; maps to targetId with targetType=PHOTO",
+      live_stream_id: "required when photo_id and target_id are absent; maps to targetId with targetType=LIVE_STREAM",
+      target_id: "optional explicit target id; requires target_type=PHOTO|LIVE_STREAM",
+      target_type: "optional enum PHOTO|LIVE_STREAM when target_id is used"
+    },
+    validateParams: validateArchivesPunishStatusInput,
+    buildRequest: buildArchivesPunishStatusRequest,
+    mockData: mockArchivesPunishStatusData
+  }),
+  archives_review_logs: freezeAction({
+    name: "archives_review_logs",
+    domainKey: "archives",
+    description: "Passthrough Archives Center review log list for typed user/time params.",
+    method: "POST",
+    apiPath: ARCHIVES_REVIEW_LOGS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      beginTime: "required epoch ms",
+      endTime: "required epoch ms",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 30"
+    },
+    validateParams: validateArchivesTimedUserPageInput("archives_review_logs", 30),
+    buildRequest: buildArchivesTimedUserPageRequest(ARCHIVES_REVIEW_LOGS_PATH, 30),
+    mockData: mockArchivesReviewLogsData
+  }),
+  archives_user_analyze_summary: freezeAction({
+    name: "archives_user_analyze_summary",
+    domainKey: "archives",
+    description: "Passthrough Archives Center user analysis summary for typed user/time params.",
+    method: "POST",
+    apiPath: ARCHIVES_USER_ANALYZE_SUMMARY_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      beginTime: "required epoch ms",
+      endTime: "required epoch ms",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 30"
+    },
+    validateParams: validateArchivesTimedUserPageInput("archives_user_analyze_summary", 30),
+    buildRequest: buildArchivesTimedUserPageRequest(ARCHIVES_USER_ANALYZE_SUMMARY_PATH, 30),
+    mockData: mockArchivesUserAnalyzeSummaryData
+  }),
+  archives_live_gallery: freezeAction({
+    name: "archives_live_gallery",
+    domainKey: "archives",
+    description: "Passthrough Archives Center user live gallery list for typed user and bounded page params.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVE_GALLERY_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageCountInput("archives_live_gallery", 20),
+    buildRequest: buildArchivesUserPageCountRequest(ARCHIVES_LIVE_GALLERY_PATH, 20),
+    mockData: mockArchivesLiveGalleryData
+  }),
+  archives_fans_list: freezeAction({
+    name: "archives_fans_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center fans list for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_FANS_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageIndexInput("archives_fans_list", 20),
+    buildRequest: buildArchivesUserPageIndexRequest(ARCHIVES_FANS_LIST_PATH, 20),
+    mockData: mockArchivesFansListData
+  }),
+  archives_follow_list: freezeAction({
+    name: "archives_follow_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center follow list for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_FOLLOW_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      pageIndex: "optional positive integer; default 1",
+      pageSize: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageIndexInput("archives_follow_list", 20),
+    buildRequest: buildArchivesUserPageIndexRequest(ARCHIVES_FOLLOW_LIST_PATH, 20),
+    mockData: mockArchivesFollowListData
+  }),
+  archives_collect_photo_list: freezeAction({
+    name: "archives_collect_photo_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center collected-photo list for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_COLLECT_PHOTO_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageCountInput("archives_collect_photo_list", 20),
+    buildRequest: buildArchivesUserPageCountRequest(ARCHIVES_COLLECT_PHOTO_LIST_PATH, 20),
+    mockData: mockArchivesCollectPhotoListData
+  }),
+  archives_collection_list: freezeAction({
+    name: "archives_collection_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center collection list for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_COLLECTION_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageSizeInput("archives_collection_list", 20),
+    buildRequest: buildArchivesUserPageSizeRequest(ARCHIVES_COLLECTION_LIST_PATH, 20),
+    mockData: mockArchivesCollectionListData
+  }),
+  archives_comment_search: freezeAction({
+    name: "archives_comment_search",
+    domainKey: "archives",
+    description: "Passthrough Archives Center photo/comment search for typed user or photo scope.",
+    method: "POST",
+    apiPath: ARCHIVES_COMMENT_SEARCH_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required when photo_id is absent; comments by user",
+      photo_id: "required when user_id is absent; comments for photo",
+      containsPhotoInfo: "optional boolean for photo_id scope; default true",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesCommentSearchInput,
+    buildRequest: buildArchivesCommentSearchRequest,
+    mockData: mockArchivesCommentSearchData
+  }),
+  archives_livestream_home_info: freezeAction({
+    name: "archives_livestream_home_info",
+    domainKey: "archives",
+    description: "Passthrough Archives Center livestream home info for a typed live stream id.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVESTREAM_HOME_INFO_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      live_stream_id: "required safe id; maps to liveStreamId"
+    },
+    validateParams: validateArchivesLiveStreamIdInput("archives_livestream_home_info"),
+    buildRequest: buildArchivesLiveStreamIdRequest(ARCHIVES_LIVESTREAM_HOME_INFO_PATH),
+    mockData: mockArchivesLivestreamHomeInfoData
+  }),
+  archives_livestream_home_meta: freezeAction({
+    name: "archives_livestream_home_meta",
+    domainKey: "archives",
+    description: "Passthrough Archives Center livestream metadata for a typed live stream id.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVESTREAM_HOME_META_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      live_stream_id: "required safe id; maps to liveStreamId"
+    },
+    validateParams: validateArchivesLiveStreamIdInput("archives_livestream_home_meta"),
+    buildRequest: buildArchivesLiveStreamIdRequest(ARCHIVES_LIVESTREAM_HOME_META_PATH),
+    mockData: mockArchivesLivestreamHomeMetaData
+  }),
+  archives_livestream_home_log: freezeAction({
+    name: "archives_livestream_home_log",
+    domainKey: "archives",
+    description: "Passthrough Archives Center livestream log list for a typed live stream id.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVESTREAM_HOME_LOG_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      live_stream_id: "required safe id; maps to liveStreamId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20",
+      beginTime: "optional epoch ms when endTime is also provided",
+      endTime: "optional epoch ms when beginTime is also provided"
+    },
+    validateParams: validateArchivesLiveStreamPageInput("archives_livestream_home_log"),
+    buildRequest: buildArchivesLiveStreamPageRequest(ARCHIVES_LIVESTREAM_HOME_LOG_PATH),
+    mockData: mockArchivesLivestreamHomeLogData
+  }),
+  archives_livestream_comment_statistics: freezeAction({
+    name: "archives_livestream_comment_statistics",
+    domainKey: "archives",
+    description: "Passthrough Archives Center livestream comment statistics for a typed live stream id.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVESTREAM_COMMENT_STATISTICS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      live_stream_id: "required safe id; maps to liveStreamId"
+    },
+    validateParams: validateArchivesLiveStreamIdInput("archives_livestream_comment_statistics"),
+    buildRequest: buildArchivesLiveStreamIdRequest(ARCHIVES_LIVESTREAM_COMMENT_STATISTICS_PATH),
+    mockData: mockArchivesLivestreamCommentStatisticsData
+  }),
+  archives_livestream_comment_detail: freezeAction({
+    name: "archives_livestream_comment_detail",
+    domainKey: "archives",
+    description: "Passthrough Archives Center livestream comment detail list for a typed live stream id.",
+    method: "POST",
+    apiPath: ARCHIVES_LIVESTREAM_COMMENT_DETAIL_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      live_stream_id: "required safe id; maps to liveStreamId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesLiveStreamPageInput("archives_livestream_comment_detail"),
+    buildRequest: buildArchivesLiveStreamPageRequest(ARCHIVES_LIVESTREAM_COMMENT_DETAIL_PATH),
+    mockData: mockArchivesLivestreamCommentDetailData
+  }),
+  archives_user_report_search: freezeAction({
+    name: "archives_user_report_search",
+    domainKey: "archives",
+    description: "Passthrough Archives Center user report search for typed user and bounded page params.",
+    method: "POST",
+    apiPath: ARCHIVES_USER_REPORT_SEARCH_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to reportedIds",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20",
+      begin: "optional epoch ms when end is also provided",
+      end: "optional epoch ms when begin is also provided"
+    },
+    validateParams: validateArchivesUserReportSearchInput,
+    buildRequest: buildArchivesUserReportSearchRequest,
+    mockData: mockArchivesUserReportSearchData
+  }),
+  archives_moment_list: freezeAction({
+    name: "archives_moment_list",
+    domainKey: "archives",
+    description: "Passthrough Archives Center moment list for a typed user.",
+    method: "POST",
+    apiPath: ARCHIVES_MOMENT_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required decimal string; maps to userId",
+      page: "optional positive integer; default 1",
+      count: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateArchivesUserPageCountInput("archives_moment_list", 20),
+    buildRequest: buildArchivesUserPageCountRequest(ARCHIVES_MOMENT_LIST_PATH, 20),
+    mockData: mockArchivesMomentListData
   }),
   archives_related_users: freezeAction({
     name: "archives_related_users",
@@ -796,6 +1278,159 @@ export const ACTIONS = Object.freeze({
     buildRequest: buildRcpPolicyCodeOnlyGetRequest(RCP_PIPELINE_POLICY_VERSIONS_BY_CODE_PATH),
     mockData: mockRcpPipelinePolicyVersionsByCodeData
   }),
+  rcp_policy_tree_list: freezeAction({
+    name: "rcp_policy_tree_list",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy tree list for typed tree/policy filters and bounded page params.",
+    method: "GET",
+    apiPath: RCP_POLICY_TREE_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyTreeCode: "optional safe policy tree code",
+      policyCode: "optional safe policy code",
+      eventTypeAssociator: "optional safe event type",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicyTreeListInput,
+    buildRequest: buildRcpPolicyTreeListRequest,
+    mockData: mockRcpPolicyTreeListData
+  }),
+  rcp_policy_tree_node_binding: freezeAction({
+    name: "rcp_policy_tree_node_binding",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy tree node binding list for a resolved node.",
+    method: "GET",
+    apiPath: RCP_POLICY_TREE_BINDING_BY_NODE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyTreeCode: "required safe policy tree code",
+      policyTreeVersion: "required positive integer",
+      policyTreeNodeCode: "required safe resolved policy tree node code",
+      policyCode: "optional safe policy code",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicyTreeNodeBindingInput,
+    buildRequest: buildRcpPolicyTreeNodeBindingRequest,
+    mockData: mockRcpPolicyTreeNodeBindingData
+  }),
+  rcp_policy_tree_policy_codes: freezeAction({
+    name: "rcp_policy_tree_policy_codes",
+    domainKey: "rcp",
+    description: "Passthrough RCP policy code list for a typed policy tree version.",
+    method: "GET",
+    apiPath: RCP_POLICY_TREE_ALL_POLICY_CODE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyTreeCode: "required safe policy tree code",
+      policyTreeVersion: "required positive integer",
+      code: "optional safe policy-code filter",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpPolicyTreePolicyCodesInput,
+    buildRequest: buildRcpPolicyTreePolicyCodesRequest,
+    mockData: mockRcpPolicyTreePolicyCodesData
+  }),
+  rcp_policy_tree_max_version: freezeAction({
+    name: "rcp_policy_tree_max_version",
+    domainKey: "rcp",
+    description: "Passthrough RCP max policy tree version lookup for a typed tree code.",
+    method: "GET",
+    apiPath: RCP_POLICY_TREE_MAX_VERSION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      policyTreeCode: "required safe policy tree code",
+      treeSnapshot: "optional boolean; default false"
+    },
+    validateParams: validateRcpPolicyTreeMaxVersionInput,
+    buildRequest: buildRcpPolicyTreeMaxVersionRequest,
+    mockData: mockRcpPolicyTreeMaxVersionData
+  }),
+  rcp_event_type_list: freezeAction({
+    name: "rcp_event_type_list",
+    domainKey: "rcp",
+    description: "Passthrough RCP event type option list for typed keyword/page params.",
+    method: "GET",
+    apiPath: RCP_EVENT_TYPE_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      keyWord: "optional safe keyword <= 128 chars",
+      keyword: "optional alias for keyWord",
+      page: "optional positive integer; default 1",
+      size: "optional positive integer <= 100; default 20"
+    },
+    validateParams: validateRcpEventTypeListInput,
+    buildRequest: buildRcpEventTypeListRequest,
+    mockData: mockRcpEventTypeListData
+  }),
+  rcp_realtime_op_list: freezeAction({
+    name: "rcp_realtime_op_list",
+    domainKey: "rcp",
+    description: "Passthrough RCP realtime operation option list for a typed event type.",
+    method: "GET",
+    apiPath: RCP_REALTIME_OP_LIST_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string"
+    },
+    validateParams: validateRcpEventTypeOnlyInput("rcp_realtime_op_list"),
+    buildRequest: buildRcpEventTypeOnlyGetRequest(RCP_REALTIME_OP_LIST_PATH),
+    mockData: mockRcpRealtimeOpListData
+  }),
+  rcp_event_query_max_duration: freezeAction({
+    name: "rcp_event_query_max_duration",
+    domainKey: "rcp",
+    description: "Passthrough RCP event query max-duration lookup for a typed event type.",
+    method: "GET",
+    apiPath: RCP_EVENT_QUERY_MAX_DURATION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string"
+    },
+    validateParams: validateRcpEventTypeOnlyInput("rcp_event_query_max_duration"),
+    buildRequest: buildRcpEventTypeOnlyGetRequest(RCP_EVENT_QUERY_MAX_DURATION_PATH),
+    mockData: mockRcpEventQueryMaxDurationData
+  }),
+  rcp_event_save_ratios: freezeAction({
+    name: "rcp_event_save_ratios",
+    domainKey: "rcp",
+    description: "Passthrough RCP event save-ratio lookup for a typed event type.",
+    method: "GET",
+    apiPath: RCP_EVENT_SAVE_RATIOS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      eventType: "required safe event type string; maps to eventTypeCode"
+    },
+    validateParams: validateRcpEventTypeOnlyInput("rcp_event_save_ratios"),
+    buildRequest: buildRcpEventSaveRatiosRequest,
+    mockData: mockRcpEventSaveRatiosData
+  }),
   rcp_policy_version_lookup: freezeAction({
     name: "rcp_policy_version_lookup",
     domainKey: "rcp",
@@ -995,6 +1630,64 @@ export const ACTIONS = Object.freeze({
     validateParams: validateTrackProductOnlyInput("track_data_type_list"),
     buildRequest: buildTrackProductOnlyGetRequest(TRACK_DATA_TYPE_LIST_PATH),
     mockData: mockTrackDataTypeListData
+  }),
+  track_sequence_get_device_ids: freezeAction({
+    name: "track_sequence_get_device_ids",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis device-id sequence lookup for typed user/device params.",
+    method: "POST",
+    apiPath: TRACK_ANALYSIS_DEVICE_IDS_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required string when device_id is absent",
+      device_id: "required string when user_id is absent",
+      appName: "required enum KUAISHOU|NEBULA"
+    },
+    validateParams: validateTrackStandaloneEntityInput("track_sequence_get_device_ids"),
+    buildRequest: buildTrackAnalysisDeviceIdsRequest,
+    mockData: mockTrackSequenceGetDeviceIdsData
+  }),
+  track_sequence_get_use_duration: freezeAction({
+    name: "track_sequence_get_use_duration",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis use-duration lookup for typed user/device params.",
+    method: "POST",
+    apiPath: TRACK_ANALYSIS_USE_DURATION_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required string when device_id is absent",
+      device_id: "required string when user_id is absent",
+      appName: "required enum KUAISHOU|NEBULA"
+    },
+    validateParams: validateTrackStandaloneEntityInput("track_sequence_get_use_duration"),
+    buildRequest: buildTrackAnalysisUseDurationRequest,
+    mockData: mockTrackSequenceGetUseDurationData
+  }),
+  track_sequence_profile: freezeAction({
+    name: "track_sequence_profile",
+    domainKey: "track_analysis",
+    description: "Passthrough Track Analysis sequence profile lookup for typed user/device params.",
+    method: "POST",
+    apiPath: TRACK_ANALYSIS_PROFILE_PATH,
+    registryStatus: "service_registered",
+    defaultResponseMode: "passthrough",
+    responseModes: PASSTHROUGH_ONLY_RESPONSE_MODES,
+    passthroughOnly: true,
+    inputContract: {
+      user_id: "required string when device_id is absent",
+      device_id: "required string when user_id is absent",
+      appName: "required enum KUAISHOU|NEBULA",
+      time_window: "optional { startTime, endTime }; defaults to recent 30-day window"
+    },
+    validateParams: validateTrackStandaloneEntityInput("track_sequence_profile"),
+    buildRequest: buildTrackAnalysisProfileRequest,
+    mockData: mockTrackSequenceProfileData
   })
 });
 
@@ -1473,6 +2166,323 @@ function buildArchivesGalleryPhotoListRequest(input) {
   };
 }
 
+function validateDecimalUserIdAction(actionName) {
+  return (input) => validateDecimalUserId(actionName, input);
+}
+
+function buildArchivesUserIdPostRequest(fixedPath) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim()
+    }
+  });
+}
+
+function buildArchivesUserIdGetRequest(fixedPath) {
+  return (input) => {
+    const params = new URLSearchParams({ userId: input.user_id.trim() });
+    const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+    return {
+      path: `${fixedPath}?${params.toString()}`,
+      displayPath: `${fixedPath}?${displayParams.toString()}`,
+      method: "GET",
+      body: {}
+    };
+  };
+}
+
+function validateArchivesUserPageIndexInput(actionName, defaultSize) {
+  return (input) => {
+    const userError = validateDecimalUserId(actionName, input);
+    if (userError) {
+      return userError;
+    }
+    return validatePageControls(actionName, input, 100, defaultSize, "pageIndex", "pageSize");
+  };
+}
+
+function buildArchivesUserPageIndexRequest(fixedPath, defaultSize) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim(),
+      pageIndex: positiveIntegerParam(input, "pageIndex", 1),
+      pageSize: positiveIntegerParam(input, "pageSize", defaultSize)
+    }
+  });
+}
+
+function validateArchivesUserPageCountInput(actionName, defaultCount) {
+  return (input) => {
+    const userError = validateDecimalUserId(actionName, input);
+    if (userError) {
+      return userError;
+    }
+    return validatePageControls(actionName, input, 100, defaultCount, "page", "count");
+  };
+}
+
+function buildArchivesUserPageCountRequest(fixedPath, defaultCount) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim(),
+      page: positiveIntegerParam(input, "page", 1),
+      count: positiveIntegerParam(input, "count", defaultCount)
+    }
+  });
+}
+
+function validateArchivesUserPageSizeInput(actionName, defaultSize) {
+  return (input) => {
+    const userError = validateDecimalUserId(actionName, input);
+    if (userError) {
+      return userError;
+    }
+    return validatePageControls(actionName, input, 100, defaultSize, "page", "size");
+  };
+}
+
+function buildArchivesUserPageSizeRequest(fixedPath, defaultSize) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim(),
+      page: positiveIntegerParam(input, "page", 1),
+      size: positiveIntegerParam(input, "size", defaultSize)
+    }
+  });
+}
+
+function validateArchivesTimedUserPageInput(actionName, defaultSize) {
+  return (input) => {
+    const userError = validateDecimalUserId(actionName, input);
+    if (userError) {
+      return userError;
+    }
+    const windowError = validatePositiveTimeRange(actionName, input, "beginTime", "endTime");
+    if (windowError) {
+      return windowError;
+    }
+    return validatePageControls(actionName, input, ARCHIVES_MAX_PAGE_SIZE, defaultSize);
+  };
+}
+
+function buildArchivesTimedUserPageRequest(fixedPath, defaultSize) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      userId: input.user_id.trim(),
+      beginTime: input.beginTime,
+      endTime: input.endTime,
+      pageIndex: positiveIntegerParam(input, "pageIndex", 1),
+      pageSize: positiveIntegerParam(input, "pageSize", defaultSize),
+      haveParamAuth: 1
+    }
+  });
+}
+
+function validateArchivesPunishStatusInput(input) {
+  const scope = archivesPunishTargetScope(input);
+  if (!scope) {
+    return {
+      message: "archives_punish_status requires photo_id, live_stream_id, or target_id with target_type",
+      required: ["photo_id or live_stream_id or target_id+target_type"],
+      errorType: "parameter_error"
+    };
+  }
+  return null;
+}
+
+function buildArchivesPunishStatusRequest(input) {
+  const scope = archivesPunishTargetScope(input);
+  return {
+    path: ARCHIVES_PUNISH_STATUS_PATH,
+    displayPath: ARCHIVES_PUNISH_STATUS_PATH,
+    method: "POST",
+    body: {
+      targetId: scope.targetId,
+      targetType: scope.targetType
+    }
+  };
+}
+
+function archivesPunishTargetScope(input) {
+  if (isNonEmptyString(input.photo_id) && /^\d+$/.test(input.photo_id.trim())) {
+    return { targetId: input.photo_id.trim(), targetType: "PHOTO" };
+  }
+  if (safeCode(input.live_stream_id)) {
+    return { targetId: input.live_stream_id.trim(), targetType: "LIVE_STREAM" };
+  }
+  if (safeCode(input.target_id) && ["PHOTO", "LIVE_STREAM"].includes(input.target_type)) {
+    return { targetId: input.target_id.trim(), targetType: input.target_type };
+  }
+  return null;
+}
+
+function validateArchivesCommentSearchInput(input) {
+  const hasUserId = isNonEmptyString(input.user_id);
+  const hasPhotoId = isNonEmptyString(input.photo_id);
+  if (hasUserId === hasPhotoId) {
+    return {
+      message: "archives_comment_search requires exactly one of user_id or photo_id",
+      required: ["user_id xor photo_id"],
+      errorType: "parameter_error"
+    };
+  }
+  if (hasUserId) {
+    const userError = validateDecimalUserId("archives_comment_search", input);
+    if (userError) {
+      return userError;
+    }
+  }
+  if (hasPhotoId && !/^\d+$/.test(input.photo_id.trim())) {
+    return {
+      message: "archives_comment_search photo_id must be a decimal string",
+      required: ["photo_id decimal string"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "containsPhotoInfo") && typeof input.containsPhotoInfo !== "boolean") {
+    return {
+      message: "archives_comment_search containsPhotoInfo must be boolean",
+      required: ["containsPhotoInfo boolean"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return validatePageControls("archives_comment_search", input, 100, 20, "page", "count");
+}
+
+function buildArchivesCommentSearchRequest(input) {
+  const body = {
+    page: positiveIntegerParam(input, "page", 1),
+    count: positiveIntegerParam(input, "count", 20)
+  };
+  if (isNonEmptyString(input.user_id)) {
+    body.userId = input.user_id.trim();
+  } else {
+    body.photoId = input.photo_id.trim();
+    body.containsPhotoInfo = Object.hasOwn(input, "containsPhotoInfo") ? input.containsPhotoInfo : true;
+  }
+  return {
+    path: ARCHIVES_COMMENT_SEARCH_PATH,
+    displayPath: ARCHIVES_COMMENT_SEARCH_PATH,
+    method: "POST",
+    body
+  };
+}
+
+function validateArchivesLiveStreamIdInput(actionName) {
+  return (input) => {
+    if (!safeCode(input.live_stream_id)) {
+      return {
+        message: `${actionName} requires live_stream_id as a safe id`,
+        required: ["live_stream_id safe id"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function buildArchivesLiveStreamIdRequest(fixedPath) {
+  return (input) => ({
+    path: fixedPath,
+    displayPath: fixedPath,
+    method: "POST",
+    body: {
+      liveStreamId: input.live_stream_id.trim()
+    }
+  });
+}
+
+function validateArchivesLiveStreamPageInput(actionName) {
+  return (input) => {
+    const idError = validateArchivesLiveStreamIdInput(actionName)(input);
+    if (idError) {
+      return idError;
+    }
+    const pageError = validatePageControls(actionName, input, 100, 20, "page", "count");
+    if (pageError) {
+      return pageError;
+    }
+    if (Object.hasOwn(input, "beginTime") || Object.hasOwn(input, "endTime")) {
+      const windowError = validatePositiveTimeRange(actionName, input, "beginTime", "endTime");
+      if (windowError) {
+        return windowError;
+      }
+    }
+    return null;
+  };
+}
+
+function buildArchivesLiveStreamPageRequest(fixedPath) {
+  return (input) => {
+    const body = {
+      liveStreamId: input.live_stream_id.trim(),
+      page: positiveIntegerParam(input, "page", 1),
+      count: positiveIntegerParam(input, "count", 20)
+    };
+    if (Object.hasOwn(input, "beginTime") && Object.hasOwn(input, "endTime")) {
+      body.beginTime = input.beginTime;
+      body.endTime = input.endTime;
+    }
+    return {
+      path: fixedPath,
+      displayPath: fixedPath,
+      method: "POST",
+      body
+    };
+  };
+}
+
+function validateArchivesUserReportSearchInput(input) {
+  const userError = validateDecimalUserId("archives_user_report_search", input);
+  if (userError) {
+    return userError;
+  }
+  const pageError = validatePageControls("archives_user_report_search", input, 100, 20, "page", "count");
+  if (pageError) {
+    return pageError;
+  }
+  if (Object.hasOwn(input, "begin") || Object.hasOwn(input, "end")) {
+    const windowError = validatePositiveTimeRange("archives_user_report_search", input, "begin", "end");
+    if (windowError) {
+      return windowError;
+    }
+  }
+  return null;
+}
+
+function buildArchivesUserReportSearchRequest(input) {
+  const body = {
+    reportedIds: input.user_id.trim(),
+    page: positiveIntegerParam(input, "page", 1),
+    count: positiveIntegerParam(input, "count", 20)
+  };
+  if (Object.hasOwn(input, "begin") && Object.hasOwn(input, "end")) {
+    body.begin = input.begin;
+    body.end = input.end;
+  }
+  return {
+    path: ARCHIVES_USER_REPORT_SEARCH_PATH,
+    displayPath: ARCHIVES_USER_REPORT_SEARCH_PATH,
+    method: "POST",
+    body
+  };
+}
+
 function validateArchivesRelatedUsersInput(input) {
   const userError = validateDecimalUserId("archives_related_users", input);
   if (userError) {
@@ -1897,6 +2907,224 @@ function buildRcpPolicyCodeOnlyGetRequest(fixedPath) {
       method: "GET",
       body: {}
     };
+  };
+}
+
+function validateRcpPolicyTreeListInput(input) {
+  for (const key of ["policyTreeCode", "policyCode", "eventTypeAssociator"]) {
+    if (Object.hasOwn(input, key) && input[key] !== "" && !safeCode(input[key])) {
+      return {
+        message: `rcp_policy_tree_list ${key} must be safe when provided`,
+        required: [`${key} safe code`],
+        errorType: "invalid_parameter"
+      };
+    }
+  }
+  return validatePageControls("rcp_policy_tree_list", input, 100, 20, "page", "size");
+}
+
+function buildRcpPolicyTreeListRequest(input) {
+  const params = new URLSearchParams({
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20)),
+    "formData[policyTreeCode]": isNonEmptyString(input.policyTreeCode) ? input.policyTreeCode.trim() : "",
+    "formData[policyCode]": isNonEmptyString(input.policyCode) ? input.policyCode.trim() : "",
+    "formData[eventTypeAssociator]": isNonEmptyString(input.eventTypeAssociator) ? input.eventTypeAssociator.trim() : "",
+    "formData[showCollection]": "false",
+    "formData[showOwner]": "false",
+    "formData[showHideStatus]": "false"
+  });
+  return {
+    path: `${RCP_POLICY_TREE_LIST_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_TREE_LIST_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyTreeNodeBindingInput(input) {
+  const treeError = validateRcpPolicyTreeLookupInput(input);
+  if (treeError) {
+    return {
+      ...treeError,
+      message: treeError.message.replace("rcp_policy_tree_lookup", "rcp_policy_tree_node_binding")
+    };
+  }
+  if (!safeCode(input.policyTreeNodeCode)) {
+    return {
+      message: "rcp_policy_tree_node_binding requires a safe policyTreeNodeCode",
+      required: ["policyTreeNodeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "policyCode") && input.policyCode !== "" && !safeCode(input.policyCode)) {
+    return {
+      message: "rcp_policy_tree_node_binding policyCode must be safe when provided",
+      required: ["policyCode safe code"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return validatePageControls("rcp_policy_tree_node_binding", input, 100, 20, "page", "size");
+}
+
+function buildRcpPolicyTreeNodeBindingRequest(input) {
+  const params = new URLSearchParams({
+    policyTreeCode: input.policyTreeCode.trim(),
+    policyTreeVersion: String(input.policyTreeVersion),
+    policyTreeNodeCode: input.policyTreeNodeCode.trim(),
+    policyCode: isNonEmptyString(input.policyCode) ? input.policyCode.trim() : "",
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20)),
+    order: isNonEmptyString(input.order) && safeCode(input.order) ? input.order.trim() : ""
+  });
+  return {
+    path: `${RCP_POLICY_TREE_BINDING_BY_NODE_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_TREE_BINDING_BY_NODE_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyTreePolicyCodesInput(input) {
+  if (!safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_policy_tree_policy_codes requires a safe policyTreeCode",
+      required: ["policyTreeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (!validPositiveInteger(input.policyTreeVersion)) {
+    return {
+      message: "rcp_policy_tree_policy_codes requires policyTreeVersion as a positive integer",
+      required: ["policyTreeVersion positive integer"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "code") && input.code !== "" && !safeCode(input.code)) {
+    return {
+      message: "rcp_policy_tree_policy_codes code must be safe when provided",
+      required: ["code safe code"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return validatePageControls("rcp_policy_tree_policy_codes", input, 100, 20, "page", "size");
+}
+
+function buildRcpPolicyTreePolicyCodesRequest(input) {
+  const params = new URLSearchParams({
+    policyTreeCode: input.policyTreeCode.trim(),
+    policyTreeVersion: String(input.policyTreeVersion),
+    code: isNonEmptyString(input.code) ? input.code.trim() : "",
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20))
+  });
+  return {
+    path: `${RCP_POLICY_TREE_ALL_POLICY_CODE_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_TREE_ALL_POLICY_CODE_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpPolicyTreeMaxVersionInput(input) {
+  if (!safeCode(input.policyTreeCode)) {
+    return {
+      message: "rcp_policy_tree_max_version requires a safe policyTreeCode",
+      required: ["policyTreeCode"],
+      errorType: "parameter_error"
+    };
+  }
+  if (Object.hasOwn(input, "treeSnapshot") && typeof input.treeSnapshot !== "boolean") {
+    return {
+      message: "rcp_policy_tree_max_version treeSnapshot must be boolean",
+      required: ["treeSnapshot boolean"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
+function buildRcpPolicyTreeMaxVersionRequest(input) {
+  const params = new URLSearchParams({
+    policyTreeCode: input.policyTreeCode.trim(),
+    treeSnapshot: String(Object.hasOwn(input, "treeSnapshot") ? input.treeSnapshot : false)
+  });
+  return {
+    path: `${RCP_POLICY_TREE_MAX_VERSION_PATH}?${params.toString()}`,
+    displayPath: `${RCP_POLICY_TREE_MAX_VERSION_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function validateRcpEventTypeListInput(input) {
+  const keyword = eventTypeKeyword(input);
+  if (keyword && !safeOptionalKeyword(keyword)) {
+    return {
+      message: "rcp_event_type_list keyword/keyWord must be a safe string <= 128 chars",
+      required: ["keyword safe string <= 128 chars"],
+      errorType: "invalid_parameter"
+    };
+  }
+  return validatePageControls("rcp_event_type_list", input, 100, 20, "page", "size");
+}
+
+function buildRcpEventTypeListRequest(input) {
+  const params = new URLSearchParams({
+    keyWord: eventTypeKeyword(input),
+    page: String(positiveIntegerParam(input, "page", 1)),
+    size: String(positiveIntegerParam(input, "size", 20))
+  });
+  return {
+    path: `${RCP_EVENT_TYPE_LIST_PATH}?${params.toString()}`,
+    displayPath: `${RCP_EVENT_TYPE_LIST_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function eventTypeKeyword(input) {
+  if (isNonEmptyString(input.keyWord)) {
+    return input.keyWord.trim();
+  }
+  if (isNonEmptyString(input.keyword)) {
+    return input.keyword.trim();
+  }
+  return "";
+}
+
+function validateRcpEventTypeOnlyInput(actionName) {
+  return (input) => {
+    if (!safeCode(input.eventType)) {
+      return {
+        message: `${actionName} requires a safe eventType`,
+        required: ["eventType"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function buildRcpEventTypeOnlyGetRequest(fixedPath) {
+  return (input) => {
+    const params = new URLSearchParams({ eventType: input.eventType.trim() });
+    return {
+      path: `${fixedPath}?${params.toString()}`,
+      displayPath: `${fixedPath}?${params.toString()}`,
+      method: "GET",
+      body: {}
+    };
+  };
+}
+
+function buildRcpEventSaveRatiosRequest(input) {
+  const params = new URLSearchParams({ eventTypeCode: input.eventType.trim() });
+  return {
+    path: `${RCP_EVENT_SAVE_RATIOS_PATH}?${params.toString()}`,
+    displayPath: `${RCP_EVENT_SAVE_RATIOS_PATH}?${params.toString()}`,
+    method: "GET",
+    body: {}
   };
 }
 
@@ -3286,6 +4514,28 @@ function validateTrackAnalysisInput(input) {
   return null;
 }
 
+function validateTrackStandaloneEntityInput(actionName) {
+  return (input) => {
+    const hasUserId = typeof input.user_id === "string" && input.user_id.trim().length > 0;
+    const hasDeviceId = typeof input.device_id === "string" && input.device_id.trim().length > 0;
+    if (hasUserId === hasDeviceId) {
+      return {
+        message: `${actionName} requires exactly one of user_id or device_id`,
+        required: ["user_id xor device_id", "appName"],
+        errorType: "parameter_error"
+      };
+    }
+    if (typeof input.appName !== "string" || !TRACK_ANALYSIS_APP_NAMES.includes(input.appName)) {
+      return {
+        message: `${actionName} requires appName to be KUAISHOU or NEBULA`,
+        required: ["appName=KUAISHOU|NEBULA"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
 function buildTrackAnalysisRequest(input) {
   const subInterface = trackAnalysisSubInterface(input);
   if (subInterface === "getUseDuration") {
@@ -4103,6 +5353,313 @@ function mockArchivesGalleryPhotoListData(input) {
   };
 }
 
+function mockArchivesPhotoGalleryTopData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      topPhotos: [
+        {
+          photoId: "197323059879",
+          topStatus: "shape_only_present"
+        }
+      ]
+    }
+  };
+}
+
+function mockArchivesNegativeReportData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      negativeModules: [
+        {
+          module: "shape_only_present",
+          status: "shape_only_present"
+        }
+      ]
+    }
+  };
+}
+
+function mockArchivesNegativeUninterestedData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      uninterestedStatus: "shape_only_present"
+    }
+  };
+}
+
+function mockArchivesRiskInfoData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      riskInfo: {
+        riskLevel: "shape_only_present",
+        riskTags: []
+      }
+    }
+  };
+}
+
+function mockArchivesUserLabelData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      labels: [
+        {
+          labelName: "shape_only_present",
+          labelValue: "shape_only_present"
+        }
+      ]
+    }
+  };
+}
+
+function mockArchivesUserShopInfoData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      shopInfoPresent: true,
+      shopStatus: "shape_only_present"
+    }
+  };
+}
+
+function mockArchivesPunishStatusData(input) {
+  const scope = archivesPunishTargetScope(input);
+  return {
+    code: 1,
+    data: {
+      targetId: scope.targetId,
+      targetType: scope.targetType,
+      punishStatus: "shape_only_present"
+    }
+  };
+}
+
+function mockArchivesReviewLogsData(input) {
+  const request = buildArchivesTimedUserPageRequest(ARCHIVES_REVIEW_LOGS_PATH, 30)(input);
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          reviewType: "shape_only_present",
+          reviewTime: input.beginTime + 1000
+        }
+      ],
+      totalCount: 1,
+      pageIndex: request.body.pageIndex,
+      pageSize: request.body.pageSize
+    }
+  };
+}
+
+function mockArchivesUserAnalyzeSummaryData(input) {
+  return {
+    code: 1,
+    data: {
+      userId: input.user_id,
+      analyzeSummary: {
+        sections: ["shape_only_present"],
+        beginTime: input.beginTime,
+        endTime: input.endTime
+      }
+    }
+  };
+}
+
+function mockArchivesLiveGalleryData(input) {
+  const request = buildArchivesUserPageCountRequest(ARCHIVES_LIVE_GALLERY_PATH, 20)(input);
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          liveStreamId: "mock_live_stream_1",
+          liveStatus: "shape_only_present"
+        }
+      ],
+      totalCount: 1,
+      page: request.body.page,
+      count: request.body.count
+    }
+  };
+}
+
+function mockArchivesFansListData(input) {
+  return mockArchivesRelationListData(input, "fans");
+}
+
+function mockArchivesFollowListData(input) {
+  return mockArchivesRelationListData(input, "follow");
+}
+
+function mockArchivesRelationListData(input, relationKind) {
+  const request = buildArchivesUserPageIndexRequest(
+    relationKind === "fans" ? ARCHIVES_FANS_LIST_PATH : ARCHIVES_FOLLOW_LIST_PATH,
+    20
+  )(input);
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          relatedUserId: "mock_related_user",
+          relationKind
+        }
+      ],
+      totalCount: 1,
+      pageIndex: request.body.pageIndex,
+      pageSize: request.body.pageSize
+    }
+  };
+}
+
+function mockArchivesCollectPhotoListData(input) {
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          photoId: "197323059879",
+          collectTime: 1780000000000
+        }
+      ],
+      totalCount: 1
+    }
+  };
+}
+
+function mockArchivesCollectionListData(input) {
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          collectionId: "mock_collection_1",
+          photoCount: 1
+        }
+      ],
+      totalCount: 1
+    }
+  };
+}
+
+function mockArchivesCommentSearchData(input) {
+  const body = buildArchivesCommentSearchRequest(input).body;
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: body.userId || "mock_comment_user",
+          photoId: body.photoId || "197323059879",
+          commentId: "mock_comment_1",
+          createTime: 1780000000000,
+          containsPhotoInfo: Boolean(body.containsPhotoInfo)
+        }
+      ],
+      totalCount: 1,
+      page: body.page,
+      count: body.count
+    }
+  };
+}
+
+function mockArchivesLivestreamHomeInfoData(input) {
+  return mockArchivesLivestreamData(input, "homeInfo");
+}
+
+function mockArchivesLivestreamHomeMetaData(input) {
+  return mockArchivesLivestreamData(input, "homeMeta");
+}
+
+function mockArchivesLivestreamHomeLogData(input) {
+  return mockArchivesLivestreamData(input, "homeLog", {
+    logs: [
+      {
+        action: "shape_only_present",
+        operateTime: 1780000000000
+      }
+    ]
+  });
+}
+
+function mockArchivesLivestreamCommentStatisticsData(input) {
+  return mockArchivesLivestreamData(input, "commentStatistics", {
+    commentCount: 1,
+    commenterCount: 1
+  });
+}
+
+function mockArchivesLivestreamCommentDetailData(input) {
+  return mockArchivesLivestreamData(input, "commentDetail", {
+    dataList: [
+      {
+        commentId: "mock_live_comment_1",
+        createTime: 1780000000000
+      }
+    ],
+    totalCount: 1
+  });
+}
+
+function mockArchivesLivestreamData(input, section, extra = {}) {
+  return {
+    code: 1,
+    data: {
+      liveStreamId: input.live_stream_id,
+      section,
+      ...extra
+    }
+  };
+}
+
+function mockArchivesUserReportSearchData(input) {
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          reportedUserId: input.user_id,
+          reportType: "shape_only_present",
+          reportTime: Object.hasOwn(input, "begin") ? input.begin + 1000 : 1780000000000
+        }
+      ],
+      totalCount: 1
+    }
+  };
+}
+
+function mockArchivesMomentListData(input) {
+  return {
+    code: 1,
+    data: {
+      dataList: [
+        {
+          userId: input.user_id,
+          momentId: "mock_moment_1",
+          createTime: 1780000000000
+        }
+      ],
+      totalCount: 1
+    }
+  };
+}
+
 function mockArchivesRelatedUsersData(input) {
   const request = buildArchivesRelatedUsersRequest(input);
   return mockFixedActionData(
@@ -4371,6 +5928,132 @@ function mockRcpPipelinePolicyVersionsByCodeData(input) {
   };
 }
 
+function mockRcpPolicyTreeListData(input) {
+  return {
+    code: 0,
+    data: {
+      records: [
+        {
+          policyTreeCode: isNonEmptyString(input.policyTreeCode) ? input.policyTreeCode : "mock_policy_tree",
+          policyCode: isNonEmptyString(input.policyCode) ? input.policyCode : "mock_policy_code",
+          eventTypeAssociator: isNonEmptyString(input.eventTypeAssociator) ? input.eventTypeAssociator : "USER_REGISTER_NEW"
+        }
+      ],
+      pagination: {
+        page: positiveIntegerParam(input, "page", 1),
+        size: positiveIntegerParam(input, "size", 20),
+        total: 1
+      }
+    }
+  };
+}
+
+function mockRcpPolicyTreeNodeBindingData(input) {
+  return {
+    code: 0,
+    data: {
+      records: [
+        {
+          policyTreeCode: input.policyTreeCode,
+          policyTreeVersion: input.policyTreeVersion,
+          policyTreeNodeCode: input.policyTreeNodeCode,
+          policyCode: isNonEmptyString(input.policyCode) ? input.policyCode : "mock_bound_policy"
+        }
+      ],
+      pagination: {
+        page: positiveIntegerParam(input, "page", 1),
+        size: positiveIntegerParam(input, "size", 20),
+        total: 1
+      }
+    }
+  };
+}
+
+function mockRcpPolicyTreePolicyCodesData(input) {
+  return {
+    code: 0,
+    data: {
+      records: [
+        {
+          label: "mock_policy_code",
+          value: isNonEmptyString(input.code) ? input.code : "mock_policy_code"
+        }
+      ],
+      pagination: {
+        page: positiveIntegerParam(input, "page", 1),
+        size: positiveIntegerParam(input, "size", 20),
+        total: 1
+      }
+    }
+  };
+}
+
+function mockRcpPolicyTreeMaxVersionData(input) {
+  return {
+    code: 0,
+    data: {
+      policyTreeCode: input.policyTreeCode,
+      maxPolicyTreeVersion: 887,
+      treeSnapshot: Object.hasOwn(input, "treeSnapshot") ? input.treeSnapshot : false
+    }
+  };
+}
+
+function mockRcpEventTypeListData(input) {
+  return {
+    code: 0,
+    data: {
+      records: [
+        {
+          eventType: isNonEmptyString(input.keyWord) ? input.keyWord : "USER_REGISTER_NEW",
+          eventName: "shape_only_present"
+        }
+      ],
+      pagination: {
+        page: positiveIntegerParam(input, "page", 1),
+        size: positiveIntegerParam(input, "size", 20),
+        total: 1
+      }
+    }
+  };
+}
+
+function mockRcpRealtimeOpListData(input) {
+  return {
+    code: 0,
+    data: [
+      {
+        eventType: input.eventType,
+        realTimeOp: "shape_only_present"
+      }
+    ]
+  };
+}
+
+function mockRcpEventQueryMaxDurationData(input) {
+  return {
+    code: 0,
+    data: {
+      eventType: input.eventType,
+      maxDurationMs: 7 * 24 * 60 * 60 * 1000
+    }
+  };
+}
+
+function mockRcpEventSaveRatiosData(input) {
+  return {
+    code: 0,
+    data: {
+      eventTypeCode: input.eventType,
+      saveRatios: [
+        {
+          ratio: "shape_only_present"
+        }
+      ]
+    }
+  };
+}
+
 function mockRcpPolicyVersionLookupData(input) {
   return {
     code: 0,
@@ -4557,6 +6240,57 @@ function mockTrackDataTypeListData(input) {
         dataType: "shape_only_present"
       }
     ]
+  };
+}
+
+function mockTrackSequenceGetDeviceIdsData(input) {
+  return {
+    code: 0,
+    data: {
+      appName: input.appName,
+      userId: input.user_id || null,
+      deviceId: input.device_id || null,
+      deviceIds: [
+        {
+          deviceId: "ANDROID_mock_track_device",
+          lastActiveTime: 1780000000000
+        }
+      ]
+    }
+  };
+}
+
+function mockTrackSequenceGetUseDurationData(input) {
+  return {
+    code: 0,
+    data: {
+      appName: input.appName,
+      userId: input.user_id || null,
+      deviceId: input.device_id || null,
+      rows: [
+        {
+          date: "2026-05-29",
+          duration: 120
+        }
+      ]
+    }
+  };
+}
+
+function mockTrackSequenceProfileData(input) {
+  return {
+    code: 0,
+    data: {
+      appName: input.appName,
+      userId: input.user_id || null,
+      deviceId: input.device_id || null,
+      profile: {
+        firstLevelProfile: {
+          activeDays: "shape_only_present"
+        },
+        secondLevelProfile: []
+      }
+    }
   };
 }
 

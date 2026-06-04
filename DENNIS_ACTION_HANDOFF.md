@@ -19,6 +19,28 @@ source quality, evidence cards, or risk judgments.
 | `archives_photo_report_aggregate` | `POST` | `/v3/photo/report/aggregate` | `photo_id` | none | passthrough-only; bounded `upstream.body` or `upstream.capped_body` | Report aggregate for content evidence follow-up. |
 | `archives_photo_user_autonomy` | `POST` | `/archives/photo/home/userAutonomy` | `photo_id` | none | passthrough-only; bounded `upstream.body` or `upstream.capped_body` | Content status, autonomy, satisfaction, or approval-state auxiliary evidence. |
 | `archives_gallery_photo_list` | `POST` | `/v3/user/gallery/photo/list` | `user_id` | `pageIndex`, `pageSize`, `filters` | passthrough-only; bounded `upstream.body` or `upstream.capped_body` | Photo ID discovery when a case has no known `photo_id`; candidate publish anchors. |
+| `archives_photo_gallery_top` | `POST` | `/v3/user/gallery/photo/top` | `user_id` | none | passthrough-only; bounded body | Top photo anchors. |
+| `archives_negative_report` | `POST` | `/v3/user/negative/report` | `user_id` | none | passthrough-only; bounded body | Negative/realtime module status. |
+| `archives_negative_uninterested` | `POST` | `/v3/user/negative/unInterested` | `user_id` | none | passthrough-only; bounded body | Uninterested/negative status. |
+| `archives_risk_info` | `GET` | `/v3/user/risk/info` | `user_id` | none | passthrough-only; bounded body | Risk info structure. |
+| `archives_user_label` | `POST` | `/archives/user/home/getUserLabel` | `user_id` | none | passthrough-only; bounded body | User label/status fields. |
+| `archives_user_shop_info` | `GET` | `/archives/user/home/getUserShopInfo` | `user_id` | none | passthrough-only; bounded body | Shop/account commerce context. |
+| `archives_punish_status` | `POST` | `/archives/draco/getPunishStatus` | `photo_id` or `live_stream_id` | `target_id`, `target_type=PHOTO|LIVE_STREAM` | passthrough-only; bounded body | Photo/live target punish status only; no generic user-level lookup. |
+| `archives_review_logs` | `POST` | `/v3/user/log/reviewLogs/fetch` | `user_id`, `beginTime`, `endTime` | `pageIndex`, `pageSize` | passthrough-only; bounded body | Review log list. |
+| `archives_user_analyze_summary` | `POST` | `/v3/user/analyze/fetch` | `user_id`, `beginTime`, `endTime` | `pageIndex`, `pageSize` | passthrough-only; bounded body | User analysis summary/matrix. |
+| `archives_live_gallery` | `POST` | `/v4/archives/gallery/live/list` | `user_id` | `page`, `count` | passthrough-only; bounded body | Live-stream ID discovery. |
+| `archives_fans_list` | `POST` | `/v3/user/profile/relation/fans/list` | `user_id` | `pageIndex`, `pageSize` | passthrough-only; bounded body | Fans relation list. |
+| `archives_follow_list` | `POST` | `/v3/user/profile/relation/follow/list` | `user_id` | `pageIndex`, `pageSize` | passthrough-only; bounded body | Follow relation list. |
+| `archives_collect_photo_list` | `POST` | `/v3/user/collect/photo/list` | `user_id` | `page`, `count` | passthrough-only; bounded body | Collected photo list. |
+| `archives_collection_list` | `POST` | `/archives/photo/collection/getCollectionList` | `user_id` | `page`, `size` | passthrough-only; bounded body | Collection/folder list. |
+| `archives_comment_search` | `POST` | `/archives/photo/comment/search` | `user_id` xor `photo_id` | `containsPhotoInfo`, `page`, `count` | passthrough-only; bounded body | Sent/received comment evidence, partial only when paged/capped. |
+| `archives_livestream_home_info` | `POST` | `/archives/livestream/home/info` | `live_stream_id` | none | passthrough-only; bounded body | Live home info. |
+| `archives_livestream_home_meta` | `POST` | `/archives/livestream/home/meta` | `live_stream_id` | none | passthrough-only; bounded body | Live metadata. |
+| `archives_livestream_home_log` | `POST` | `/archives/livestream/home/log` | `live_stream_id` | `beginTime`, `endTime`, `page`, `count` | passthrough-only; bounded body | Live audit/log list. |
+| `archives_livestream_comment_statistics` | `POST` | `/archives/livestream/comment/statistics` | `live_stream_id` | none | passthrough-only; bounded body | Live comment aggregate. |
+| `archives_livestream_comment_detail` | `POST` | `/archives/livestream/comment/detail` | `live_stream_id` | `page`, `count` | passthrough-only; bounded body | Live comment detail list. |
+| `archives_user_report_search` | `POST` | `/v4/archives/report/user/search` | `user_id` | `begin`, `end`, `page`, `count` | passthrough-only; bounded body | User report search. |
+| `archives_moment_list` | `POST` | `/archives/user/gallery/momentList` | `user_id` | `page`, `count` | passthrough-only; bounded body | Moment list; empty result is not counter-evidence. |
 
 Archives outputs may contain risk entities such as `user_id`, `photo_id`,
 device identifiers, IP, UA, status fields, and publish timestamps. These are
@@ -40,6 +62,14 @@ values, Chrome profile files, localStorage, or Playwright storage state.
 | `rcp_policy_blur_search` | `GET` | `/v2/rest/pro/policy/policyBlurSearch` | none | `policyCode`, `policyTreeCode`, `page`, `size` | Policy code/name fuzzy lookup. |
 | `rcp_policy_all_version` | `GET` | `/v2/rest/pro/policy/getPolicyAllVersion` | `policyCode` | `page`, `size` | Policy version list. |
 | `rcp_pipeline_policy_versions_by_code` | `GET` | `/v2/rest/common/pipeline/getPolicyVersionsByCode` | `policyCode` | none | Pipeline policy-version metadata. |
+| `rcp_policy_tree_list` | `GET` | `/v2/rest/pro/policyTree/policyTreeList` | none | `policyTreeCode`, `policyCode`, `eventTypeAssociator`, `page`, `size` | Coarse policy-tree discovery. |
+| `rcp_policy_tree_node_binding` | `GET` | `/v2/rest/pro/policyTree/queryBindingByNodeCode` | `policyTreeCode`, `policyTreeVersion`, `policyTreeNodeCode` | `policyCode`, `page`, `size` | Node-level bound policy list. |
+| `rcp_policy_tree_policy_codes` | `GET` | `/v2/rest/pro/policyTree/getAllPolicyCodeByPage` | `policyTreeCode`, `policyTreeVersion` | `code`, `page`, `size` | Full-tree policy-code list. |
+| `rcp_policy_tree_max_version` | `GET` | `/v2/rest/pro/policyTree/getMaxPolicyTreeVersion` | `policyTreeCode` | `treeSnapshot` | Max policy-tree version lookup. |
+| `rcp_event_type_list` | `GET` | `/v2/rest/basicInfo/getEventTypeListByPage` | none | `keyWord`, `keyword`, `page`, `size` | Event type option discovery. |
+| `rcp_realtime_op_list` | `GET` | `/v2/rest/event/realTimeOpList` | `eventType` | none | Realtime operation option discovery. |
+| `rcp_event_query_max_duration` | `GET` | `/v2/rest/event/eventQueryMaxDurationGet` | `eventType` | none | Event query max-duration helper. |
+| `rcp_event_save_ratios` | `GET` | `/v2/rest/event/getEventSaveRatios` | `eventType` | none | Event save-ratio helper. |
 
 Dennis should use these for `strategy_hit_explanation`,
 `policy_attribution`, `false_positive_review`, and `strategy_governance`.
@@ -54,6 +84,9 @@ follow-up. The service does not explain policy semantics or risk conclusions.
 | `track_analysis_product_list` | `POST` | `/dp/track-analysis/product/list/v2` | none | `product`, `appName`, `currentPage`, `pageSize`, `keyword`, `needFavorite` | Product/app discovery before Track queries. |
 | `track_sequence_dimension_list` | `GET` | `/dp/platform/app/analytics/v2/sequence/dimension/list` | none | `product` | Sequence dimension discovery. |
 | `track_data_type_list` | `GET` | `/dp/platform/app/analytics/v2/track/getDataTypeList` | none | `product` | Track data type discovery. |
+| `track_sequence_get_device_ids` | `POST` | `/dp/platform/app/analytics/v2/sequence/getDeviceIds` | `user_id` xor `device_id`, `appName` | none | Standalone device-id list subinterface. |
+| `track_sequence_get_use_duration` | `POST` | `/dp/platform/app/analytics/v2/sequence/getUseDuration` | `user_id` xor `device_id`, `appName` | none | Standalone use-duration subinterface. |
+| `track_sequence_profile` | `POST` | `/dp/platform/app/analytics/v2/sequence/profile` | `user_id` xor `device_id`, `appName` | `time_window` | Standalone Track profile subinterface. |
 
 These are auxiliary enumeration actions for `track_parameter_discovery`,
 `track_field_explanation`, and dimension/data type discovery. They should not

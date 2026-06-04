@@ -1,6 +1,6 @@
 version: 1
 service: browser_backed_risk_service
-action_count: 37
+action_count: 70
 contract_source: ACTION_REGISTRY.md
 positioning: fixed_action_typed_params_safe_passthrough
 
@@ -16,6 +16,13 @@ capabilities:
     actions:
       - archives_user_profile
       - archives_user_analysis
+      - archives_negative_report
+      - archives_negative_uninterested
+      - archives_risk_info
+      - archives_user_label
+      - archives_user_shop_info
+      - archives_review_logs
+      - archives_user_analyze_summary
       - track_analysis_summary
 
   - capability: login_history
@@ -54,16 +61,31 @@ capabilities:
       - archives_photo_report_aggregate
       - archives_photo_user_autonomy
       - archives_gallery_photo_list
+      - archives_photo_gallery_top
+      - archives_collect_photo_list
+      - archives_collection_list
+      - archives_live_gallery
+      - archives_livestream_home_info
+      - archives_livestream_home_meta
+      - archives_livestream_home_log
+      - archives_livestream_comment_statistics
+      - archives_livestream_comment_detail
+      - archives_user_report_search
+      - archives_moment_list
+      - archives_punish_status
 
   - capability: social_and_private_message
     display_name: 私信/社交
     suitable_questions:
-      - 查私信样本、关联用户和关系链线索
+      - 查私信样本、粉丝、关注、评论、关联用户和关系链线索
     default_actions:
       - archives_private_message_search
     actions:
       - archives_private_message_search
       - archives_related_users
+      - archives_fans_list
+      - archives_follow_list
+      - archives_comment_search
 
   - capability: profile_change
     display_name: 资料变更
@@ -97,6 +119,14 @@ capabilities:
       - rcp_policy_blur_search
       - rcp_policy_all_version
       - rcp_pipeline_policy_versions_by_code
+      - rcp_policy_tree_list
+      - rcp_policy_tree_node_binding
+      - rcp_policy_tree_policy_codes
+      - rcp_policy_tree_max_version
+      - rcp_event_type_list
+      - rcp_realtime_op_list
+      - rcp_event_query_max_duration
+      - rcp_event_save_ratios
       - rcp_policy_version_lookup
       - rcp_policy_detail_lookup
       - rcp_policy_release_record_lookup
@@ -117,6 +147,9 @@ capabilities:
       - track_analysis_product_list
       - track_sequence_dimension_list
       - track_data_type_list
+      - track_sequence_get_device_ids
+      - track_sequence_get_use_duration
+      - track_sequence_profile
 
 command_aliases:
   用户画像:

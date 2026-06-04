@@ -138,7 +138,7 @@ Behavior:
 - Load `ACTION_REGISTRY.md`.
 - Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` when the user asks by
   capability instead of exact action name.
-- List 37 allowlisted actions.
+- List 70 allowlisted actions.
 - Show typed params.
 - State that service output is a passthrough envelope with bounded upstream
   business body visibility.
@@ -158,7 +158,7 @@ than naming a fixed action:
 - `/browser-backed-risk-service action <action_name> <json_params>`
 
 The Skill should map these commands through `CAPABILITY_INDEX.yaml`, then use
-typed params from `ACTION_REGISTRY.md`. Do not require users to memorize the 37
+typed params from `ACTION_REGISTRY.md`. Do not require users to memorize the 70
 action names.
 
 ## `/browser-backed-risk-service 自测用户 <user_id>`
@@ -177,7 +177,7 @@ Pre-check:
 2. For Remote Main Agent + Mac Local Worker Mode, confirm Mac node is connected.
 3. Call `{service_base_url}/health`.
 4. Call `{service_base_url}/actions`.
-5. Confirm `action_count=37`.
+5. Confirm `action_count=70`.
 
 Default action group:
 

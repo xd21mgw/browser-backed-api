@@ -19,7 +19,7 @@ The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive
 calls, permission bypass, or platform writes.
 
-Current callable `action_count=37`. All actions are passthrough-only at the
+Current callable `action_count=70`. All actions are passthrough-only at the
 service layer.
 
 This Skill is independent of any specific upper-layer agent.
@@ -44,7 +44,7 @@ POST {service_base_url}/actions/<action_name>
 ```
 
 Before action calls, verify `/health` and `/actions`; `action_count` should be
-37.
+70.
 
 ## Deployment Modes
 
@@ -224,7 +224,7 @@ Failure behavior:
 
 ### `/browser-backed-risk-service actions`
 
-- List the 37 allowlisted fixed actions.
+- List the 70 allowlisted fixed actions.
 - Show typed params from `ACTION_REGISTRY.md`.
 - Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` when the user asks by
   capability rather than exact action name.
@@ -264,7 +264,7 @@ Before running:
 - Confirm `service_base_url`.
 - In Remote Main Agent + Mac Local Worker Mode, confirm the Mac node is
   connected and `{service_base_url}/health` is reachable.
-- Call `{service_base_url}/actions` and confirm `action_count=37`.
+- Call `{service_base_url}/actions` and confirm `action_count=70`.
 
 Default low-risk read-only action group:
 

@@ -14,7 +14,7 @@ The service does not provide summary, source cards, source quality, evidence
 cards, risk judgment, DataAgent/Hive calls, arbitrary URL fetch, or write
 actions.
 
-Current callable `action_count=37`.
+Current callable `action_count=70`.
 
 ## Package Layout
 
@@ -61,7 +61,7 @@ injection, storageState injection, or arbitrary URL fetch.
 ## Capability Entry Points
 
 Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` instead of memorizing all
-37 action names. Supported Skill command intents include:
+70 action names. Supported Skill command intents include:
 
 - `/browser-backed-risk-service 用户画像 <user_id>`
 - `/browser-backed-risk-service 登录历史 <user_id>`

@@ -66,7 +66,7 @@ quality scoring, risk judgments, no-data interpretation, next-step
 recommendations, DataAgent/Hive calls, permission bypass, or automatic upstream
 write/disposal actions.
 
-Current `action_count=37`.
+Current `action_count=70`.
 
 Useful entry points:
 
@@ -298,7 +298,7 @@ Optional smoke:
 Expected self-test output:
 
 - `service_ready`
-- `action_count=37`
+- `action_count=70`
 - per-action envelope summary
 - per-action `live_status`
 - main-agent observation summary such as `track_profile_observed`,
@@ -338,7 +338,7 @@ in [`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`](./REMOTE_MAIN_AGENT_SUCCESS_PATHS.md).
 
 ## Capability Playbook
 
-Users and main agents do not need to memorize all 37 action names. Use
+Users and main agents do not need to memorize all 70 action names. Use
 [`CAPABILITY_INDEX.yaml`](./CAPABILITY_INDEX.yaml) for capability-to-action
 mapping and [`ACTION_PLAYBOOK.md`](./ACTION_PLAYBOOK.md) for user-facing "what
 do I want to inspect" guidance.

@@ -76,6 +76,100 @@ const ACTION_INPUTS = Object.freeze({
     pageIndex: 1,
     pageSize: 20
   },
+  archives_photo_gallery_top: {
+    user_id: "2871834924"
+  },
+  archives_negative_report: {
+    user_id: "2871834924"
+  },
+  archives_negative_uninterested: {
+    user_id: "2871834924"
+  },
+  archives_risk_info: {
+    user_id: "2871834924"
+  },
+  archives_user_label: {
+    user_id: "2871834924"
+  },
+  archives_user_shop_info: {
+    user_id: "2871834924"
+  },
+  archives_punish_status: {
+    photo_id: "197323059879"
+  },
+  archives_review_logs: {
+    user_id: "2871834924",
+    beginTime: 1780000000000,
+    endTime: 1780086400000,
+    pageIndex: 1,
+    pageSize: 20
+  },
+  archives_user_analyze_summary: {
+    user_id: "2871834924",
+    beginTime: 1780000000000,
+    endTime: 1780086400000,
+    pageIndex: 1,
+    pageSize: 20
+  },
+  archives_live_gallery: {
+    user_id: "2871834924",
+    page: 1,
+    count: 20
+  },
+  archives_fans_list: {
+    user_id: "2871834924",
+    pageIndex: 1,
+    pageSize: 20
+  },
+  archives_follow_list: {
+    user_id: "2871834924",
+    pageIndex: 1,
+    pageSize: 20
+  },
+  archives_collect_photo_list: {
+    user_id: "2871834924",
+    page: 1,
+    count: 20
+  },
+  archives_collection_list: {
+    user_id: "2871834924",
+    page: 1,
+    size: 20
+  },
+  archives_comment_search: {
+    user_id: "2871834924",
+    page: 1,
+    count: 20
+  },
+  archives_livestream_home_info: {
+    live_stream_id: "mock_live_stream_1"
+  },
+  archives_livestream_home_meta: {
+    live_stream_id: "mock_live_stream_1"
+  },
+  archives_livestream_home_log: {
+    live_stream_id: "mock_live_stream_1",
+    page: 1,
+    count: 20
+  },
+  archives_livestream_comment_statistics: {
+    live_stream_id: "mock_live_stream_1"
+  },
+  archives_livestream_comment_detail: {
+    live_stream_id: "mock_live_stream_1",
+    page: 1,
+    count: 20
+  },
+  archives_user_report_search: {
+    user_id: "2871834924",
+    page: 1,
+    count: 20
+  },
+  archives_moment_list: {
+    user_id: "2871834924",
+    page: 1,
+    count: 20
+  },
   archives_related_users: {
     user_id: "2871834924",
     relation_type: "same_device_registered"
@@ -156,6 +250,46 @@ const ACTION_INPUTS = Object.freeze({
   rcp_pipeline_policy_versions_by_code: {
     policyCode: "mock_policy_code"
   },
+  rcp_policy_tree_list: {
+    policyTreeCode: "USER_REGISTER_NEW",
+    policyCode: "mock_policy_code",
+    eventTypeAssociator: "USER_REGISTER_NEW",
+    page: 1,
+    size: 20
+  },
+  rcp_policy_tree_node_binding: {
+    policyTreeCode: "USER_REGISTER_NEW",
+    policyTreeVersion: 887,
+    policyTreeNodeCode: "53187346034508",
+    policyCode: "mock_policy_code",
+    page: 1,
+    size: 20
+  },
+  rcp_policy_tree_policy_codes: {
+    policyTreeCode: "USER_REGISTER_NEW",
+    policyTreeVersion: 887,
+    code: "mock_policy_code",
+    page: 1,
+    size: 20
+  },
+  rcp_policy_tree_max_version: {
+    policyTreeCode: "USER_REGISTER_NEW",
+    treeSnapshot: false
+  },
+  rcp_event_type_list: {
+    keyWord: "USER_REGISTER",
+    page: 1,
+    size: 20
+  },
+  rcp_realtime_op_list: {
+    eventType: "USER_REGISTER_NEW"
+  },
+  rcp_event_query_max_duration: {
+    eventType: "USER_REGISTER_NEW"
+  },
+  rcp_event_save_ratios: {
+    eventType: "USER_REGISTER_NEW"
+  },
   rcp_policy_version_lookup: {
     eventType: "USER_REGISTER_NEW",
     eventId: "mock_event_id",
@@ -218,6 +352,18 @@ const ACTION_INPUTS = Object.freeze({
   },
   track_data_type_list: {
     product: "KUAISHOU"
+  },
+  track_sequence_get_device_ids: {
+    user_id: "2871834924",
+    appName: "KUAISHOU"
+  },
+  track_sequence_get_use_duration: {
+    user_id: "2871834924",
+    appName: "KUAISHOU"
+  },
+  track_sequence_profile: {
+    user_id: "2871834924",
+    appName: "KUAISHOU"
   }
 });
 
@@ -386,13 +532,13 @@ test("origin registry and fixed action allowlist remain explicit", () => {
     assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
     assert.equal(origin.enabled, true);
   }
-  assert.equal(Object.keys(ACTIONS).length, 37);
+  assert.equal(Object.keys(ACTIONS).length, 70);
   assert.deepEqual(Object.keys(ACTIONS), ACTION_ALLOWLIST);
 });
 
 test("capability index maps every allowlisted action without inventing actions", () => {
   const { actionCount, actions } = readCapabilityIndexActionNames();
-  assert.equal(actionCount, 37);
+  assert.equal(actionCount, ACTION_ALLOWLIST.length);
   for (const actionName of actions) {
     assert.equal(ACTION_ALLOWLIST.includes(actionName), true, `${actionName} must be allowlisted`);
   }
@@ -423,7 +569,7 @@ test("fixed action fetch modes default to context request with only weapon follo
   const unknownActions = ACTION_ALLOWLIST.filter((actionName) => !["context_request", "page_followup"].includes(ACTIONS[actionName].fetchMode));
 
   assert.deepEqual(pageFollowupActions, ["weapon_inventory"]);
-  assert.equal(contextActions.length, 36);
+  assert.equal(contextActions.length, ACTION_ALLOWLIST.length - 1);
   assert.deepEqual(unknownActions, []);
 });
 
@@ -1057,7 +1203,7 @@ test("health and refresh state expose auth readiness metadata only", () => {
   assert.equal(health.service_mode, "live");
   assert.equal(health.profile_dir_configured, true);
   assert.equal(health.state_file_configured, true);
-  assert.equal(health.action_count, 37);
+  assert.equal(health.action_count, ACTION_ALLOWLIST.length);
 
   const state = updateOriginWarmState({}, config.domains.rcp, {
     status: "ready",
@@ -1171,13 +1317,13 @@ test("worker:expose summary gives low-approval service_base_url without credenti
   const summary = buildExposeSummary({
     proxyStatus: "running",
     serviceBaseUrl: "http://10.0.0.2:9787",
-    health: { action_count: 37, auth_state: "ready" },
-    actions: { action_count: 37 }
+    health: { action_count: ACTION_ALLOWLIST.length, auth_state: "ready" },
+    actions: { action_count: ACTION_ALLOWLIST.length }
   });
   assert.equal(summary.proxy_status, "running");
   assert.equal(summary.local_service, "http://127.0.0.1:8787");
   assert.equal(summary.service_base_url, "http://10.0.0.2:9787");
-  assert.equal(summary.action_count, 37);
+  assert.equal(summary.action_count, ACTION_ALLOWLIST.length);
   assert.equal(summary.auth_state, "ready");
   assert.deepEqual(summary.allowed_paths, ["/health", "/actions", "/actions/<allowlisted_action>"]);
   assertNoCredentialMaterial(summary);
