@@ -442,7 +442,9 @@ Lock classifications:
   profile window or stop the owning worker.
 - `stale_profile_lock`: lock files exist under the dedicated profile but the
   recorded PID is not live. The default `worker:start` does not delete them.
-  Clear only with the explicit command below.
+  It returns `service_ready=false`, `lock_type=stale_profile_lock`,
+  `pid_exists=false`, `dennis_should_continue_live=false`, and a recovery
+  `next_step`. Clear only with the explicit command below.
 - `unknown_lock`: the profile source or PID state cannot be trusted. Stop and
   ask the user to inspect. Do not delete files or kill Chrome.
 
@@ -451,7 +453,11 @@ browser-backed profile:
 
 ```sh
 npm run worker:doctor -- --clear-stale-lock
+npm run worker:start
 ```
+
+`stale_profile_lock` is a safety stop, not a service bug. Dennis and other
+runners must not continue live source calls while `service_ready=false`.
 
 You can also inspect obvious local Chrome/Playwright processes without reading
 the profile contents:

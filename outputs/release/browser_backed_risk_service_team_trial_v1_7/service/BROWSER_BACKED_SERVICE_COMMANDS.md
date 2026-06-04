@@ -348,6 +348,9 @@ These commands reduce repeated Mac node approvals by grouping common operations.
   browser.
 - If the dedicated profile has stale lock files, stops with
   `stale_profile_lock`; cleanup requires an explicit doctor command.
+  The JSON includes `service_ready=false`, `lock_type=stale_profile_lock`,
+  `pid_exists=false` when the recorded PID is gone, and
+  `dennis_should_continue_live=false`.
 - If service is missing or auth is not ready, runs `refresh:once`.
 - If refresh succeeds, starts `SERVICE_MODE=live node src/server.js` in the
   background when needed.
@@ -361,6 +364,18 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - Does not read or output cookie/token/session/header.
 - Does not automatically close or kill `Google Chrome`, `Chromium`, or browser
   processes.
+
+For `stale_profile_lock`, ask the user to confirm the dedicated profile is not
+open, then run exactly:
+
+```sh
+npm run worker:doctor -- --clear-stale-lock
+npm run worker:start
+```
+
+Dennis / main-agent runners must stop when `worker:start` returns
+`service_ready=false` or `blocking_issue=stale_profile_lock`; they must not
+continue live source calls against `127.0.0.1:8787`.
 
 ### `npm run worker:status`
 

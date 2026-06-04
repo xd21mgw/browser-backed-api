@@ -20,6 +20,7 @@ import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../sr
 import { BrowserBackedApiService } from "../src/service.js";
 import { buildRefreshDaemonEvent, parseRefreshIntervalMs } from "../scripts/refresh-daemon.js";
 import {
+  buildProfileLockBlockedStartOutput,
   buildExposeSummary,
   canClearStaleProfileLock,
   classifyProfileLockState,
@@ -1363,6 +1364,33 @@ test("profile lock classifier marks dedicated stale lock as explicit-clear only"
   assert.equal(result.action_allowed, false);
   assert.equal(canClearStaleProfileLock(result), true);
   assertNoCredentialMaterial(result);
+});
+
+test("worker:start stale profile lock output blocks Dennis live continuation", () => {
+  const dedicated = path.join(os.homedir(), ".dennis-browser-backed", "profile");
+  const lockDiagnosis = classifyProfileLockState({
+    profileDir: dedicated,
+    lockFiles: [{ name: "SingletonLock", path: path.join(dedicated, "SingletonLock"), pid: 444 }],
+    processRows: [],
+    pidExists: () => false
+  });
+  const output = buildProfileLockBlockedStartOutput(lockDiagnosis);
+  assert.equal(output.ok, false);
+  assert.equal(output.service_ready, false);
+  assert.equal(output.blocking_issue, "stale_profile_lock");
+  assert.equal(output.lock_type, "stale_profile_lock");
+  assert.equal(output.profile_path, dedicated);
+  assert.equal(output.pid_exists, false);
+  assert.equal(output.dennis_should_continue_live, false);
+  assert.equal(output.refresh_attempted, false);
+  assert.equal(output.service_started, false);
+  assert.equal(output.auto_kill_chrome, false);
+  assert.equal(output.auto_delete_lock, false);
+  assert.equal(
+    output.next_step,
+    "Run npm run worker:doctor -- --clear-stale-lock, then npm run worker:start"
+  );
+  assertNoCredentialMaterial(output);
 });
 
 test("profile lock classifier stops on unknown custom profile lock", () => {

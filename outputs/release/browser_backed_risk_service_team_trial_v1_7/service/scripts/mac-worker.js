@@ -161,6 +161,32 @@ export function canClearStaleProfileLock(profileLock) {
   return profileLock?.status === "stale_profile_lock" && profileLock?.clear_stale_lock_allowed === true;
 }
 
+export function buildProfileLockBlockedStartOutput(lockDiagnosis) {
+  const lockPids = Array.isArray(lockDiagnosis?.lock_pids) ? lockDiagnosis.lock_pids : [];
+  const pidExists = lockPids.some((item) => item?.pid_exists === true);
+  const isStaleProfileLock = lockDiagnosis?.status === "stale_profile_lock";
+  return {
+    ok: false,
+    command: "worker:start",
+    service_base_url: localBaseUrl,
+    service_ready: false,
+    blocking_issue: lockDiagnosis?.blocking_issue || lockDiagnosis?.status || "profile_lock_blocked",
+    lock_type: lockDiagnosis?.status || "unknown_lock",
+    profile_path: profileDir,
+    pid_exists: pidExists,
+    dennis_should_continue_live: false,
+    profile_lock: lockDiagnosis,
+    refresh_attempted: false,
+    service_started: false,
+    auto_kill_chrome: false,
+    auto_delete_lock: false,
+    next_step: isStaleProfileLock
+      ? "Run npm run worker:doctor -- --clear-stale-lock, then npm run worker:start"
+      : lockDiagnosis?.next_step || "Run npm run worker:doctor and resolve the profile lock before retrying worker:start.",
+    credential_material_output: false
+  };
+}
+
 export function classifyProfileLockState({
   profileDir: rawProfileDir = profileDir,
   lockFiles = [],
@@ -272,18 +298,7 @@ async function startWorker() {
   if (!existing.ok) {
     const lockDiagnosis = diagnoseProfileLock();
     if (blockingProfileLockStatus(lockDiagnosis.status)) {
-      printJson({
-        ok: false,
-        command: "worker:start",
-        service_base_url: localBaseUrl,
-        blocking_issue: lockDiagnosis.blocking_issue,
-        profile_lock: lockDiagnosis,
-        refresh_attempted: false,
-        service_started: false,
-        auto_kill_chrome: false,
-        auto_delete_lock: false,
-        credential_material_output: false
-      });
+      printJson(buildProfileLockBlockedStartOutput(lockDiagnosis));
       process.exitCode = 1;
       return;
     }

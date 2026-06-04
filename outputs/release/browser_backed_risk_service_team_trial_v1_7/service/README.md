@@ -423,6 +423,12 @@ Profile lock safety:
   `npm run worker:doctor -- --clear-stale-lock`.
 - The explicit cleanup applies only to stale lock files in
   `~/.dennis-browser-backed/profile`.
+- When `worker:start` returns `service_ready=false` with
+  `blocking_issue=stale_profile_lock`, this is a safety stop, not a service
+  bug. Dennis / runners must not continue live source calls. After user
+  confirmation, recover with:
+  `npm run worker:doctor -- --clear-stale-lock` and then
+  `npm run worker:start`.
 
 If the remote Agent reports `mac_node_disconnected`, open the MyFlicker Mac
 client, confirm the node is connected, and retry `/browser-backed-risk-service

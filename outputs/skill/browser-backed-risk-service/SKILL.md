@@ -634,8 +634,11 @@ Profile lock handling is diagnostic-only by default:
   browser-backed dedicated profile window or stop the owning worker; do not
   kill Chrome automatically.
 - If it reports `stale_profile_lock`, tell the user about the explicit
-  `npm run worker:doctor -- --clear-stale-lock` command. Do not clear stale
-  locks from `worker:start`.
+  `npm run worker:doctor -- --clear-stale-lock` command, followed by
+  `npm run worker:start`. Do not clear stale locks from `worker:start`.
+  If `worker:start` returns `service_ready=false` or
+  `blocking_issue=stale_profile_lock`, stop live source execution and report
+  `dennis_should_continue_live=false`; do not continue to `/actions`.
 - If it reports `unknown_lock`, stop with `blocking_issue=profile_lock_unknown`.
 - Never run `killall Chrome`, `pkill Chrome`,
   `osascript quit app "Google Chrome"`, or any equivalent automatic browser
