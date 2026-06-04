@@ -248,30 +248,7 @@ export class BrowserBackedApiService {
     }
 
     try {
-      const fetchResult = await this.browserClient.runAction(action, actionRequest);
-      const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
-        latencyMs: Date.now() - startedAt,
-        authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
-        ...lazyMeta
-      });
-
-      if (shouldUseContextRequestResponseFallback(action, actionRequest, response, this.browserClient)) {
-        try {
-          const fallbackResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
-          return buildLiveActionResponse(action, input, this.config, fallbackResult, {
-            latencyMs: Date.now() - startedAt,
-            authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
-            ...lazyMeta
-          });
-        } catch {
-          return response;
-        }
-      }
-
-      return response;
-    } catch (error) {
-      const errorType = classifyError(error);
-      if (shouldUseContextRequestFallback(action, actionRequest, errorType, this.browserClient)) {
+      if (isContextRequestAction(action, this.browserClient)) {
         try {
           const fetchResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
           return buildLiveActionResponse(action, input, this.config, fetchResult, {
@@ -279,17 +256,29 @@ export class BrowserBackedApiService {
             authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
             ...lazyMeta
           });
-        } catch (fallbackError) {
+        } catch (error) {
+          const errorType = classifyError(error);
           return buildPassthroughFailureResponse(action, input, {
             latencyMs: Date.now() - startedAt,
-            errorType: classifyError(fallbackError),
+            errorType,
+            timeoutStage: timeoutStageForFetchError(errorType, "api_fetch_timeout"),
             ...lazyMeta
           });
         }
       }
+
+      const fetchResult = await this.browserClient.runAction(action, actionRequest);
+      return buildLiveActionResponse(action, input, this.config, fetchResult, {
+        latencyMs: Date.now() - startedAt,
+        authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
+        ...lazyMeta
+      });
+    } catch (error) {
+      const errorType = classifyError(error);
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
         errorType,
+        timeoutStage: timeoutStageForFetchError(errorType, action.fetchMode === "page_followup" ? "page_followup_timeout" : null),
         ...lazyMeta
       });
     }
@@ -391,7 +380,8 @@ export class BrowserBackedApiService {
           errorType: "timeout",
           latencyMs: Date.now() - startedAt,
           response: null,
-          timedOut: true
+          timedOut: true,
+          timeoutStage: "source_timeout"
         });
       }
 
@@ -681,10 +671,12 @@ function buildBatchSourceResult({
   latencyMs,
   response,
   timedOut = false,
+  timeoutStage = null,
   validationError = null,
   exceptionMessage = null
 }) {
   const upstream = summarizeBatchUpstream(response);
+  const sourceTimeoutStage = timedOut ? "source_timeout" : response?.timeout_stage || upstream.timeout_stage || timeoutStage || null;
   return {
     source_id: source.source_id,
     action: source.action,
@@ -698,6 +690,7 @@ function buildBatchSourceResult({
     error_type: errorType,
     ok: category === "completed" || category === "no_data" || category === "partial" || category === "planned",
     timed_out: timedOut,
+    timeout_stage: sourceTimeoutStage,
     timeout_ms: source.timeout_ms,
     latency_ms: latencyMs,
     http_status: upstream.status,
@@ -740,6 +733,7 @@ function summarizeBatchUpstream(response) {
       ...(Object.hasOwn(upstream, "returned_records") ? { returned_records: upstream.returned_records } : {}),
       ...(Object.hasOwn(upstream, "missing_records") ? { missing_records: upstream.missing_records } : {}),
       ...(Object.hasOwn(upstream, "missing_body_reason") ? { missing_body_reason: upstream.missing_body_reason } : {}),
+      ...(Object.hasOwn(upstream, "timeout_stage") ? { timeout_stage: upstream.timeout_stage } : {}),
       ...(Object.hasOwn(upstream, "body") ? { body: upstream.body } : {}),
       ...(Object.hasOwn(upstream, "body_snippet") ? { body_snippet: upstream.body_snippet } : {}),
       ...(Object.hasOwn(upstream, "capped_body") ? { capped_body: upstream.capped_body } : {})
@@ -756,6 +750,7 @@ function summarizeBatchUpstream(response) {
     returned_bytes: null,
     platform_error: response?.platform_error || null,
     error_type: response?.error_type || null,
+    timeout_stage: response?.timeout_stage || null,
     raw_body_handling: response?.raw_body_handling || "omitted",
     raw_body_suppressed: true
   };
@@ -850,6 +845,7 @@ function buildTransportStatusMatrix(sourceResults) {
         returned_bytes: sourceResult.upstream?.returned_bytes ?? null,
         elapsed_ms: sourceResult.elapsed_ms,
         timeout_ms: sourceResult.timeout_ms,
+        timeout_stage: sourceResult.timeout_stage,
         timed_out: Boolean(sourceResult.timed_out),
         transport_error: sourceResult.transport_error,
         platform_error: sourceResult.platform_error,
@@ -1000,7 +996,7 @@ function isPlatformEnabled(config, domainKey) {
 }
 
 function classifyError(error) {
-  if (error?.name === "TimeoutError" || /timeout/i.test(error?.message || "")) {
+  if (error?.name === "TimeoutError" || /timeout|timed\s+out/i.test(error?.message || "")) {
     return "navigation_timeout";
   }
   if (/origin/i.test(error?.message || "")) {
@@ -1022,27 +1018,12 @@ function shouldLazyRewarm(actionDiagnostics) {
   );
 }
 
-function shouldUseContextRequestFallback(action, actionRequest, errorType, browserClient) {
-  return Boolean(
-    isContextRequestFallbackEligible(action, actionRequest, browserClient) &&
-      errorType === "network_error" &&
-      action?.name === "login_logs_search"
-  );
+function isContextRequestAction(action, browserClient) {
+  return Boolean(action?.fetchMode === "context_request" && typeof browserClient?.runActionWithContextRequest === "function");
 }
 
-function shouldUseContextRequestResponseFallback(action, actionRequest, response, browserClient) {
-  return Boolean(
-    isContextRequestFallbackEligible(action, actionRequest, browserClient) &&
-      response?.error_type === "unexpected_html_response"
-  );
-}
-
-function isContextRequestFallbackEligible(action, actionRequest, browserClient) {
-  return Boolean(
-    action?.expectedContentType === "json" &&
-      !actionRequest?.followUp &&
-      typeof browserClient?.runActionWithContextRequest === "function"
-  );
+function timeoutStageForFetchError(errorType, stage) {
+  return /timeout|navigation_timeout/i.test(String(errorType || "")) ? stage : null;
 }
 
 export function publicError(statusCode, code, publicMessage) {

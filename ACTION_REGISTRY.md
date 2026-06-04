@@ -43,6 +43,22 @@ or set `response_mode=passthrough`. Other response modes are rejected.
 
 `passthrough_body=bounded` means the service returns `upstream.body` for small upstream business responses and `upstream.body_snippet` or `upstream.capped_body` for large responses. Request headers, response `set-cookie`, browser auth stores, Chrome profile material, localStorage, and Playwright storage state remain forbidden.
 
+## Fetch Mode Model
+
+The service uses browser pages for origin readiness, local login state, and
+lightweight account confirmation. Business API fetches use browser-context
+request by default, so fixed actions do not depend on the currently loaded page
+JavaScript context.
+
+Current runtime fetch modes:
+
+- `context_request`: 36 fixed actions. The browser context supplies the local
+  login state while the service calls the allowlisted fixed origin/path directly.
+- `page_followup`: `weapon_inventory` only. This action chains the
+  service-owned `graphData -> riskData` fixed paths and remains on
+  page-context fetch for that follow-up flow.
+- `page_fetch`: no current default action uses this mode.
+
 ## Callable Action Matrix
 
 | action_name | platform / origin_key | method | fixed_path | typed_params | response_mode_support | passthrough_body | allowlisted | mock_ready | live_smoke_status | open_status | safety_boundary |

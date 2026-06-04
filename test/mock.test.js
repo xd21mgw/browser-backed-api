@@ -405,6 +405,7 @@ test("actions endpoint exposes passthrough-only contract for every action", () =
   const response = createService().actions();
   assert.deepEqual(response.actions.map((action) => action.name), ACTION_ALLOWLIST);
   for (const action of response.actions) {
+    assert.equal(["context_request", "page_followup"].includes(action.fetch_mode), true, `${action.name} has explicit fetch mode`);
     assert.equal(action.default_response_mode, "passthrough");
     assert.deepEqual(action.response_modes, ["passthrough"]);
     assert.equal(action.input_contract.response_mode, "optional enum passthrough; default passthrough");
@@ -414,6 +415,16 @@ test("actions endpoint exposes passthrough-only contract for every action", () =
     assert.equal(action.response_policy.reads_cookie_token_session_header_plaintext, false);
     assertNoOldBusinessFields(action);
   }
+});
+
+test("fixed action fetch modes default to context request with only weapon follow-up on page", () => {
+  const contextActions = ACTION_ALLOWLIST.filter((actionName) => ACTIONS[actionName].fetchMode === "context_request");
+  const pageFollowupActions = ACTION_ALLOWLIST.filter((actionName) => ACTIONS[actionName].fetchMode === "page_followup");
+  const unknownActions = ACTION_ALLOWLIST.filter((actionName) => !["context_request", "page_followup"].includes(ACTIONS[actionName].fetchMode));
+
+  assert.deepEqual(pageFollowupActions, ["weapon_inventory"]);
+  assert.equal(contextActions.length, 36);
+  assert.deepEqual(unknownActions, []);
 });
 
 test("live body cap defaults to 5MB and remains env-overridable", () => {
@@ -559,27 +570,26 @@ test("live response builder exposes small text upstream body", () => {
   assertTransportEnvelope(response, "archives_user_profile");
 });
 
-test("login_logs_search falls back to context request when page fetch fails", async () => {
+test("context request actions do not use page-context fetch", async () => {
   const config = createLiveConfig();
-  let contextFallbackCalled = false;
+  const calledActions = [];
   const fakeBrowserClient = {
-    actionDiagnostics: () => ({
-      action_name: "login_logs_search",
-      expected_origin: config.domains.login_logs.origin,
-      bound_page_origin: config.domains.login_logs.origin,
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
       origin_warmed: true,
       page_ready: true,
       origin_match: true
     }),
     runAction: async () => {
-      throw new Error("Failed to fetch");
+      throw new Error("page fetch should not be used for context_request actions");
     },
     runActionWithContextRequest: async (action, actionRequest) => {
-      contextFallbackCalled = true;
-      assert.equal(action.name, "login_logs_search");
-      assert.equal(actionRequest.method, "GET");
-      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
-      const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [] } });
+      calledActions.push(action.name);
+      assert.equal(action.fetchMode, "context_request");
+      assert.equal(typeof actionRequest.path, "string");
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
       return {
         ok: true,
         status: 200,
@@ -591,42 +601,43 @@ test("login_logs_search falls back to context request when page fetch fails", as
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  service.warmState.set("login_logs", {
-    warmed: true,
-    page_ready: true,
-    status: "ready",
-    error_type: null,
-    final_origin: config.domains.login_logs.origin
-  });
+  for (const domainKey of Object.keys(config.domains)) {
+    service.warmState.set(domainKey, {
+      warmed: true,
+      page_ready: true,
+      status: "ready",
+      error_type: null,
+      final_origin: config.domains[domainKey].origin
+    });
+  }
 
-  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
-  assert.equal(contextFallbackCalled, true);
-  assert.equal(response.ok, true);
-  assert.equal(response.http_status, 200);
-  assert.equal(response.upstream.status, 200);
-  assert.equal(response.upstream.body_present, true);
-  assert.equal(response.upstream.body_omitted, false);
-  assert.deepEqual(response.upstream.body, { code: 0, data: { logSearchModels: [] } });
-  assert.equal(response.error_type, undefined);
-  assertTransportEnvelope(response, "login_logs_search");
+  for (const actionName of ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request")) {
+    const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
+    assert.equal(response.ok, true, actionName);
+    assert.equal(response.upstream.body.data.action, actionName);
+    assertTransportEnvelope(response, actionName);
+  }
+  assert.deepEqual(calledActions, ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request"));
 });
 
-test("login_logs_search prefers page-context API fetch before context fallback", async () => {
+test("weapon_inventory uses page follow-up fetch and does not call context request", async () => {
   const config = createLiveConfig();
-  let contextFallbackCalled = false;
-  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [{ id: "page_context_record" }] } });
+  let pageFetchCalled = false;
+  const bodyText = JSON.stringify({ code: 0, data: { action: "weapon_inventory" } });
   const fakeBrowserClient = {
     actionDiagnostics: () => ({
-      action_name: "login_logs_search",
-      expected_origin: config.domains.login_logs.origin,
-      bound_page_origin: config.domains.login_logs.origin,
+      action_name: "weapon_inventory",
+      expected_origin: config.domains.weapon.origin,
+      bound_page_origin: config.domains.weapon.origin,
       origin_warmed: true,
       page_ready: true,
       origin_match: true
     }),
     runAction: async (action, actionRequest) => {
-      assert.equal(action.name, "login_logs_search");
-      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
+      pageFetchCalled = true;
+      assert.equal(action.name, "weapon_inventory");
+      assert.equal(action.fetchMode, "page_followup");
+      assert.equal(actionRequest.followUp.type, "weapon_graph_risk");
       return {
         ok: true,
         status: 200,
@@ -638,31 +649,27 @@ test("login_logs_search prefers page-context API fetch before context fallback",
       };
     },
     runActionWithContextRequest: async () => {
-      contextFallbackCalled = true;
-      throw new Error("context fallback should not be used");
+      throw new Error("context request should not be used for weapon_inventory follow-up chain");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  service.warmState.set("login_logs", {
+  service.warmState.set("weapon", {
     warmed: true,
     page_ready: true,
     status: "ready",
     error_type: null,
-    final_origin: config.domains.login_logs.origin
+    final_origin: config.domains.weapon.origin
   });
 
-  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
-  assert.equal(contextFallbackCalled, false);
+  const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
+  assert.equal(pageFetchCalled, true);
   assert.equal(response.ok, true);
-  assert.equal(response.upstream.body.data.logSearchModels[0].id, "page_context_record");
-  assertTransportEnvelope(response, "login_logs_search");
+  assert.equal(response.upstream.body.data.action, "weapon_inventory");
+  assertTransportEnvelope(response, "weapon_inventory");
 });
 
-test("login_logs_search retries context request when page-context returns HTML shell", async () => {
+test("login_logs_search context API timeout reports api fetch stage", async () => {
   const config = createLiveConfig();
-  let contextFallbackCalled = false;
-  const html = "<!doctype html><html><head><title>Workbench</title></head><body>app shell</body></html>";
-  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [{ id: "context_record" }] } });
   const fakeBrowserClient = {
     actionDiagnostics: () => ({
       action_name: "login_logs_search",
@@ -672,33 +679,11 @@ test("login_logs_search retries context request when page-context returns HTML s
       page_ready: true,
       origin_match: true
     }),
-    runAction: async (action, actionRequest) => {
-      assert.equal(action.name, "login_logs_search");
-      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
-      return {
-        ok: true,
-        status: 200,
-        contentType: "text/html;charset=UTF-8",
-        bodyText: html,
-        observedBytes: Buffer.byteLength(html),
-        returnedBytes: Buffer.byteLength(html),
-        bodyTruncated: false
-      };
+    runAction: async () => {
+      throw new Error("page fetch should not be used for login_logs_search");
     },
-    runActionWithContextRequest: async (action, actionRequest) => {
-      contextFallbackCalled = true;
-      assert.equal(action.name, "login_logs_search");
-      assert.equal(actionRequest.method, "GET");
-      assert.equal(actionRequest.path.startsWith("/rest/unified/log/search?"), true);
-      return {
-        ok: true,
-        status: 200,
-        contentType: "application/json;charset=UTF-8",
-        bodyText,
-        observedBytes: Buffer.byteLength(bodyText),
-        returnedBytes: Buffer.byteLength(bodyText),
-        bodyTruncated: false
-      };
+    runActionWithContextRequest: async () => {
+      throw new Error("Request timed out after 30000ms");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
@@ -711,19 +696,18 @@ test("login_logs_search retries context request when page-context returns HTML s
   });
 
   const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
-  assert.equal(contextFallbackCalled, true);
-  assert.equal(response.ok, true);
-  assert.equal(response.error_type, undefined);
-  assert.equal(response.upstream.body.data.logSearchModels[0].id, "context_record");
-  assert.equal(response.safety.credential_material_output, false);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "navigation_timeout");
+  assert.equal(response.timeout, true);
+  assert.equal(response.timeout_stage, "api_fetch_timeout");
+  assert.equal(response.upstream.timeout_stage, "api_fetch_timeout");
   assertTransportEnvelope(response, "login_logs_search");
 });
 
-test("JSON fixed actions retry context request when page-context returns HTML shell", async () => {
+test("context request action returns API contract mismatch when the fixed API returns HTML shell", async () => {
   const config = createLiveConfig();
-  let contextFallbackCalled = false;
   const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
-  const bodyText = JSON.stringify({ result: 1, data: { userId: "2871834924" } });
+  let contextRequestCalled = false;
   const fakeBrowserClient = {
     actionDiagnostics: () => ({
       action_name: "archives_user_profile",
@@ -733,8 +717,13 @@ test("JSON fixed actions retry context request when page-context returns HTML sh
       page_ready: true,
       origin_match: true
     }),
-    runAction: async (action, actionRequest) => {
+    runAction: async () => {
+      throw new Error("page fetch should not be used for archives_user_profile");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      contextRequestCalled = true;
       assert.equal(action.name, "archives_user_profile");
+      assert.equal(actionRequest.method, "GET");
       assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
       return {
         ok: true,
@@ -743,21 +732,6 @@ test("JSON fixed actions retry context request when page-context returns HTML sh
         bodyText: html,
         observedBytes: Buffer.byteLength(html),
         returnedBytes: Buffer.byteLength(html),
-        bodyTruncated: false
-      };
-    },
-    runActionWithContextRequest: async (action, actionRequest) => {
-      contextFallbackCalled = true;
-      assert.equal(action.name, "archives_user_profile");
-      assert.equal(actionRequest.method, "GET");
-      assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
-      return {
-        ok: true,
-        status: 200,
-        contentType: "application/json;charset=UTF-8",
-        bodyText,
-        observedBytes: Buffer.byteLength(bodyText),
-        returnedBytes: Buffer.byteLength(bodyText),
         bodyTruncated: false
       };
     }
@@ -772,10 +746,11 @@ test("JSON fixed actions retry context request when page-context returns HTML sh
   });
 
   const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
-  assert.equal(contextFallbackCalled, true);
-  assert.equal(response.ok, true);
-  assert.equal(response.error_type, undefined);
-  assert.equal(response.upstream.body.data.userId, "2871834924");
+  assert.equal(contextRequestCalled, true);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "unexpected_html_response");
+  assert.equal(response.platform_error, "api_contract_mismatch");
+  assert.equal(response.upstream.response_body_kind, "html_page");
   assert.equal(response.safety.credential_material_output, false);
   assertTransportEnvelope(response, "archives_user_profile");
 });
@@ -1053,6 +1028,10 @@ test("business token session login auth fields in upstream body remain visible",
 
 test("passthrough response does not expose request or transport auth headers", () => {
   const bodyText = JSON.stringify({ data: { tokenType: "business", login_time: 1780000000000 } });
+  const blockedTransportHeaders = Object.fromEntries([
+    ["set-cookie", "blocked_test_value"],
+    ["authorization", "blocked_test_value"]
+  ]);
   const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
     ok: true,
     status: 200,
@@ -1060,10 +1039,7 @@ test("passthrough response does not expose request or transport auth headers", (
     bodyText,
     observedBytes: Buffer.byteLength(bodyText),
     bodyTruncated: false,
-    headers: {
-      "set-cookie": "x",
-      authorization: "x"
-    }
+    headers: blockedTransportHeaders
   }, { latencyMs: 7 });
   assert.equal(response.ok, true);
   assert.equal(Object.hasOwn(response.upstream, "headers"), false);

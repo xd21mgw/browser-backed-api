@@ -11,9 +11,9 @@ This is a command-oriented Skill for the **Browser-backed Risk Platform Access
 Service**. The service is a controlled local/Mac worker for risk-platform reads.
 
 The service only does fixed action allowlist, typed params validation, fixed
-origin/path construction, browser-session readiness, same-origin fetch,
-bounded upstream business body passthrough, response-size guard, transport
-status, and controlled batch scheduling.
+origin/path construction, browser-session readiness, browser-context API
+request by default, bounded upstream business body passthrough, response-size
+guard, transport status, and controlled batch scheduling.
 
 The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive

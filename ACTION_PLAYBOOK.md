@@ -51,10 +51,11 @@ curl -sS -X POST "{service_base_url}/actions/login_logs_search" \
   -d '{"response_mode":"passthrough","user_id":"<user_id>","max_records":300}'
 ```
 
-Notes: fixed actions expect API JSON. If a page shell is returned, the service
-retries the same fixed API through browser-context request before reporting
-`unexpected_html_response` / `api_contract_mismatch`. Large JSON uses
-`json_array_capped`; `missing_records` must be treated as incomplete evidence.
+Notes: fixed actions expect API JSON and use browser-context request by default;
+page state is only for login/readiness. If the fixed API returns a page shell,
+the service reports `unexpected_html_response` / `api_contract_mismatch`.
+Large JSON uses `json_array_capped`; `missing_records` must be treated as
+incomplete evidence.
 
 ## 设备图谱
 
@@ -73,8 +74,9 @@ curl -sS -X POST "{service_base_url}/actions/weapon_inventory" \
   -d '{"response_mode":"passthrough","user_id":"<user_id>"}'
 ```
 
-Notes: `weapon_inventory` may chain service-owned graph/risk fixed paths. It
-still does not build a risk judgment.
+Notes: `weapon_inventory` is the current page-follow-up exception because it
+chains service-owned graph/risk fixed paths. It still does not build a risk
+judgment.
 
 ## 作品/内容
 

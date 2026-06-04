@@ -172,6 +172,8 @@ const LOGIN_LOGS_JSON_CAP_PATH = Object.freeze(["data", "logSearchModels"]);
 const DEFAULT_RESPONSE_MODE = "passthrough";
 const RESPONSE_MODES = Object.freeze(["passthrough"]);
 const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
+const FETCH_MODE_CONTEXT_REQUEST = "context_request";
+const FETCH_MODE_PAGE_FOLLOWUP = "page_followup";
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -305,6 +307,7 @@ export const ACTIONS = Object.freeze({
     description: "Return a compact Weapon graphData and optional riskData shape summary for a typed entity.",
     method: "GET",
     apiPath: WEAPON_GRAPH_DATA_PATH,
+    fetchMode: FETCH_MODE_PAGE_FOLLOWUP,
     inputContract: {
       user_id: "required string when device_id is absent; graphData USER_ID -> DEVICE_ID",
       device_id: "required string when user_id is absent; graphData DEVICE_ID -> USER_ID",
@@ -1007,6 +1010,7 @@ export function listActions(config) {
       description: action.description,
       domain: domain.label,
       method: action.method,
+      fetch_mode: action.fetchMode,
       registry_status: action.registryStatus || "service_registered",
       platform_enabled: domain.enabled !== false,
       default_response_mode: defaultResponseMode,
@@ -1216,6 +1220,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   const httpStatus = typeof meta.httpStatus === "number" ? meta.httpStatus : null;
   const invalidParams = Boolean(meta.invalidParams || /parameter/i.test(errorType));
   const timedOut = Boolean(meta.timedOut || /timeout/i.test(errorType));
+  const timeoutStage = typeof meta.timeoutStage === "string" && meta.timeoutStage ? meta.timeoutStage : null;
   return {
     ok: false,
     action: action.name,
@@ -1235,6 +1240,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     platform_error: meta.platformError || null,
     invalid_params: invalidParams,
     timeout: timedOut,
+    ...(timeoutStage ? { timeout_stage: timeoutStage } : {}),
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
     raw_body_handling: "omitted",
     upstream: {
@@ -1247,7 +1253,8 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       observed_bytes: 0,
       returned_bytes: 0,
       raw_body_handling: "omitted",
-      error_type: errorType
+      error_type: errorType,
+      ...(timeoutStage ? { timeout_stage: timeoutStage } : {})
     },
     ...(meta.parameterError
       ? {
@@ -2618,6 +2625,7 @@ function freezeAction(action) {
   normalizeRelativePath(action.apiPath, `${action.name}.apiPath`);
   return Object.freeze({
     expectedContentType: "json",
+    fetchMode: FETCH_MODE_CONTEXT_REQUEST,
     ...action
   });
 }
