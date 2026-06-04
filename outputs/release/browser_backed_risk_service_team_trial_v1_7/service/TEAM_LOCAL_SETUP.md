@@ -133,8 +133,14 @@ If you do not set `BROWSER_BACKED_PROFILE_DIR`, the service uses:
 
 Do not copy another teammate's profile. Do not commit or send your profile
 directory. A single profile can be used by only one Chrome/Playwright process at
-the same time, so close `start:live`, `refresh:daemon`, `open:profile`, or other
-Chrome instances using that profile before reusing it.
+the same time. The service should use the dedicated profile at
+`~/.dennis-browser-backed/profile`, not your daily Chrome profile. If
+`worker:start` reports `profile_locked`, run `npm run worker:doctor` to classify
+the lock. Main agents and worker scripts do not automatically close or kill
+Chrome. If the lock belongs to your daily Chrome profile, fix
+`BROWSER_BACKED_PROFILE_DIR` instead of closing daily Chrome. If it belongs to a
+browser-backed dedicated profile window, close that dedicated window yourself
+before retrying.
 
 ### 4. Advanced: check and refresh login state once
 

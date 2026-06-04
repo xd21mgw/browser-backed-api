@@ -388,7 +388,9 @@ Use this when the main Agent runs remotely or in a cloud environment.
 - Keep MyFlicker / Mac node client, or the approved equivalent channel, online
   and connected.
 - Keep browser-backed service running on the Mac.
-- Ensure the Chrome profile is not locked by another Chrome/Playwright process.
+- Ensure the dedicated browser-backed profile is not locked by another
+  Chrome/Playwright process. Do not point `BROWSER_BACKED_PROFILE_DIR` at the
+  user's daily Chrome profile.
 - Configure `BROWSER_BACKED_SERVICE_BASE_URL`, or the Agent's equivalent
   setting, to a controlled Mac worker/bridge/tunnel URL.
 - Do not expose the service directly to the public internet.
@@ -408,6 +410,19 @@ npm run worker:start
 Use `npm run worker:doctor` for profile lock, port, install, or readiness
 diagnostics. Use `npm run worker:stop` to stop the worker without deleting the
 profile or refresh state.
+
+Profile lock safety:
+
+- Main agents and Skills must not automatically close or kill daily Chrome,
+  `Google Chrome`, `Chromium`, or browser processes.
+- `worker:start` stops on unsafe profile locks and prints a blocking issue
+  instead of killing or deleting anything.
+- `worker:doctor` classifies locks as `daily_chrome_profile_in_use`,
+  `dedicated_profile_live_lock`, `stale_profile_lock`, or `unknown_lock`.
+- Stale lock cleanup is explicit only:
+  `npm run worker:doctor -- --clear-stale-lock`.
+- The explicit cleanup applies only to stale lock files in
+  `~/.dennis-browser-backed/profile`.
 
 If the remote Agent reports `mac_node_disconnected`, open the MyFlicker Mac
 client, confirm the node is connected, and retry `/browser-backed-risk-service

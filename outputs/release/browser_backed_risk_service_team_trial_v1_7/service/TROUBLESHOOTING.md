@@ -283,7 +283,9 @@ Check:
 Common fixes:
 
 - Run `npm run worker:start` to let the worker route to open-profile if needed.
-- Make sure Chrome is not holding the same profile lock.
+- Run `npm run worker:doctor` if a profile lock is suspected. The service should
+  use the dedicated browser-backed profile, not the daily Chrome profile, and
+  worker scripts do not automatically close or kill Chrome.
 - Check whether your account has permission to that internal platform.
 - Check network/VPN access.
 
@@ -399,16 +401,16 @@ Symptom:
 - Chrome says the profile is in use.
 - You see a `ProcessSingleton`, `SingletonLock`, or profile-in-use style error.
 
-Fix:
+Safety rule:
 
-- First confirm whether this profile is already used by `npm run start:live`,
-  `npm run refresh:daemon`, `npm run open:profile`, a previous refresh command,
-  or a normal Chrome window.
-- Close or stop the process that is using the same profile, then retry.
-- Use a dedicated `BROWSER_BACKED_PROFILE_DIR`.
-- Do not copy another person's profile.
-- Do not delete the profile directory to fix a lock unless you have separately
-  confirmed it is disposable test data.
+- Browser-backed service should use the dedicated profile
+  `~/.dennis-browser-backed/profile`.
+- User daily Chrome profiles must not be used for this service.
+- Main agents, Skills, and worker scripts must not automatically close or kill
+  `Google Chrome`, `Chromium`, or browser processes.
+- Daily Chrome is never killed by the agent.
+- Profile locks are diagnosed and classified; user confirmation is required
+  before closing anything.
 
 You can check whether the local service is still running:
 
@@ -422,9 +424,34 @@ For fixed worker diagnostics:
 npm run worker:doctor
 ```
 
-If the profile is locked, close the process using the same profile before
-running `worker:start`, `refresh:once`, or `open:profile`. Do not delete the
-profile as the first step.
+Useful explicit diagnostics:
+
+```sh
+npm run worker:doctor -- --show-profile-processes
+npm run worker:doctor -- --explain-lock
+```
+
+Lock classifications:
+
+- `daily_chrome_profile_in_use`: the configured profile points at the user's
+  normal Chrome profile. Do not close daily Chrome. Reconfigure
+  `BROWSER_BACKED_PROFILE_DIR` to `~/.dennis-browser-backed/profile`.
+- `dedicated_profile_live_lock`: the browser-backed dedicated profile is in use,
+  usually by `open:profile`, `worker:start`, `start:live`, or a Playwright
+  remnant. The agent does not kill it; ask the user to close the browser-backed
+  profile window or stop the owning worker.
+- `stale_profile_lock`: lock files exist under the dedicated profile but the
+  recorded PID is not live. The default `worker:start` does not delete them.
+  Clear only with the explicit command below.
+- `unknown_lock`: the profile source or PID state cannot be trusted. Stop and
+  ask the user to inspect. Do not delete files or kill Chrome.
+
+Explicit stale-lock cleanup is allowed only for stale locks under the dedicated
+browser-backed profile:
+
+```sh
+npm run worker:doctor -- --clear-stale-lock
+```
 
 You can also inspect obvious local Chrome/Playwright processes without reading
 the profile contents:
@@ -432,6 +459,10 @@ the profile contents:
 ```sh
 pgrep -fl "chrome|Chromium|playwright|start:live|refresh:daemon|open-profile" || true
 ```
+
+This command is inspect-only. Do not run `killall Chrome`, `pkill Chrome`,
+`osascript quit app "Google Chrome"`, or any equivalent automatic browser
+shutdown from an Agent or Skill.
 
 ## Action Returns blocked/auth_failed/network_error
 

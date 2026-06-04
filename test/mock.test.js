@@ -19,7 +19,15 @@ import { loadConfig } from "../src/config.js";
 import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../src/originRegistry.js";
 import { BrowserBackedApiService } from "../src/service.js";
 import { buildRefreshDaemonEvent, parseRefreshIntervalMs } from "../scripts/refresh-daemon.js";
-import { buildExposeSummary, classifyProxyRequest, needsManualLogin, planWorkerStart } from "../scripts/mac-worker.js";
+import {
+  buildExposeSummary,
+  canClearStaleProfileLock,
+  classifyProfileLockState,
+  classifyProxyRequest,
+  extractUserDataDir,
+  needsManualLogin,
+  planWorkerStart
+} from "../scripts/mac-worker.js";
 
 const ACTION_INPUTS = Object.freeze({
   rcp_snapshot: {
@@ -1288,6 +1296,124 @@ test("worker:start plan opens profile for manual auth then continues refresh/sta
     refreshSummary,
     postOpenRefreshSummary: { ok: true, auth_state: "ready" }
   }), ["refresh_once", "open_profile", "refresh_once_after_open_profile", "start_service"]);
+});
+
+test("worker:start plan blocks on unsafe profile lock before refresh", () => {
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: false,
+    authState: null,
+    profileLockStatus: "daily_chrome_profile_in_use"
+  }), ["profile_lock_blocked"]);
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: false,
+    authState: null,
+    profileLockStatus: "dedicated_profile_live_lock"
+  }), ["profile_lock_blocked"]);
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: false,
+    authState: null,
+    profileLockStatus: "stale_profile_lock"
+  }), ["profile_lock_blocked"]);
+});
+
+test("profile lock classifier protects daily Chrome profile", () => {
+  const dailyProfile = path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome");
+  const result = classifyProfileLockState({
+    profileDir: dailyProfile,
+    lockFiles: [],
+    processRows: [
+      { pid: 222, command: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }
+    ]
+  });
+  assert.equal(result.status, "daily_chrome_profile_in_use");
+  assert.equal(result.daily_chrome_in_use, true);
+  assert.equal(result.auto_kill_allowed, false);
+  assert.equal(result.action_allowed, false);
+  assertNoCredentialMaterial(result);
+});
+
+test("profile lock classifier reports dedicated profile live lock without kill permission", () => {
+  const dedicated = path.join(os.homedir(), ".dennis-browser-backed", "profile");
+  const result = classifyProfileLockState({
+    profileDir: dedicated,
+    lockFiles: [{ name: "SingletonLock", path: path.join(dedicated, "SingletonLock"), pid: 333 }],
+    processRows: [
+      { pid: 333, command: `Chromium --user-data-dir="${dedicated}"` }
+    ],
+    pidExists: (pid) => pid === 333
+  });
+  assert.equal(result.status, "dedicated_profile_live_lock");
+  assert.equal(result.configured_profile_processes.length, 1);
+  assert.equal(result.auto_kill_allowed, false);
+  assert.equal(result.auto_delete_lock_allowed, false);
+  assertNoCredentialMaterial(result);
+});
+
+test("profile lock classifier marks dedicated stale lock as explicit-clear only", () => {
+  const dedicated = path.join(os.homedir(), ".dennis-browser-backed", "profile");
+  const result = classifyProfileLockState({
+    profileDir: dedicated,
+    lockFiles: [{ name: "SingletonLock", path: path.join(dedicated, "SingletonLock"), pid: 444 }],
+    processRows: [],
+    pidExists: () => false
+  });
+  assert.equal(result.status, "stale_profile_lock");
+  assert.equal(result.clear_stale_lock_allowed, true);
+  assert.equal(result.auto_delete_lock_allowed, false);
+  assert.equal(result.action_allowed, false);
+  assert.equal(canClearStaleProfileLock(result), true);
+  assertNoCredentialMaterial(result);
+});
+
+test("profile lock classifier stops on unknown custom profile lock", () => {
+  const custom = path.join(os.tmpdir(), "custom-browser-profile");
+  const result = classifyProfileLockState({
+    profileDir: custom,
+    lockFiles: [{ name: "SingletonLock", path: path.join(custom, "SingletonLock") }],
+    processRows: []
+  });
+  assert.equal(result.status, "unknown_lock");
+  assert.equal(result.blocking_issue, "unknown_lock");
+  assert.equal(result.action_allowed, false);
+  assert.equal(canClearStaleProfileLock(result), false);
+  assertNoCredentialMaterial(result);
+});
+
+test("clear-stale-lock helper rejects live and daily Chrome profile locks", () => {
+  assert.equal(canClearStaleProfileLock({ status: "dedicated_profile_live_lock", clear_stale_lock_allowed: false }), false);
+  assert.equal(canClearStaleProfileLock({ status: "daily_chrome_profile_in_use", clear_stale_lock_allowed: false }), false);
+  assert.equal(canClearStaleProfileLock({ status: "unknown_lock", clear_stale_lock_allowed: false }), false);
+});
+
+test("profile lock parser extracts user-data-dir without exposing raw command paths", () => {
+  const userDataDir = path.join(os.homedir(), ".dennis-browser-backed", "profile");
+  assert.equal(extractUserDataDir(`Chromium --user-data-dir="${userDataDir}" --flag`), userDataDir);
+  assert.equal(extractUserDataDir(`Chromium --user-data-dir ${userDataDir} --flag`), userDataDir);
+});
+
+test("worker script does not contain Chrome kill commands and docs carry guardrails", () => {
+  const workerContent = fs.readFileSync(path.join(process.cwd(), "scripts/mac-worker.js"), "utf8");
+  const forbidden = [
+    /killall\s+["']?(Google Chrome|Chrome|Chromium)/i,
+    /pkill\s+.*(Google Chrome|Chrome|Chromium)/i,
+    /osascript\s+.*quit app ["']?Google Chrome/i
+  ];
+  for (const pattern of forbidden) {
+    assert.equal(pattern.test(workerContent), false, `worker script must not contain ${pattern}`);
+  }
+
+  const docFiles = [
+    "BROWSER_BACKED_AGENT_SKILL.md",
+    "BROWSER_BACKED_SERVICE_COMMANDS.md",
+    "MAC_LOCAL_WORKER_GUIDE.md",
+    "TROUBLESHOOTING.md",
+    "README.md"
+  ].filter((file) => fs.existsSync(path.join(process.cwd(), file)));
+  assert.ok(docFiles.length > 0, "at least one profile-lock guardrail doc should exist");
+  for (const file of docFiles) {
+    const content = fs.readFileSync(path.join(process.cwd(), file), "utf8");
+    assert.match(content, /not automatically close or kill|Never run|Do not run/i);
+  }
 });
 
 test("refresh daemon interval and manual-login event remain bounded", () => {

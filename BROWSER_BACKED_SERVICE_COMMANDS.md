@@ -340,6 +340,14 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - Checks whether port 8787 already has a reachable service.
 - If service is reachable and `auth_state=ready`, prints a sanitized ready
   summary and does not start a duplicate service.
+- If service is not reachable, checks profile locks before refresh/start.
+- If the configured profile is the user's daily Chrome profile, stops with
+  `daily_chrome_profile_in_use`; it does not close daily Chrome.
+- If the dedicated browser-backed profile is actively locked, stops with
+  `dedicated_profile_live_lock`; it asks for user action and does not kill the
+  browser.
+- If the dedicated profile has stale lock files, stops with
+  `stale_profile_lock`; cleanup requires an explicit doctor command.
 - If service is missing or auth is not ready, runs `refresh:once`.
 - If refresh succeeds, starts `SERVICE_MODE=live node src/server.js` in the
   background when needed.
@@ -351,6 +359,8 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - Prints `service_base_url=http://127.0.0.1:8787`.
 - Does not delete profile/state.
 - Does not read or output cookie/token/session/header.
+- Does not automatically close or kill `Google Chrome`, `Chromium`, or browser
+  processes.
 
 ### `npm run worker:status`
 
@@ -396,9 +406,29 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - Checks whether `node_modules` exists.
 - Checks whether port 8787 is reachable.
 - Checks whether the configured profile path exists.
-- Checks whether obvious profile lock files exist.
+- Classifies profile locks as `daily_chrome_profile_in_use`,
+  `dedicated_profile_live_lock`, `stale_profile_lock`, `unknown_lock`, or
+  `no_lock`.
 - Prints next-step suggestions.
 - Does not inspect profile contents or authentication material.
+- Does not kill Chrome or delete lock files by default.
+
+Optional inspect-only flags:
+
+```sh
+npm run worker:doctor -- --show-profile-processes
+npm run worker:doctor -- --explain-lock
+```
+
+Explicit stale-lock cleanup:
+
+```sh
+npm run worker:doctor -- --clear-stale-lock
+```
+
+This only clears stale lock files under `~/.dennis-browser-backed/profile` when
+the recorded PID is not live. It never clears daily Chrome locks and never kills
+Chrome.
 
 ## Auth State Transfer POC Command Policy
 

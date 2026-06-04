@@ -25,6 +25,9 @@ const proxyLogFile = process.env.BROWSER_BACKED_WORKER_PROXY_LOG_FILE ||
   path.join(runtimeDir, "worker-proxy.log");
 const profileDir = process.env.BROWSER_BACKED_PROFILE_DIR ||
   path.join(os.homedir(), ".dennis-browser-backed", "profile");
+const dedicatedProfileDir = path.join(os.homedir(), ".dennis-browser-backed", "profile");
+const dailyChromeProfileDir = path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome");
+const PROFILE_LOCK_FILE_PATTERN = /^(Singleton|lockfile)/i;
 
 const MANUAL_LOGIN_ERROR_TYPES = Object.freeze([
   "manual_login_required",
@@ -120,9 +123,12 @@ export function buildExposeSummary({ proxyStatus, serviceBaseUrl, health, action
   };
 }
 
-export function planWorkerStart({ serviceReachable, authState, refreshSummary, postOpenRefreshSummary } = {}) {
+export function planWorkerStart({ serviceReachable, authState, refreshSummary, postOpenRefreshSummary, profileLockStatus } = {}) {
   if (serviceReachable && authState === "ready") {
     return ["return_ready"];
+  }
+  if (!serviceReachable && blockingProfileLockStatus(profileLockStatus)) {
+    return ["profile_lock_blocked"];
   }
   const steps = ["refresh_once"];
   if (refreshSummary && needsManualLogin(refreshSummary)) {
@@ -140,6 +146,93 @@ export function planWorkerStart({ serviceReachable, authState, refreshSummary, p
     steps.push("refresh_failed");
   }
   return steps;
+}
+
+export function blockingProfileLockStatus(status) {
+  return [
+    "dedicated_profile_live_lock",
+    "daily_chrome_profile_in_use",
+    "stale_profile_lock",
+    "unknown_lock"
+  ].includes(status);
+}
+
+export function canClearStaleProfileLock(profileLock) {
+  return profileLock?.status === "stale_profile_lock" && profileLock?.clear_stale_lock_allowed === true;
+}
+
+export function classifyProfileLockState({
+  profileDir: rawProfileDir = profileDir,
+  lockFiles = [],
+  processRows = [],
+  pidExists = () => false
+} = {}) {
+  const normalizedProfile = normalizePath(rawProfileDir);
+  const dedicated = pathEquals(normalizedProfile, dedicatedProfileDir);
+  const dailyProfileConfigured = pathEquals(normalizedProfile, dailyChromeProfileDir) ||
+    pathInside(normalizedProfile, dailyChromeProfileDir);
+  const chromeProcesses = processRows
+    .filter((row) => isChromeLikeCommand(row.command))
+    .map((row) => ({
+      pid: Number(row.pid) || null,
+      command_summary: summarizeProcessCommand(row.command),
+      user_data_dir: extractUserDataDir(row.command),
+      uses_configured_profile: pathEquals(extractUserDataDir(row.command), normalizedProfile),
+      uses_daily_chrome_profile: !extractUserDataDir(row.command)
+        ? isDailyChromeCommand(row.command)
+        : pathEquals(extractUserDataDir(row.command), dailyChromeProfileDir) || pathInside(extractUserDataDir(row.command), dailyChromeProfileDir)
+    }));
+  const configuredProfileProcesses = chromeProcesses.filter((item) => item.uses_configured_profile);
+  const dailyChromeProcesses = chromeProcesses.filter((item) => item.uses_daily_chrome_profile);
+  const lockPidEntries = lockFiles
+    .map((file) => ({
+      name: file.name,
+      path: file.path,
+      pid: file.pid ?? parsePidFromLockTarget(file.link_target || file.content || "")
+    }))
+    .filter((item) => Number.isInteger(item.pid) && item.pid > 0)
+    .map((item) => ({
+      ...item,
+      pid_exists: Boolean(pidExists(item.pid))
+    }));
+  const liveLockPids = lockPidEntries.filter((item) => item.pid_exists);
+  const lockPresent = lockFiles.length > 0;
+
+  let status = "no_lock";
+  let blockingIssue = null;
+  if (dailyProfileConfigured) {
+    status = "daily_chrome_profile_in_use";
+    blockingIssue = "daily_chrome_profile_in_use";
+  } else if (configuredProfileProcesses.length > 0 || liveLockPids.length > 0) {
+    status = dedicated ? "dedicated_profile_live_lock" : "unknown_lock";
+    blockingIssue = status;
+  } else if (lockPresent) {
+    status = dedicated ? "stale_profile_lock" : "unknown_lock";
+    blockingIssue = status;
+  }
+
+  return {
+    status,
+    blocking_issue: blockingIssue,
+    profile_dir_configured: true,
+    profile_dir_is_dedicated_default: dedicated,
+    daily_chrome_profile_configured: dailyProfileConfigured,
+    daily_chrome_in_use: dailyChromeProcesses.length > 0,
+    lock_files_present: lockPresent,
+    lock_files: lockFiles.map((file) => file.name),
+    lock_pids: lockPidEntries.map((item) => ({
+      name: item.name,
+      pid: item.pid,
+      pid_exists: item.pid_exists
+    })),
+    configured_profile_processes: configuredProfileProcesses.map(publicProcessSummary),
+    daily_chrome_processes: dailyChromeProcesses.map(publicProcessSummary),
+    action_allowed: status === "no_lock",
+    clear_stale_lock_allowed: status === "stale_profile_lock" && dedicated,
+    auto_kill_allowed: false,
+    auto_delete_lock_allowed: false,
+    next_step: profileLockNextStep(status)
+  };
 }
 
 export function needsManualLogin(summary) {
@@ -174,6 +267,26 @@ async function startWorker() {
       health: summarizeHealth(existing.body)
     });
     return;
+  }
+
+  if (!existing.ok) {
+    const lockDiagnosis = diagnoseProfileLock();
+    if (blockingProfileLockStatus(lockDiagnosis.status)) {
+      printJson({
+        ok: false,
+        command: "worker:start",
+        service_base_url: localBaseUrl,
+        blocking_issue: lockDiagnosis.blocking_issue,
+        profile_lock: lockDiagnosis,
+        refresh_attempted: false,
+        service_started: false,
+        auto_kill_chrome: false,
+        auto_delete_lock: false,
+        credential_material_output: false
+      });
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const firstRefresh = runRefreshOnceCommand();
@@ -470,17 +583,35 @@ async function stopWorker() {
 }
 
 async function doctor() {
+  const flags = new Set(process.argv.slice(3));
+  const clearStaleLock = flags.has("--clear-stale-lock");
+  const showProfileProcesses = flags.has("--show-profile-processes") || flags.has("--explain-lock") || clearStaleLock;
   const health = await fetchHealth();
   const proxyHealth = await fetchProxyHealth();
   const npmVersion = spawnSync("npm", ["--version"], { encoding: "utf8" });
   const packageInstalled = fs.existsSync(path.join(process.cwd(), "node_modules"));
   const profileExists = fs.existsSync(profileDir);
-  const lockFiles = profileExists
-    ? fs.readdirSync(profileDir).filter((name) => /^Singleton|^lockfile$/i.test(name)).slice(0, 20)
-    : [];
+  const profileLock = diagnoseProfileLock();
+  let staleLockCleared = false;
+  let staleLockClearError = null;
+  if (clearStaleLock) {
+    if (canClearStaleProfileLock(profileLock)) {
+      try {
+        for (const file of listProfileLockFiles(profileDir)) {
+          fs.rmSync(file.path, { force: true, recursive: false });
+        }
+        staleLockCleared = true;
+      } catch (error) {
+        staleLockClearError = sanitizeMessage(error);
+      }
+    } else {
+      staleLockClearError = "clear-stale-lock is allowed only for stale locks in the dedicated browser-backed profile";
+    }
+  }
+  const postClearProfileLock = staleLockCleared ? diagnoseProfileLock() : profileLock;
 
   printJson({
-    ok: true,
+    ok: staleLockClearError === null,
     command: "worker:doctor",
     node_version: process.version,
     npm_available: npmVersion.status === 0,
@@ -493,13 +624,34 @@ async function doctor() {
     health: health.ok ? summarizeHealth(health.body) : null,
     profile_dir_configured: Boolean(profileDir),
     profile_exists: profileExists,
-    profile_lock_files_present: lockFiles.length > 0,
-    profile_lock_file_names: lockFiles,
+    profile_lock_files_present: postClearProfileLock.lock_files_present,
+    profile_lock_file_names: postClearProfileLock.lock_files,
+    profile_lock: showProfileProcesses
+      ? postClearProfileLock
+      : {
+        status: postClearProfileLock.status,
+        blocking_issue: postClearProfileLock.blocking_issue,
+        daily_chrome_in_use: postClearProfileLock.daily_chrome_in_use,
+        lock_files_present: postClearProfileLock.lock_files_present,
+        action_allowed: postClearProfileLock.action_allowed,
+        clear_stale_lock_allowed: postClearProfileLock.clear_stale_lock_allowed,
+        auto_kill_allowed: false,
+        auto_delete_lock_allowed: false,
+        next_step: postClearProfileLock.next_step
+      },
+    stale_lock_clear_requested: clearStaleLock,
+    stale_lock_cleared: staleLockCleared,
+    stale_lock_clear_error: staleLockClearError,
     pid_file_exists: fs.existsSync(pidFile),
     proxy_pid_file_exists: fs.existsSync(proxyPidFile),
-    next_steps: suggestNextSteps({ healthOk: health.ok, packageInstalled, profileExists, lockFiles }),
+    next_steps: suggestNextSteps({ healthOk: health.ok, packageInstalled, profileExists, profileLock: postClearProfileLock }),
+    auto_kill_chrome: false,
+    auto_delete_lock: false,
     credential_material_output: false
   });
+  if (staleLockClearError) {
+    process.exitCode = 1;
+  }
 }
 
 async function fetchHealth() {
@@ -576,15 +728,24 @@ function summarizeActions(body) {
   };
 }
 
-function suggestNextSteps({ healthOk, packageInstalled, profileExists, lockFiles }) {
+function suggestNextSteps({ healthOk, packageInstalled, profileExists, profileLock }) {
   if (!packageInstalled) {
     return ["Run npm install."];
   }
   if (!profileExists) {
     return ["Run npm run worker:start to enter open:profile when needed."];
   }
-  if (lockFiles.length > 0 && !healthOk) {
-    return ["A profile lock exists. Stop start:live, refresh:daemon, open:profile, or Chrome using this profile, then retry."];
+  if (profileLock?.status === "daily_chrome_profile_in_use") {
+    return ["BROWSER_BACKED_PROFILE_DIR points at the daily Chrome profile. Do not close daily Chrome; switch to ~/.dennis-browser-backed/profile."];
+  }
+  if (profileLock?.status === "dedicated_profile_live_lock" && !healthOk) {
+    return ["The dedicated browser-backed profile is in use. Ask the user to close the browser-backed profile window or stop the owning worker; do not kill Chrome automatically."];
+  }
+  if (profileLock?.status === "stale_profile_lock" && !healthOk) {
+    return ["Dedicated profile has stale lock files. Inspect with npm run worker:doctor -- --explain-lock; clear only with npm run worker:doctor -- --clear-stale-lock."];
+  }
+  if (profileLock?.status === "unknown_lock" && !healthOk) {
+    return ["Profile lock source is unknown. Stop and ask the user to inspect profile ownership; do not delete locks or kill Chrome."];
   }
   if (!healthOk) {
     return ["Run npm run worker:start."];
@@ -658,6 +819,165 @@ function sanitizeWorkerRefreshSummary(summary) {
       ]))
       : {}
   };
+}
+
+function diagnoseProfileLock() {
+  return classifyProfileLockState({
+    profileDir,
+    lockFiles: listProfileLockFiles(profileDir),
+    processRows: listProcessRows(),
+    pidExists: processExists
+  });
+}
+
+function listProfileLockFiles(targetProfileDir) {
+  try {
+    if (!fs.existsSync(targetProfileDir)) {
+      return [];
+    }
+    return fs.readdirSync(targetProfileDir)
+      .filter((name) => PROFILE_LOCK_FILE_PATTERN.test(name))
+      .slice(0, 50)
+      .map((name) => {
+        const filePath = path.join(targetProfileDir, name);
+        let linkTarget = null;
+        let content = null;
+        try {
+          const stat = fs.lstatSync(filePath);
+          if (stat.isSymbolicLink()) {
+            linkTarget = fs.readlinkSync(filePath);
+          } else if (stat.isFile() && stat.size <= 4096) {
+            content = fs.readFileSync(filePath, "utf8");
+          }
+        } catch {}
+        return {
+          name,
+          path: filePath,
+          link_target: linkTarget,
+          content
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function listProcessRows() {
+  const result = spawnSync("ps", ["-axo", "pid=,command="], {
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024
+  });
+  if (result.status !== 0) {
+    return [];
+  }
+  return String(result.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      return match ? { pid: Number(match[1]), command: match[2] } : null;
+    })
+    .filter(Boolean);
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+export function extractUserDataDir(command) {
+  const text = String(command || "");
+  const equalsMatch = text.match(/--user-data-dir=(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
+  if (equalsMatch) {
+    return normalizePath(equalsMatch[1] || equalsMatch[2] || equalsMatch[3]);
+  }
+  const spacedMatch = text.match(/--user-data-dir\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
+  if (spacedMatch) {
+    return normalizePath(spacedMatch[1] || spacedMatch[2] || spacedMatch[3]);
+  }
+  return null;
+}
+
+function parsePidFromLockTarget(value) {
+  const text = String(value || "");
+  const matches = [...text.matchAll(/(?:^|[^0-9])(\d{2,10})(?:$|[^0-9])/g)]
+    .map((match) => Number(match[1]))
+    .filter((pid) => Number.isInteger(pid) && pid > 1);
+  return matches.length > 0 ? matches[matches.length - 1] : null;
+}
+
+function isChromeLikeCommand(command) {
+  const text = String(command || "");
+  return /Google Chrome|Chromium|chrome(?!driver)|msedge|playwright/i.test(text);
+}
+
+function isDailyChromeCommand(command) {
+  const text = String(command || "");
+  return /Google Chrome/i.test(text) && !/--user-data-dir/.test(text);
+}
+
+function summarizeProcessCommand(command) {
+  const text = String(command || "").replace(/\s+/g, " ").trim();
+  return text
+    .replace(/--user-data-dir=(?:"[^"]+"|'[^']+'|[^\s]+)/g, "--user-data-dir=[path]")
+    .replace(/--user-data-dir\s+(?:"[^"]+"|'[^']+'|[^\s]+)/g, "--user-data-dir [path]")
+    .slice(0, 220);
+}
+
+function publicProcessSummary(item) {
+  return {
+    pid: item.pid,
+    command_summary: item.command_summary,
+    user_data_dir_present: Boolean(item.user_data_dir),
+    uses_configured_profile: Boolean(item.uses_configured_profile),
+    uses_daily_chrome_profile: Boolean(item.uses_daily_chrome_profile)
+  };
+}
+
+function normalizePath(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value);
+  const expanded = text.startsWith("~/") ? path.join(os.homedir(), text.slice(2)) : text;
+  return path.resolve(expanded);
+}
+
+function pathEquals(left, right) {
+  const normalizedLeft = normalizePath(left);
+  const normalizedRight = normalizePath(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function pathInside(child, parent) {
+  const normalizedChild = normalizePath(child);
+  const normalizedParent = normalizePath(parent);
+  if (!normalizedChild || !normalizedParent || normalizedChild === normalizedParent) {
+    return false;
+  }
+  const relative = path.relative(normalizedParent, normalizedChild);
+  return Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function profileLockNextStep(status) {
+  if (status === "daily_chrome_profile_in_use") {
+    return "Do not close daily Chrome. Configure BROWSER_BACKED_PROFILE_DIR to ~/.dennis-browser-backed/profile.";
+  }
+  if (status === "dedicated_profile_live_lock") {
+    return "Ask the user to close the browser-backed dedicated profile window or stop the owning worker; do not kill Chrome automatically.";
+  }
+  if (status === "stale_profile_lock") {
+    return "Inspect with npm run worker:doctor -- --explain-lock; clear only with npm run worker:doctor -- --clear-stale-lock.";
+  }
+  if (status === "unknown_lock") {
+    return "Stop and ask the user to inspect the profile lock. Do not delete lock files or kill Chrome.";
+  }
+  return "No profile lock blocker detected.";
 }
 
 function readPid() {

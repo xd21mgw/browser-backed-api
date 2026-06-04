@@ -141,6 +141,10 @@ Rules:
 - Do not commit a profile directory to git.
 - Do not send a profile directory to anyone.
 - The same profile can be used by only one Chrome/Playwright process at a time.
+- Use the dedicated default profile `~/.dennis-browser-backed/profile`.
+- Do not point `BROWSER_BACKED_PROFILE_DIR` at the user's daily Chrome profile.
+- Main agents and Skills must not automatically close or kill Chrome. Profile
+  locks require `npm run worker:doctor` diagnostics and user confirmation.
 
 ## Service Ready Standard
 

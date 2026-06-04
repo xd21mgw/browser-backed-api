@@ -237,17 +237,28 @@ Check whether port 8787 is still listening:
 lsof -ti tcp:8787
 ```
 
-If a profile lock appears, check for existing service/refresh/open-profile
-processes before retrying. Do not delete the profile to fix a lock unless it is
-known disposable test data.
-
+If a profile lock appears, do not close or kill daily Chrome from the Agent.
 Use:
 
 ```sh
 npm run worker:doctor
+npm run worker:doctor -- --show-profile-processes
 ```
 
 for Node/npm, install, profile path, profile lock, and port diagnostics.
+
+`worker:doctor` classifies locks as `daily_chrome_profile_in_use`,
+`dedicated_profile_live_lock`, `stale_profile_lock`, or `unknown_lock`.
+
+- Daily Chrome profile: do not close daily Chrome; fix `BROWSER_BACKED_PROFILE_DIR`.
+- Dedicated live lock: ask the user to close the browser-backed profile window
+  or stop the owning worker.
+- Stale dedicated lock: clear only with
+  `npm run worker:doctor -- --clear-stale-lock`.
+- Unknown lock: stop and ask the user to inspect.
+
+Do not delete the profile. Do not run `killall Chrome`, `pkill Chrome`, or
+`osascript quit app "Google Chrome"`.
 
 ## Safety Rules
 
@@ -259,6 +270,7 @@ for Node/npm, install, profile path, profile lock, and port diagnostics.
 - Do not open arbitrary URL fetch.
 - Do not expose the Mac service directly to the public internet.
 - Do not let the Agent read profile files.
+- Do not let the Agent automatically close or kill daily Chrome.
 
 ## Auth State Transfer POC
 

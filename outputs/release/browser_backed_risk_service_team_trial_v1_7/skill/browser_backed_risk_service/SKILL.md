@@ -624,6 +624,23 @@ profile copy to Linux.
 If the Mac worker is available, run `npm run worker:doctor` before asking for
 manual profile reset. Do not delete the profile.
 
+Profile lock handling is diagnostic-only by default:
+
+- The service should use `~/.dennis-browser-backed/profile`, not the user's
+  daily Chrome profile.
+- If `worker:doctor` reports `daily_chrome_profile_in_use`, stop and tell the
+  user to fix `BROWSER_BACKED_PROFILE_DIR`; do not close daily Chrome.
+- If it reports `dedicated_profile_live_lock`, ask the user to close the
+  browser-backed dedicated profile window or stop the owning worker; do not
+  kill Chrome automatically.
+- If it reports `stale_profile_lock`, tell the user about the explicit
+  `npm run worker:doctor -- --clear-stale-lock` command. Do not clear stale
+  locks from `worker:start`.
+- If it reports `unknown_lock`, stop with `blocking_issue=profile_lock_unknown`.
+- Never run `killall Chrome`, `pkill Chrome`,
+  `osascript quit app "Google Chrome"`, or any equivalent automatic browser
+  shutdown.
+
 If the Mac node is disconnected, ask the user to open the MyFlicker Mac client,
 confirm the node is connected, and retry `/browser-backed-risk-service 状态`.
 Do not try profile copy, cookie injection, storageState injection, or
