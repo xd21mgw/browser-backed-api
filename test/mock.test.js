@@ -595,13 +595,13 @@ test("actions endpoint exposes passthrough-only contract for every action", () =
   }
 });
 
-test("fixed action fetch modes default to context request with only weapon follow-up on page", () => {
+test("fixed action fetch modes default to context request with page-session exceptions explicit", () => {
   const contextActions = ACTION_ALLOWLIST.filter((actionName) => ACTIONS[actionName].fetchMode === "context_request");
   const pageFollowupActions = ACTION_ALLOWLIST.filter((actionName) => ACTIONS[actionName].fetchMode === "page_followup");
   const unknownActions = ACTION_ALLOWLIST.filter((actionName) => !["context_request", "page_followup"].includes(ACTIONS[actionName].fetchMode));
 
-  assert.deepEqual(pageFollowupActions, ["weapon_inventory"]);
-  assert.equal(contextActions.length, ACTION_ALLOWLIST.length - 1);
+  assert.deepEqual(pageFollowupActions, ["weapon_inventory", "login_logs_search"]);
+  assert.equal(contextActions.length, ACTION_ALLOWLIST.length - 2);
   assert.deepEqual(unknownActions, []);
 });
 
@@ -832,9 +832,22 @@ test("weapon_inventory uses page follow-up fetch and does not call context reque
   assertTransportEnvelope(response, "weapon_inventory");
 });
 
-test("login_logs_search context API timeout reports api fetch stage", async () => {
+test("login_logs_search page-session API timeout reports api fetch stage", async () => {
   const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
   const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      assert.equal(domainKey, "login_logs");
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.login_logs.origin,
+        current_origin: config.domains.login_logs.origin,
+        same_origin_actual: true,
+        error_type: null
+      };
+    },
     actionDiagnostics: () => ({
       action_name: "login_logs_search",
       expected_origin: config.domains.login_logs.origin,
@@ -844,14 +857,14 @@ test("login_logs_search context API timeout reports api fetch stage", async () =
       origin_match: true
     }),
     runAction: async () => {
-      throw new Error("page fetch should not be used for login_logs_search");
+      throw new Error("Request timed out after 30000ms");
     },
     runActionWithContextRequest: async () => {
-      throw new Error("Request timed out after 30000ms");
+      throw new Error("context request should not be used for login_logs_search");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  markOriginReady(service, config, "login_logs");
+  markAllOriginsReady(service, config);
 
   const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
   assert.equal(response.ok, false);
@@ -911,7 +924,7 @@ test("auth freshness guard rewarms stale ready origin before action fetch", asyn
   const config = createLiveConfig();
   fs.mkdirSync(config.profileDir, { recursive: true });
   let prewarmCalls = 0;
-  let contextRequestCalled = false;
+  let pageFetchCalled = false;
   const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [] } });
   const readyState = {
     warmed: true,
@@ -944,8 +957,8 @@ test("auth freshness guard rewarms stale ready origin before action fetch", asyn
       page_ready: true,
       origin_match: true
     }),
-    runActionWithContextRequest: async () => {
-      contextRequestCalled = true;
+    runAction: async () => {
+      pageFetchCalled = true;
       return {
         ok: true,
         status: 200,
@@ -955,6 +968,9 @@ test("auth freshness guard rewarms stale ready origin before action fetch", asyn
         returnedBytes: Buffer.byteLength(bodyText),
         bodyTruncated: false
       };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for login_logs_search");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
@@ -965,11 +981,229 @@ test("auth freshness guard rewarms stale ready origin before action fetch", asyn
 
   const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
   assert.equal(prewarmCalls, 1);
-  assert.equal(contextRequestCalled, true);
+  assert.equal(pageFetchCalled, true);
   assert.equal(response.ok, true);
   assert.equal(response.meta.freshness_rewarm_attempted, true);
   assert.equal(response.meta.freshness_rewarm_status, "ready");
   assert.equal(response.meta.origin_ready_state_stale, false);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search rewarms fresh page session before API fetch", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let prewarmCalls = 0;
+  let pageFetchCalled = false;
+  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [] } });
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      assert.equal(domainKey, "login_logs");
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.login_logs.origin,
+        current_origin: config.domains.login_logs.origin,
+        same_origin_actual: true,
+        error_type: null
+      };
+    },
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      pageFetchCalled = true;
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for login_logs_search");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markAllOriginsReady(service, config);
+  service.warmState.set("login_logs", readyState);
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(prewarmCalls, 1);
+  assert.equal(pageFetchCalled, true);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.freshness_rewarm_attempted, true);
+  assert.equal(response.meta.freshness_rewarm_status, "ready");
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search retries once after stale HTML page shell", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let prewarmCalls = 0;
+  let pageFetchCalls = 0;
+  const html = "<!doctype html><html><body>workbench shell</body></html>";
+  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [{ loginTime: "2026-06-01 17:27:27" }] } });
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      assert.equal(domainKey, "login_logs");
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.login_logs.origin,
+        current_origin: config.domains.login_logs.origin,
+        same_origin_actual: true,
+        error_type: null
+      };
+    },
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      pageFetchCalls += 1;
+      if (pageFetchCalls === 1) {
+        return {
+          ok: true,
+          status: 200,
+          contentType: "text/html;charset=UTF-8",
+          bodyText: html,
+          observedBytes: Buffer.byteLength(html),
+          returnedBytes: Buffer.byteLength(html),
+          bodyTruncated: false
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for login_logs_search");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markAllOriginsReady(service, config);
+  service.warmState.set("login_logs", readyState);
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(prewarmCalls, 2);
+  assert.equal(pageFetchCalls, 2);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "unexpected_html_response");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.raw_body_handling, "visible");
+  assert.equal(response.upstream.body.data.logSearchModels.length, 1);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("login_logs_search reports stale page context when retry still returns HTML", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let prewarmCalls = 0;
+  let pageFetchCalls = 0;
+  const html = "<!doctype html><html><body>workbench shell</body></html>";
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      assert.equal(domainKey, "login_logs");
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.login_logs.origin,
+        current_origin: config.domains.login_logs.origin,
+        same_origin_actual: true,
+        error_type: null
+      };
+    },
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      pageFetchCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        contentType: "text/html;charset=UTF-8",
+        bodyText: html,
+        observedBytes: Buffer.byteLength(html),
+        returnedBytes: Buffer.byteLength(html),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for login_logs_search");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", readyState);
+  service.refreshState = updateOriginWarmState({}, config.domains.login_logs, readyState);
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(prewarmCalls, 2);
+  assert.equal(pageFetchCalls, 2);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "login_logs_page_context_stale");
+  assert.equal(response.safe_reason, "html_response_not_business_json");
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "unexpected_html_response");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.upstream.login_logs_page_context_stale, true);
+  assert.equal(Object.hasOwn(response.upstream, "body"), false);
   assertTransportEnvelope(response, "login_logs_search");
 });
 

@@ -230,12 +230,16 @@ the passthrough size cap. The default body cap is 5MB and can be overridden with
 Field projection and user-facing compact tables belong in the calling main
 agent or downstream parser, not in this service.
 Fixed actions expect API JSON by default and do not treat front-end HTML as
-data. Business action fetches now use the browser-context request API by
-default, so API calls do not depend on the currently loaded page's JavaScript
-context. If the fixed API returns a workbench/app HTML shell, the action returns
-`unexpected_html_response` / `api_contract_mismatch` instead of `no_data`.
-Pages are still used for origin readiness, browser login state, and the
-`weapon_inventory` service-owned graph/risk follow-up chain.
+data. Most business actions use the browser-context request API, so API calls
+do not depend on the currently loaded page's JavaScript context. `login_logs_search`
+is an explicit exception: the user-center workbench page can become idle/stale,
+so the service refreshes the login logs page session before the fixed API call.
+If `login_logs_search` gets an API timeout or a workbench HTML shell, it refreshes
+that page session once and retries the same fixed action. A second HTML shell is
+reported as `login_logs_page_context_stale`; it is not `no_data`.
+Pages are still used for origin readiness, browser login state, the login logs
+page-session guard, and the `weapon_inventory` service-owned graph/risk follow-up
+chain.
 The service still never outputs request headers, response `set-cookie` headers,
 browser cookie jars, Chrome profile contents, localStorage/browser storage, or
 Playwright storage state.

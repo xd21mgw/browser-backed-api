@@ -248,8 +248,14 @@ export class BrowserBackedApiService {
       boundPageOriginAfterRewarm: actionDiagnostics.bound_page_origin || null
     };
 
-    if (originWarmed && shouldLazyRewarm(actionDiagnostics)) {
+    const actionSessionRewarmAlreadyDone = freshnessResult.meta.freshness_rewarm_attempted === true &&
+      freshnessResult.meta.freshness_rewarm_status === "ready";
+    const forceActionRewarm = shouldForceActionRewarm(action) && !actionSessionRewarmAlreadyDone;
+    if (originWarmed && (forceActionRewarm || shouldLazyRewarm(actionDiagnostics))) {
       lazyMeta.lazyRewarmAttempted = true;
+      lazyMeta.lazyRewarmReason = forceActionRewarm
+        ? "action_requires_fresh_page_session"
+        : "page_not_ready_or_origin_mismatch";
       const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
       lazyMeta.lazyRewarmStatus = rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed";
       originWarmed = Boolean(rewarmResult.warmed);
@@ -294,18 +300,90 @@ export class BrowserBackedApiService {
       }
 
       const fetchResult = await this.browserClient.runAction(action, actionRequest);
-      return buildLiveActionResponse(action, input, this.config, fetchResult, {
+      const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
         ...lazyMeta
+      });
+      if (shouldRetryAfterPageSessionResponse(action, response)) {
+        return this.retryAfterPageSessionRefresh({
+          action,
+          input,
+          actionRequest,
+          startedAt,
+          baseMeta: lazyMeta,
+          reason: pageSessionRetryReason(response)
+        });
+      }
+      return response;
+    } catch (error) {
+      const errorType = classifyError(error);
+      if (shouldRetryAfterPageSessionError(action, errorType)) {
+        return this.retryAfterPageSessionRefresh({
+          action,
+          input,
+          actionRequest,
+          startedAt,
+          baseMeta: lazyMeta,
+          reason: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)) || errorType
+        });
+      }
+      return buildPassthroughFailureResponse(action, input, {
+        latencyMs: Date.now() - startedAt,
+        errorType,
+        timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
+        ...lazyMeta
+      });
+    }
+  }
+
+  async retryAfterPageSessionRefresh({ action, input, actionRequest, startedAt, baseMeta, reason }) {
+    const retryMeta = {
+      ...baseMeta,
+      page_context_retry_attempted: true,
+      page_context_retry_reason: reason || "login_logs_page_context_stale",
+      page_context_retry_status: "not_attempted"
+    };
+    const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+    retryMeta.page_context_retry_status = rewarmResult.warmed
+      ? "ready"
+      : rewarmResult.error_type || rewarmResult.status || "failed";
+    Object.assign(retryMeta, this.freshnessMeta(action.domainKey, {
+      freshness_check_attempted: true,
+      freshness_rewarm_attempted: true,
+      freshness_rewarm_status: retryMeta.page_context_retry_status,
+      auth_redirect_detected: Boolean(rewarmResult.auth_redirect_detected),
+      landing_flow_status: rewarmResult.last_landing_flow_status || rewarmResult.landing_flow_status || null
+    }));
+
+    if (!rewarmResult.warmed || retryMeta.origin_ready_state_stale === true) {
+      const errorType = rewarmFailureErrorType(rewarmResult);
+      return buildPassthroughFailureResponse(action, input, {
+        latencyMs: Date.now() - startedAt,
+        errorType,
+        platformError: errorType,
+        authRedirectDetected: Boolean(rewarmResult.auth_redirect_detected),
+        safe_reason: "login_logs_page_context_stale",
+        nextStep: "npm run worker:start",
+        ...retryMeta
+      });
+    }
+
+    try {
+      const retryFetchResult = await this.browserClient.runAction(action, actionRequest);
+      return buildLiveActionResponse(action, input, this.config, retryFetchResult, {
+        latencyMs: Date.now() - startedAt,
+        authRedirectDetected: false,
+        ...retryMeta
       });
     } catch (error) {
       const errorType = classifyError(error);
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
         errorType,
-        timeoutStage: timeoutStageForFetchError(errorType, action.fetchMode === "page_followup" ? "page_followup_timeout" : null),
-        ...lazyMeta
+        timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
+        safe_reason: "login_logs_page_context_stale",
+        ...retryMeta
       });
     }
   }
@@ -1165,6 +1243,32 @@ function shouldLazyRewarm(actionDiagnostics) {
   );
 }
 
+function shouldForceActionRewarm(action) {
+  return action?.name === "login_logs_search";
+}
+
+function shouldRetryAfterPageSessionResponse(action, response) {
+  if (action?.name !== "login_logs_search") {
+    return false;
+  }
+  return [
+    "unexpected_html_response",
+    "auth_state_expired_or_api_session_not_ready",
+    "login_logs_page_context_stale"
+  ].includes(response?.error_type);
+}
+
+function shouldRetryAfterPageSessionError(action, errorType) {
+  return action?.name === "login_logs_search" && /timeout|navigation_timeout/i.test(String(errorType || ""));
+}
+
+function pageSessionRetryReason(response) {
+  if (response?.upstream?.response_body_kind === "html_page") {
+    return "unexpected_html_response";
+  }
+  return response?.error_type || "login_logs_page_context_stale";
+}
+
 function rewarmFailureErrorType(rewarmResult) {
   const errorType = rewarmResult?.error_type || rewarmResult?.last_error_type || rewarmResult?.status;
   if ([
@@ -1204,6 +1308,13 @@ function isContextRequestAction(action, browserClient) {
 
 function timeoutStageForFetchError(errorType, stage) {
   return /timeout|navigation_timeout/i.test(String(errorType || "")) ? stage : null;
+}
+
+function defaultTimeoutStageForAction(action) {
+  if (action?.name === "login_logs_search") {
+    return "api_fetch_timeout";
+  }
+  return action?.fetchMode === "page_followup" ? "page_followup_timeout" : null;
 }
 
 export function publicError(statusCode, code, publicMessage) {

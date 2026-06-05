@@ -110,6 +110,13 @@ Daily user experience should be low-friction:
   `auth_state_expired_or_api_session_not_ready` or
   `safe_reason=origin_ready_state_stale`, do not reinterpret it as no data; ask
   the user to run `npm run worker:start` or complete manual login if requested.
+- `login_logs_search` is the page-session-sensitive exception. The workbench can
+  stop reacting after idle time even when it is on the correct origin. The
+  service refreshes the login logs page session before the fixed API call and
+  retries once after `unexpected_html_response` or `api_fetch_timeout`. If it
+  returns `login_logs_page_context_stale`, report that the login logs source is
+  blocked by stale page context; do not call it `no_data` and do not retry
+  indefinitely.
 - `npm run worker:start` is the only daily recovery entry point. It may open the
   Mac profile flow when refresh/rewarm reports `manual_login_required`,
   `auth_required`, `two_factor_required`, or `captcha_required`; after the user

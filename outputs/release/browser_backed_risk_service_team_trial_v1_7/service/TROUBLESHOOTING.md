@@ -643,6 +643,22 @@ If `/health` reports `pending_manual_login=true`, do not continue live source
 calls. The recovery path is `npm run worker:start`; the service will open the
 profile flow only for user interaction and then refresh/start again.
 
+## login_logs_search Returns HTML Or Times Out
+
+The unified login logs workbench can become idle even while the page is still on
+the correct origin. A stale page may stop reacting to new user searches until it
+is refreshed. For this action, service-side `ready` therefore means both
+origin/auth freshness and a fresh login-logs page session.
+
+Before `login_logs_search`, the service refreshes the login logs workbench page
+session and then calls the fixed API. If the API call returns a workbench HTML
+shell or hits `api_fetch_timeout`, the service refreshes that page session once
+and retries the same fixed action. If it still returns HTML, the action reports
+`error_type=login_logs_page_context_stale` with
+`safe_reason=html_response_not_business_json`. This is not `no_data`; rerun
+`npm run worker:start` or manually refresh/complete the login logs workbench
+only if the action also reports auth/manual-login fields.
+
 For passthrough smoke, record only:
 
 - `http_status`

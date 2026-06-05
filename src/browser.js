@@ -69,7 +69,7 @@ export class BrowserBackedClient {
       navigationError = error;
     }
 
-    if (domain.landingFlow?.sameOriginActivation) {
+    if (domain.landingFlow?.sameOriginActivation || domain.key === "login_logs") {
       await waitForLandingSettle(page, this.config.browser.requestTimeoutMs);
     }
 

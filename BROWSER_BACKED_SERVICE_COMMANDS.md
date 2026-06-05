@@ -190,6 +190,12 @@ Default action group:
 | `weapon_inventory` | `{"response_mode":"passthrough","user_id":"<user_id>"}` |
 | `archives_user_profile` | `{"response_mode":"passthrough","user_id":"<user_id>"}` |
 
+`login_logs_search` refreshes the user-center workbench page session before the
+fixed API call because that page can become idle after sitting unused. If the API
+call returns a workbench HTML shell or times out, the service refreshes that page
+session once and retries. If it still reports `login_logs_page_context_stale`,
+record the source as blocked/stale; do not treat it as `no_data`.
+
 Optional action:
 
 | action | params |

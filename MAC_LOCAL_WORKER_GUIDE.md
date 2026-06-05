@@ -112,6 +112,14 @@ age/TTL. Before a fixed action runs, the service rewarms stale target origins;
 if rewarm needs manual login, the action is blocked instead of returning an
 HTML page shell as business data.
 
+`login_logs_search` has one extra page-session guard. The user-center workbench
+page can become idle after sitting unused: typing a new `user_id` and clicking
+search may do nothing until the page is refreshed. The service refreshes the
+login logs page session before this fixed action. If the fixed API returns a
+workbench HTML shell or times out, it refreshes the page session once and retries
+the same action. A second HTML shell is reported as
+`login_logs_page_context_stale`, not as `no_data`.
+
 ## Expose A Low-Approval Worker URL
 
 After the local service is running, expose a constrained Mac worker URL:

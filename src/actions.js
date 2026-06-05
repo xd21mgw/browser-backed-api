@@ -397,6 +397,7 @@ export const ACTIONS = Object.freeze({
     domainKey: "login_logs",
     description: "Return a bounded online login log shape summary for a typed user and time window.",
     method: "GET",
+    fetchMode: FETCH_MODE_PAGE_FOLLOWUP,
     apiPath: LOGIN_LOGS_SEARCH_PATH,
     expectedContentType: "json",
     inputContract: {
@@ -1836,9 +1837,18 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
 
   if (unexpectedHtml) {
     ok = false;
-    errorType = staleApiSession ? "auth_state_expired_or_api_session_not_ready" : "unexpected_html_response";
-    platformError = staleApiSession ? "api_session_not_ready" : "api_contract_mismatch";
-    safeReason = staleApiSession ? "auth_state_expired_or_api_session_not_ready" : "html_response_not_business_json";
+    const loginLogsRetryStillHtml = action.name === "login_logs_search" &&
+      meta.page_context_retry_attempted === true &&
+      meta.page_context_retry_status === "ready";
+    errorType = loginLogsRetryStillHtml
+      ? "login_logs_page_context_stale"
+      : staleApiSession
+        ? "auth_state_expired_or_api_session_not_ready"
+        : "unexpected_html_response";
+    platformError = loginLogsRetryStillHtml || !staleApiSession ? "api_contract_mismatch" : "api_session_not_ready";
+    safeReason = loginLogsRetryStillHtml || !staleApiSession
+      ? "html_response_not_business_json"
+      : "auth_state_expired_or_api_session_not_ready";
     upstream.body_omitted = true;
     upstream.response_too_large = false;
     upstream.error_type = errorType;
@@ -1849,6 +1859,9 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     upstream.safe_reason = safeReason;
     upstream.auth_state_expired = Boolean(meta.auth_state_expired);
     upstream.origin_ready_state_stale = Boolean(meta.origin_ready_state_stale);
+    if (loginLogsRetryStillHtml) {
+      upstream.login_logs_page_context_stale = true;
+    }
   } else if (bodyPresent && bodyTruncated && jsonArrayCap?.ok) {
     ok = false;
     errorType = "response_too_large";
@@ -1923,6 +1936,9 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      page_context_retry_attempted: Boolean(meta.page_context_retry_attempted),
+      page_context_retry_reason: safeString(meta.page_context_retry_reason) || null,
+      page_context_retry_status: safeString(meta.page_context_retry_status) || null,
       safe_reason: safeReason || null
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: bodyPresent && !upstream.body_omitted })

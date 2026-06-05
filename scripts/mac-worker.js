@@ -510,12 +510,13 @@ async function startOrReuseService({
   child.unref();
   fs.writeFileSync(pidFile, String(child.pid), { mode: 0o600 });
 
-  const health = await waitForHealth(15000);
+  const health = await waitForServiceReady(15000);
   printJson({
-    ok: Boolean(health.ok),
+    ok: Boolean(health.ok && serviceHealthReady(health.body)),
     command: "worker:start",
     service_already_running: Boolean(serviceAlreadyReachable),
     service_started: Boolean(health.ok),
+    service_ready: Boolean(health.ok && serviceHealthReady(health.body)),
     auth_recovery_attempted: Boolean(authRecoveryAttempted),
     open_profile_attempted: Boolean(openProfileAttempted),
     service_base_url: localBaseUrl,
@@ -528,9 +529,11 @@ async function startOrReuseService({
     profile_deleted: false,
     refresh_summary: sanitizeWorkerRefreshSummary(refreshSummary),
     health: health.ok ? summarizeHealth(health.body) : null,
-    next_step: health.ok ? "Use worker:status or call service actions." : "Check worker:doctor and log_file."
+    next_step: health.ok && serviceHealthReady(health.body)
+      ? "Use worker:status or call service actions."
+      : "Run npm run worker:start after completing any pending manual login."
   });
-  if (!health.ok) {
+  if (!health.ok || !serviceHealthReady(health.body)) {
     process.exitCode = 1;
   }
 }
@@ -867,6 +870,22 @@ async function waitForHealth(timeoutMs) {
     await sleep(500);
   }
   return { ok: false, body: null };
+}
+
+async function waitForServiceReady(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastHealth = { ok: false, body: null };
+  while (Date.now() < deadline) {
+    const health = await fetchHealth();
+    if (health.ok) {
+      lastHealth = health;
+      if (serviceHealthReady(health.body)) {
+        return health;
+      }
+    }
+    await sleep(500);
+  }
+  return lastHealth;
 }
 
 async function waitForProxyHealth(timeoutMs) {
