@@ -240,6 +240,10 @@ npm run worker:start
 `worker:start` opens the visible profile flow if manual login is required, then
 continues refresh/start after the user finishes.
 
+If an existing browser-backed service is holding the dedicated profile,
+`worker:start` stops that service process before opening the profile for manual
+SSO/2FA. It does not kill daily Chrome and does not delete the profile.
+
 If you intentionally use a custom profile path:
 
 ```sh

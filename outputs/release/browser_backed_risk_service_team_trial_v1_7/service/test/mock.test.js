@@ -1519,6 +1519,20 @@ test("worker:start plan opens profile for manual auth then continues refresh/sta
   }), ["refresh_once", "open_profile", "refresh_once_after_open_profile", "start_service"]);
 });
 
+test("worker:start plan releases running service profile before manual auth", () => {
+  const refreshSummary = {
+    ok: false,
+    auth_state: "auth_required",
+    last_error_type: "two_factor_required"
+  };
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: true,
+    authState: "auth_required",
+    refreshSummary,
+    postOpenRefreshSummary: { ok: true, auth_state: "ready" }
+  }), ["refresh_once", "stop_service_for_manual_login", "open_profile", "refresh_once_after_open_profile", "start_service"]);
+});
+
 test("worker:start plan blocks on unsafe profile lock before refresh", () => {
   assert.deepEqual(planWorkerStart({
     serviceReachable: false,

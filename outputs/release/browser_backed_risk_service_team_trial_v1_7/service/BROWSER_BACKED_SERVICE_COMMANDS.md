@@ -362,6 +362,9 @@ These commands reduce repeated Mac node approvals by grouping common operations.
   `two_factor_required`, or `captcha_required`, opens the visible profile flow,
   waits for the user to finish, then runs refresh again and starts/reuses the
   service.
+- If the already-running browser-backed service is holding the dedicated
+  profile, stops that service process first so the visible profile flow can
+  open. This is not a daily Chrome kill and does not delete the profile.
 - If an action returns one of those manual auth states, the main Agent should
   stop live source calls and run this command instead of trying profile copy,
   cookie injection, or ad hoc auth repair.

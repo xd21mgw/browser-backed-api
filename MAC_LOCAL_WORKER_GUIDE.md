@@ -90,6 +90,9 @@ npm run worker:start
 - If service is not running, `worker:start` refreshes once and then starts it.
 - If manual login is required, `worker:start` opens the profile flow and
   continues after the user completes it.
+- If the already-running browser-backed service is holding the dedicated
+  profile, `worker:start` stops that service process first so the profile can be
+  opened for manual SSO/2FA. It does not kill daily Chrome.
 - Main Agent calls `service_base_url/actions/<action_name>`.
 - The service reuses the existing Mac profile.
 - The service returns a passthrough transport envelope.

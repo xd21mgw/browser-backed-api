@@ -133,9 +133,12 @@ export function planWorkerStart({ serviceReachable, authState, refreshSummary, p
   }
   const steps = autoClearStaleLock ? ["clear_stale_profile_lock", "refresh_once"] : ["refresh_once"];
   if (refreshSummary && needsManualLogin(refreshSummary)) {
+    if (serviceReachable) {
+      steps.push("stop_service_for_manual_login");
+    }
     steps.push("open_profile", "refresh_once_after_open_profile");
     if (postOpenRefreshSummary?.ok) {
-      steps.push(serviceReachable ? "return_existing_service" : "start_service");
+      steps.push("start_service");
     } else {
       steps.push("manual_login_pending");
     }
@@ -384,6 +387,29 @@ async function startWorker() {
 
   const firstRefresh = runRefreshOnceCommand();
   if (needsManualLogin(firstRefresh.summary)) {
+    let manualLoginServiceRelease = null;
+    if (existing.ok) {
+      manualLoginServiceRelease = await stopManagedServiceForManualLogin();
+      if (!manualLoginServiceRelease.ok) {
+        printJson({
+          ok: false,
+          command: "worker:start",
+          service_base_url: localBaseUrl,
+          auth_recovery_attempted: true,
+          open_profile_attempted: false,
+          pending_manual_login: true,
+          blocking_issue: "service_profile_locked_for_manual_login",
+          manual_login_service_release: manualLoginServiceRelease,
+          profile_lock_recovery: profileLockRecovery,
+          stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
+          refresh_summary: sanitizeWorkerRefreshSummary(firstRefresh.summary),
+          next_step: "Run npm run worker:stop, then npm run worker:start. The worker will not kill Chrome or delete the profile.",
+          credential_material_output: false
+        });
+        process.exitCode = 1;
+        return;
+      }
+    }
     const openProfile = runOpenProfileCommand();
     const secondRefresh = openProfile.ok ? runRefreshOnceCommand() : { ok: false, summary: null };
     if (!secondRefresh.ok || !secondRefresh.summary?.ok) {
@@ -396,6 +422,7 @@ async function startWorker() {
         open_profile_ok: openProfile.ok,
         pending_manual_login: true,
         profile_lock_recovery: profileLockRecovery,
+        manual_login_service_release: manualLoginServiceRelease,
         stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
         refresh_summary: sanitizeWorkerRefreshSummary(secondRefresh.summary || firstRefresh.summary),
         next_step: "Complete manual login in open:profile, then run npm run worker:start again.",
@@ -405,11 +432,12 @@ async function startWorker() {
       return;
     }
     await startOrReuseService({
-      serviceAlreadyReachable: existing.ok,
+      serviceAlreadyReachable: existing.ok && !manualLoginServiceRelease?.ok,
       authRecoveryAttempted: true,
       openProfileAttempted: true,
       refreshSummary: secondRefresh.summary,
-      profileLockRecovery
+      profileLockRecovery,
+      manualLoginServiceRelease
     });
     return;
   }
@@ -441,7 +469,14 @@ async function startWorker() {
   });
 }
 
-async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttempted, openProfileAttempted, refreshSummary, profileLockRecovery = null }) {
+async function startOrReuseService({
+  serviceAlreadyReachable,
+  authRecoveryAttempted,
+  openProfileAttempted,
+  refreshSummary,
+  profileLockRecovery = null,
+  manualLoginServiceRelease = null
+}) {
   const postRefreshHealth = await fetchHealth();
   if (postRefreshHealth.ok && serviceHealthReady(postRefreshHealth.body)) {
     printJson({
@@ -452,6 +487,7 @@ async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttemp
       open_profile_attempted: Boolean(openProfileAttempted),
       service_base_url: localBaseUrl,
       profile_lock_recovery: profileLockRecovery,
+      manual_login_service_release: manualLoginServiceRelease,
       stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
       auto_kill_chrome: false,
       profile_deleted: false,
@@ -486,6 +522,7 @@ async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttemp
     pid_file: pidFile,
     log_file: logFile,
     profile_lock_recovery: profileLockRecovery,
+    manual_login_service_release: manualLoginServiceRelease,
     stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
     auto_kill_chrome: false,
     profile_deleted: false,
@@ -496,6 +533,48 @@ async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttemp
   if (!health.ok) {
     process.exitCode = 1;
   }
+}
+
+async function stopManagedServiceForManualLogin() {
+  const pid = readPid();
+  if (!pid) {
+    return {
+      ok: false,
+      reason: "missing_worker_pid_file",
+      signal_sent: false,
+      service_still_reachable: Boolean((await fetchHealth()).ok),
+      auto_kill_chrome: false,
+      profile_deleted: false,
+      credential_material_output: false
+    };
+  }
+
+  let signalSent = false;
+  try {
+    process.kill(pid, "SIGTERM");
+    signalSent = true;
+  } catch {}
+
+  const deadline = Date.now() + 8000;
+  let health = await fetchHealth();
+  while (health.ok && Date.now() < deadline) {
+    await sleep(500);
+    health = await fetchHealth();
+  }
+  if (!health.ok) {
+    removePidFile();
+  }
+
+  return {
+    ok: !health.ok,
+    reason: health.ok ? "service_still_reachable" : "service_stopped_for_manual_login",
+    pid,
+    signal_sent: signalSent,
+    service_still_reachable: Boolean(health.ok),
+    auto_kill_chrome: false,
+    profile_deleted: false,
+    credential_material_output: false
+  };
 }
 
 async function printStatus() {

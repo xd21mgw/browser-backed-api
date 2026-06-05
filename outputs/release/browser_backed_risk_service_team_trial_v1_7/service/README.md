@@ -508,6 +508,11 @@ default. Override with `REFRESH_INTERVAL_MINUTES` or
 records `pending_manual_login` and asks the user to run `npm run worker:start`;
 it does not bypass auth or repeatedly open browsers.
 
+When manual login is required while the worker service is already running,
+`worker:start` may stop the browser-backed service process first so the
+dedicated profile can be opened for user interaction. It does not kill daily
+Chrome, delete the profile, or touch credential material.
+
 Mac worker helper commands:
 
 ```sh

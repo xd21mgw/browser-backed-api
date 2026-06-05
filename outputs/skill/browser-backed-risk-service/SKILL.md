@@ -114,6 +114,9 @@ Daily user experience should be low-friction:
   Mac profile flow when refresh/rewarm reports `manual_login_required`,
   `auth_required`, `two_factor_required`, or `captcha_required`; after the user
   finishes interaction it refreshes again and starts/reuses the service.
+- If the existing browser-backed service is holding the dedicated profile,
+  `worker:start` may stop that service process before opening the profile flow.
+  This is not a daily Chrome kill and does not delete profile data.
 
 Do not copy the Mac profile to Linux as a standard path. Joint testing showed
 that Track may become ready, but RCP, Weapon, Login Logs, and Archives can
