@@ -378,6 +378,10 @@ const ACTION_INPUTS = Object.freeze({
   }
 });
 
+const DENNIS_BATCH_CHUNKS = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "test/fixtures/dennis_batch_chunks.json"), "utf8")
+);
+
 const OLD_BUSINESS_FIELDS = Object.freeze([
   "normalized_observation",
   "source_card",
@@ -2105,53 +2109,32 @@ test("batch dry run accepts large-response and auth-sensitive serial groups", as
   assert.deepEqual(response.classifications.planned.sort(), ["analysis", "features"].sort());
 });
 
-test("batch accepts Dennis-shaped chunk payload and returns source-level rows", async () => {
-  const response = await createService().executeBatch({
-    request_id: "sample_expand_validate:round_1:chunk_1",
-    response_mode: "controlled_batch_passthrough",
-    default_timeout_ms: 30_000,
-    execution_groups: [
-      {
-        group_id: "independent_parallel",
-        execution: "independent_parallel",
-        sources: [
-          {
-            source_id: "round_1:user_5521564836:archives_user_profile",
-            action: "archives_user_profile",
-            params: { user_id: "5521564836", mode: "archives_user_home_profile" },
-            timeout_ms: 30_000
-          },
-          {
-            source_id: "round_1:user_5523394618:weapon_inventory",
-            action: "weapon_inventory",
-            params: { user_id: "5523394618" },
-            timeout_ms: 30_000
-          },
-          {
-            source_id: "round_1:user_5523620454:archives_photo_search",
-            action: "archives_photo_search",
-            params: {
-              user_id: "5523620454",
-              begin: 1780000000000,
-              end: 1780086400000,
-              page: 1,
-              count: 20
-            },
-            timeout_ms: 30_000
-          }
-        ]
-      }
-    ]
-  });
+test("batch accepts Dennis real-shaped chunk payloads and returns source-level rows", async () => {
+  const service = createService();
+  const expectedChunkCounts = [9, 2, 1, 3];
+  const responses = [];
 
-  assert.equal(response.ok, true);
-  assert.equal(response.scheduler.source_count, 3);
-  assert.equal(response.transport_status_matrix["round_1:user_5521564836:archives_user_profile"].category, "completed");
-  assert.equal(response.transport_status_matrix["round_1:user_5523394618:weapon_inventory"].category, "completed");
-  assert.equal(response.transport_status_matrix["round_1:user_5523620454:archives_photo_search"].category, "completed");
-  assert.equal(response.completed_count, 3);
-  assert.equal(response.failed_count, 0);
-  assertNoCredentialMaterial(response);
+  for (const [index, payload] of DENNIS_BATCH_CHUNKS.entries()) {
+    const response = await service.executeBatch(payload);
+    responses.push(response);
+
+    assert.equal(response.ok, true);
+    assert.equal(response.request_id, payload.request_id);
+    assert.equal(response.scheduler.source_count, expectedChunkCounts[index]);
+    assert.equal(response.batch_payload_shape.source_count, expectedChunkCounts[index]);
+    assert.equal(response.batch_payload_shape.group_count, payload.execution_groups.length);
+    assert.equal(response.batch_payload_shape.groups[0].sources[0].source_id, payload.execution_groups[0].sources[0].source_id);
+    assert.equal(response.batch_payload_shape.groups[0].sources[0].action, payload.execution_groups[0].sources[0].action);
+    assert.equal(Object.keys(response.source_results).length, expectedChunkCounts[index]);
+    assert.equal(Object.keys(response.transport_status_matrix).length, expectedChunkCounts[index]);
+    assert.equal(response.completed_count, expectedChunkCounts[index]);
+    assert.equal(response.failed_count, 0);
+    assertNoCredentialMaterial(response.batch_payload_shape);
+    assertNoCredentialMaterial(response);
+  }
+
+  assert.equal(responses.length, 4);
+  assert.equal(responses.reduce((count, response) => count + response.scheduler.source_count, 0), 15);
 });
 
 test("single source failure does not block completed batch sources", async () => {
@@ -2284,6 +2267,18 @@ test("batch rejects forbidden inputs and legacy response mode per source", async
       ]
     }),
     (error) => error.code === "forbidden_action_input"
+  );
+  await assert.rejects(
+    () => service.executeBatch({
+      sources: [
+        {
+          source_id: "unknown",
+          action: "not_allowlisted",
+          params: {}
+        }
+      ]
+    }),
+    (error) => error.code === "unknown_action"
   );
 
   const response = await service.executeBatch({

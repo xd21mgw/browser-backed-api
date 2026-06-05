@@ -451,6 +451,7 @@ export class BrowserBackedApiService {
         batch_deadline_ms: plan.batch_deadline_ms,
         upstream_business_body_output: "bounded"
       },
+      batch_payload_shape: summarizeBatchPlanShape(plan),
       execution_groups: groupResults,
       source_results: sourceResults,
       transport_status_matrix: transportStatusMatrix,
@@ -871,6 +872,24 @@ function normalizeBatchSource(sourceInput, { groupId, sourceIndex, defaultTimeou
     params,
     timeout_ms: timeoutMs,
     validation_error: validationError
+  };
+}
+
+function summarizeBatchPlanShape(plan) {
+  return {
+    request_id: plan.request_id,
+    group_count: plan.groups.length,
+    source_count: plan.source_count,
+    groups: plan.groups.map((group) => ({
+      group_id: group.group_id,
+      execution: group.execution,
+      dependency_group_ids: group.depends_on,
+      source_count: group.sources.length,
+      sources: group.sources.map((source) => ({
+        source_id: source.source_id,
+        action: source.action
+      }))
+    }))
   };
 }
 
