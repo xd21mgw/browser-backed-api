@@ -1057,6 +1057,7 @@ export const ACTIONS = Object.freeze({
     description: "Return a compact RCP event detail shape summary for a typed event id and exact query time.",
     method: "GET",
     apiPath: RCP_EVENT_DETAIL_PATH,
+    requestTimeoutMs: 30_000,
     registryStatus: "service_registered",
     inputContract: {
       eventType: "required safe event type string",
@@ -1746,6 +1747,7 @@ export function buildActionBody(action, input) {
       path: normalizeRelativePath(request.path, `${action.name}.requestPath`),
       method: request.method || action.method,
       body: request.body || {},
+      requestTimeoutMs: request.requestTimeoutMs || action.requestTimeoutMs || null,
       displayPath: request.displayPath
         ? normalizeRelativePath(request.displayPath, `${action.name}.displayPath`)
         : undefined
@@ -1754,7 +1756,8 @@ export function buildActionBody(action, input) {
   return {
     path: action.apiPath,
     method: action.method,
-    body: safeInput
+    body: safeInput,
+    requestTimeoutMs: action.requestTimeoutMs || null
   };
 }
 

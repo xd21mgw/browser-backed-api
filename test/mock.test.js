@@ -710,6 +710,16 @@ test("fixed request builders keep typed params on fixed paths", () => {
   assert.equal(rcpTreeDecisionRequest.method, "GET");
   assert.equal(rcpTreeDecisionRequest.path.startsWith("/v2/rest/event/rcpEventTreeOrDecision?"), true);
 
+  const rcpDetailRequest = buildActionBody(ACTIONS.rcp_event_detail, ACTION_INPUTS.rcp_event_detail);
+  assert.equal(rcpDetailRequest.method, "GET");
+  assert.equal(rcpDetailRequest.path.startsWith("/v2/rest/event/rcpEventDetail?"), true);
+  assert.equal(rcpDetailRequest.requestTimeoutMs, 30000);
+
+  const rcpFeatureRequest = buildActionBody(ACTIONS.rcp_event_feature_list, ACTION_INPUTS.rcp_event_feature_list);
+  assert.equal(rcpFeatureRequest.method, "GET");
+  assert.equal(rcpFeatureRequest.path.startsWith("/v2/rest/event/rcpEventFeatureList?"), true);
+  assert.equal(rcpFeatureRequest.requestTimeoutMs, null);
+
   const trackProductRequest = buildActionBody(ACTIONS.track_analysis_product_list, ACTION_INPUTS.track_analysis_product_list);
   assert.equal(trackProductRequest.method, "POST");
   assert.equal(trackProductRequest.path.startsWith("/dp/track-analysis/product/list/v2?"), true);
@@ -792,6 +802,44 @@ test("context request actions do not use page-context fetch", async () => {
     assertTransportEnvelope(response, actionName);
   }
   assert.deepEqual(calledActions, ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request"));
+});
+
+test("rcp_event_detail forwards action-specific request timeout to context request", async () => {
+  const config = createLiveConfig();
+  let seenTimeoutMs = null;
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "rcp_event_detail",
+      expected_origin: config.domains.rcp.origin,
+      bound_page_origin: config.domains.rcp.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for rcp_event_detail");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      assert.equal(action.name, "rcp_event_detail");
+      seenTimeoutMs = actionRequest.requestTimeoutMs;
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "rcp");
+
+  const response = await service.executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail);
+  assert.equal(seenTimeoutMs, 30000);
+  assert.equal(response.ok, true);
+  assertTransportEnvelope(response, "rcp_event_detail");
 });
 
 test("weapon_inventory uses page follow-up fetch and does not call context request", async () => {
