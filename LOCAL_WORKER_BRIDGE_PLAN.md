@@ -181,6 +181,8 @@ A bridge/tunnel may forward only:
 
 - `GET /health`
 - `GET /actions`
+- `POST /actions/batch`
+- `POST /actions/multi_source_plan`
 - `POST /actions/<allowlisted_action>`
 
 It must not provide:

@@ -20,7 +20,8 @@ Agents should call the service through a configured `service_base_url`.
 
 The bridge/tunnel is a deployment-layer requirement, not part of this service
 release. The verified low-approval Mac proxy forwards only `/health`,
-`/actions`, and `/actions/<allowlisted_action>` to the teammate's Mac local
+`/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and
+`/actions/<allowlisted_action>` to the teammate's Mac local
 worker; it must not expose arbitrary URL fetch, Chrome profile files, cookies,
 tokens, sessions, or request headers.
 
@@ -343,7 +344,7 @@ read or output authentication material.
 `worker:expose` is the verified low-approval runtime helper for Remote Main
 Agent + Mac Local Worker Mode. It starts or reuses a constrained proxy on the
 Mac and prints a `service_base_url` such as `http://<mac_ip>:9787`. The proxy
-forwards only `/health`, `/actions`, and `/actions/<allowlisted_action>` to the
+forwards only `/health`, `/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and `/actions/<allowlisted_action>` to the
 local service. It does not expose arbitrary URL fetch, Chrome profile files,
 cookies, tokens, sessions, authorization values, request headers, localStorage,
 or Playwright storageState.

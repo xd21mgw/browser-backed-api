@@ -145,6 +145,8 @@ The proxy forwards only:
 
 - `GET /health`
 - `GET /actions`
+- `POST /actions/batch`
+- `POST /actions/multi_source_plan`
 - `POST /actions/<allowlisted_action>`
 
 Daily action calls should use this HTTP path instead of asking Mac node to run

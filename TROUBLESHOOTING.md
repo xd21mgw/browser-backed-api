@@ -65,8 +65,8 @@ Fix:
   to a controlled Mac worker/bridge/tunnel URL.
 - If the Mac service is already ready, run `npm run worker:expose` on the Mac
   and use the printed `service_base_url`.
-- The bridge/tunnel should forward only `/health`, `/actions`, and
-  `/actions/<allowlisted_action>`.
+- The bridge/tunnel should forward only `/health`, `/actions`, `POST /actions/batch`,
+  `POST /actions/multi_source_plan`, and `/actions/<allowlisted_action>`.
 - Do not expose the service directly to the public internet.
 - Do not forward or upload profile files, cookies, tokens, sessions, request
   headers, localStorage, or Playwright storageState.

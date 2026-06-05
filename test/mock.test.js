@@ -1960,9 +1960,11 @@ test("refresh daemon interval and manual-login event remain bounded", () => {
 test("worker:expose proxy only allows service health, action list, and allowlisted actions", () => {
   assert.equal(classifyProxyRequest("GET", "/health").allowed, true);
   assert.equal(classifyProxyRequest("GET", "/actions").allowed, true);
+  assert.equal(classifyProxyRequest("POST", "/actions/batch").allowed, true);
+  assert.equal(classifyProxyRequest("POST", "/actions/multi_source_plan").allowed, true);
+  assert.equal(classifyProxyRequest("GET", "/actions/batch").reason, "method_not_allowed");
   assert.equal(classifyProxyRequest("POST", "/actions/login_logs_search").allowed, true);
   assert.equal(classifyProxyRequest("POST", "/actions/not_real").reason, "action_not_allowlisted");
-  assert.equal(classifyProxyRequest("POST", "/actions/batch").reason, "action_not_allowlisted");
   assert.equal(classifyProxyRequest("GET", "/actions/login_logs_search").reason, "method_not_allowed");
   assert.equal(classifyProxyRequest("POST", "/proxy?url=https://example.invalid").reason, "path_not_allowed");
 });
@@ -1979,7 +1981,13 @@ test("worker:expose summary gives low-approval service_base_url without credenti
   assert.equal(summary.service_base_url, "http://10.0.0.2:9787");
   assert.equal(summary.action_count, ACTION_ALLOWLIST.length);
   assert.equal(summary.auth_state, "ready");
-  assert.deepEqual(summary.allowed_paths, ["/health", "/actions", "/actions/<allowlisted_action>"]);
+  assert.deepEqual(summary.allowed_paths, [
+    "/health",
+    "/actions",
+    "/actions/batch",
+    "/actions/multi_source_plan",
+    "/actions/<allowlisted_action>"
+  ]);
   assertNoCredentialMaterial(summary);
 });
 
@@ -2006,6 +2014,9 @@ test("batch executes independent parallel sources and returns transport matrix",
   assert.equal(response.ok, true);
   assert.equal(response.response_mode, "controlled_batch_passthrough");
   assert.equal(response.batch_status, "completed");
+  assert.equal(response.completed_count, 3);
+  assert.equal(response.failed_count, 0);
+  assert.equal(response.partial_count, 0);
   assert.deepEqual(response.classifications.completed.sort(), ["archives_profile", "login_logs", "track_ready"].sort());
   assert.ok(response.transport_status_matrix.login_logs);
   assert.equal(response.transport_status_matrix.login_logs.body_present, true);
@@ -2092,6 +2103,55 @@ test("batch dry run accepts large-response and auth-sensitive serial groups", as
   });
   assert.equal(response.batch_status, "planned");
   assert.deepEqual(response.classifications.planned.sort(), ["analysis", "features"].sort());
+});
+
+test("batch accepts Dennis-shaped chunk payload and returns source-level rows", async () => {
+  const response = await createService().executeBatch({
+    request_id: "sample_expand_validate:round_1:chunk_1",
+    response_mode: "controlled_batch_passthrough",
+    default_timeout_ms: 30_000,
+    execution_groups: [
+      {
+        group_id: "independent_parallel",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "round_1:user_5521564836:archives_user_profile",
+            action: "archives_user_profile",
+            params: { user_id: "5521564836", mode: "archives_user_home_profile" },
+            timeout_ms: 30_000
+          },
+          {
+            source_id: "round_1:user_5523394618:weapon_inventory",
+            action: "weapon_inventory",
+            params: { user_id: "5523394618" },
+            timeout_ms: 30_000
+          },
+          {
+            source_id: "round_1:user_5523620454:archives_photo_search",
+            action: "archives_photo_search",
+            params: {
+              user_id: "5523620454",
+              begin: 1780000000000,
+              end: 1780086400000,
+              page: 1,
+              count: 20
+            },
+            timeout_ms: 30_000
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.scheduler.source_count, 3);
+  assert.equal(response.transport_status_matrix["round_1:user_5521564836:archives_user_profile"].category, "completed");
+  assert.equal(response.transport_status_matrix["round_1:user_5523394618:weapon_inventory"].category, "completed");
+  assert.equal(response.transport_status_matrix["round_1:user_5523620454:archives_photo_search"].category, "completed");
+  assert.equal(response.completed_count, 3);
+  assert.equal(response.failed_count, 0);
+  assertNoCredentialMaterial(response);
 });
 
 test("single source failure does not block completed batch sources", async () => {
@@ -2184,6 +2244,31 @@ test("batch source timeout is isolated from other sources", async () => {
   assert.equal(response.batch_status, "partial");
   assert.equal(response.transport_status_matrix.slow_login.timed_out, true);
   assert.equal(response.transport_status_matrix.profile.category, "completed");
+});
+
+test("batch deadline returns source-level timeout rows before caller timeout", async () => {
+  const service = createService();
+  const response = await service.executeBatch({
+    batch_timeout_ms: 1000,
+    execution_groups: [
+      {
+        group_id: "auth_sensitive_serial",
+        execution: "auth_sensitive_serial",
+        sources: [
+          { source_id: "profile", action: "archives_user_profile", params: ACTION_INPUTS.archives_user_profile },
+          { source_id: "analysis", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "failed");
+  assert.equal(response.timeout_count, 2);
+  assert.equal(response.failed_count, 2);
+  assert.equal(response.transport_status_matrix.profile.timeout_stage, "batch_deadline");
+  assert.equal(response.transport_status_matrix.analysis.timeout_stage, "batch_deadline");
+  assert.equal(response.missing_or_failed_sources.length, 2);
+  assertNoCredentialMaterial(response);
 });
 
 test("batch rejects forbidden inputs and legacy response mode per source", async () => {

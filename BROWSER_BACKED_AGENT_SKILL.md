@@ -139,7 +139,7 @@ future focus area; until then, prefer Mac Local Worker for remote main Agents.
 
 Bridge/tunnel safety boundary:
 
-- Forward only `/health`, `/actions`, and `/actions/<allowlisted_action>`
+- Forward only `/health`, `/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and `/actions/<allowlisted_action>`
   unless a separately reviewed deployment explicitly enables more service
   routes.
 - Do not expose arbitrary URL fetch or arbitrary platform paths.

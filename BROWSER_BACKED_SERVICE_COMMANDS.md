@@ -414,6 +414,8 @@ main-agent runners must stop and must not continue live source calls against
 - Allows only:
   - `GET /health`
   - `GET /actions`
+  - `POST /actions/batch`
+  - `POST /actions/multi_source_plan`
   - `POST /actions/<allowlisted_action>`
 - Does not expose arbitrary URL fetch, Chrome profile files, cookies, tokens,
   sessions, authorization values, request headers, localStorage, or Playwright

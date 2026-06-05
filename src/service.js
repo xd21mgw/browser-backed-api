@@ -395,6 +395,22 @@ export class BrowserBackedApiService {
     const groupResults = [];
 
     for (const group of plan.groups) {
+      if (batchDeadlineExceeded(plan)) {
+        const timedOutSources = group.sources.map((source) => buildBatchDeadlineTimeoutResult(source, plan));
+        for (const sourceResult of timedOutSources) {
+          sourceResults[sourceResult.source_id] = sourceResult;
+        }
+        groupResults.push({
+          group_id: group.group_id,
+          execution: group.execution,
+          dependency_group_ids: group.depends_on,
+          source_ids: group.sources.map((source) => source.source_id),
+          latency_ms: 0,
+          completed_at: new Date().toISOString(),
+          skipped_by_batch_deadline: true
+        });
+        continue;
+      }
       const groupStartedAt = Date.now();
       const sources = isParallelExecution(group.execution)
         ? await Promise.all(group.sources.map((source) => this.executeBatchSource(source, plan)))
@@ -432,11 +448,24 @@ export class BrowserBackedApiService {
         source_count: plan.source_count,
         default_source_timeout_ms: plan.default_timeout_ms,
         max_source_timeout_ms: MAX_BATCH_SOURCE_TIMEOUT_MS,
+        batch_deadline_ms: plan.batch_deadline_ms,
         upstream_business_body_output: "bounded"
       },
       execution_groups: groupResults,
       source_results: sourceResults,
       transport_status_matrix: transportStatusMatrix,
+      completed_count: classifications.completed.length,
+      no_data_count: classifications.no_data.length,
+      partial_count: classifications.partial.length,
+      auth_failed_count: classifications.auth_failed.length,
+      blocked_count: classifications.blocked.length,
+      timeout_count: classifications.timeout.length,
+      parse_error_count: classifications.parse_error.length,
+      planned_count: classifications.planned.length,
+      failed_count: classifications.auth_failed.length +
+        classifications.blocked.length +
+        classifications.timeout.length +
+        classifications.parse_error.length,
       classifications,
       missing_or_failed_sources: missingOrFailedSources,
       safety: batchSafety()
@@ -445,6 +474,10 @@ export class BrowserBackedApiService {
 
   async executeBatchSource(source, plan) {
     const startedAt = Date.now();
+    const remainingMs = remainingBatchTimeMs(plan);
+    if (remainingMs <= BATCH_DEADLINE_MARGIN_MS) {
+      return buildBatchDeadlineTimeoutResult(source, plan);
+    }
     if (source.validation_error) {
       return buildBatchSourceResult({
         source,
@@ -471,9 +504,13 @@ export class BrowserBackedApiService {
     }
 
     try {
+      const effectiveTimeoutMs = Math.max(
+        MIN_BATCH_SOURCE_TIMEOUT_MS,
+        Math.min(source.timeout_ms, remainingMs - BATCH_DEADLINE_MARGIN_MS)
+      );
       const response = await withSourceTimeout(
         () => this.executeAction(source.action, source.params),
-        source.timeout_ms
+        effectiveTimeoutMs
       );
       if (response?.timed_out) {
         return buildBatchSourceResult({
@@ -485,7 +522,7 @@ export class BrowserBackedApiService {
           latencyMs: Date.now() - startedAt,
           response: null,
           timedOut: true,
-          timeoutStage: "source_timeout"
+          timeoutStage: effectiveTimeoutMs < source.timeout_ms ? "batch_deadline" : "source_timeout"
         });
       }
 
@@ -686,6 +723,10 @@ const BATCH_EXECUTION_MODES = Object.freeze([
 ]);
 const DEFAULT_BATCH_SOURCE_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SOURCE_TIMEOUT_MS = 120_000;
+const MIN_BATCH_SOURCE_TIMEOUT_MS = 100;
+const BATCH_DEADLINE_MARGIN_MS = 1_000;
+const DEFAULT_BATCH_DEADLINE_OVERHEAD_MS = 10_000;
+const MAX_BATCH_DEADLINE_MS = 115_000;
 const MAX_BATCH_GROUPS = 12;
 const MAX_BATCH_SOURCES = 30;
 const SAFE_BATCH_ID_PATTERN = /^[A-Za-z0-9_:-]{1,96}$/;
@@ -713,6 +754,7 @@ function buildBatchPlan(input) {
   const groupIds = new Set();
   const sourceIds = new Set();
   let sourceCount = 0;
+  let maxSourceTimeoutMs = defaultTimeoutMs;
 
   const groups = groupsInput.map((groupInput, groupIndex) => {
     if (!groupInput || typeof groupInput !== "object" || Array.isArray(groupInput)) {
@@ -744,6 +786,7 @@ function buildBatchPlan(input) {
         throw publicError(400, "invalid_batch_request", `Duplicate source_id: ${source.source_id}`);
       }
       sourceIds.add(source.source_id);
+      maxSourceTimeoutMs = Math.max(maxSourceTimeoutMs, source.timeout_ms);
       return source;
     });
 
@@ -780,7 +823,9 @@ function buildBatchPlan(input) {
     request_id: requestId,
     dry_run: input.dry_run === true,
     started_at: new Date().toISOString(),
+    deadline_started_at_ms: Date.now(),
     default_timeout_ms: defaultTimeoutMs,
+    batch_deadline_ms: boundedBatchDeadline(input.batch_timeout_ms, maxSourceTimeoutMs),
     source_count: sourceCount,
     groups
   };
@@ -858,6 +903,43 @@ function boundedTimeout(value, fallback) {
   return Math.min(Math.max(Math.trunc(number), 100), MAX_BATCH_SOURCE_TIMEOUT_MS);
 }
 
+function boundedBatchDeadline(value, maxSourceTimeoutMs) {
+  const fallback = Math.min(
+    MAX_BATCH_DEADLINE_MS,
+    Math.max(maxSourceTimeoutMs + DEFAULT_BATCH_DEADLINE_OVERHEAD_MS, 20_000)
+  );
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw publicError(400, "invalid_batch_request", "batch_timeout_ms must be a positive number");
+  }
+  return Math.min(Math.max(Math.trunc(number), 1_000), MAX_BATCH_DEADLINE_MS);
+}
+
+function remainingBatchTimeMs(plan) {
+  return Math.max(0, plan.deadline_started_at_ms + plan.batch_deadline_ms - Date.now());
+}
+
+function batchDeadlineExceeded(plan) {
+  return remainingBatchTimeMs(plan) <= BATCH_DEADLINE_MARGIN_MS;
+}
+
+function buildBatchDeadlineTimeoutResult(source, plan) {
+  return buildBatchSourceResult({
+    source,
+    plan,
+    category: "timeout",
+    sourceStatus: "timeout",
+    errorType: "batch_deadline_exceeded",
+    latencyMs: 0,
+    response: null,
+    timedOut: true,
+    timeoutStage: "batch_deadline"
+  });
+}
+
 function isParallelExecution(execution) {
   return execution === "independent_parallel";
 }
@@ -901,7 +983,7 @@ function buildBatchSourceResult({
   exceptionMessage = null
 }) {
   const upstream = summarizeBatchUpstream(response);
-  const sourceTimeoutStage = timedOut ? "source_timeout" : response?.timeout_stage || upstream.timeout_stage || timeoutStage || null;
+  const sourceTimeoutStage = timedOut ? (timeoutStage || "source_timeout") : response?.timeout_stage || upstream.timeout_stage || timeoutStage || null;
   return {
     source_id: source.source_id,
     action: source.action,
