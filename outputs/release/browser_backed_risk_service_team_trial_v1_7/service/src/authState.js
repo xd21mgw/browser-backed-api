@@ -19,8 +19,10 @@ const SAFE_ERROR_TYPES = Object.freeze(new Set([
   "origin_mismatch",
   "origin_refresh_failed",
   "page_load_error",
+  "password_required",
   "permission_blocked",
   "platform_not_enabled",
+  "qr_required",
   "refresh_failed",
   "state_parse_error",
   "two_factor_required",
@@ -95,6 +97,8 @@ export function computeAuthState({
     last_refresh_at: state.last_refresh_at,
     auth_state: authState,
     auth_state_expired: authState === "expired",
+    pending_manual_login: authState === "auth_required" || originStatusHasManualLogin(originStatus),
+    next_step: authState === "auth_required" || originStatusHasManualLogin(originStatus) ? "npm run worker:start" : null,
     origin_ready_state_stale: Object.values(originStatus).some((entry) => entry.origin_ready_state_stale === true),
     origin_status: originStatus,
     warmed_origins: state.warmed_origins,
@@ -129,6 +133,7 @@ export function updateOriginWarmState(refreshState, origin, warmResult, { now = 
     [originKey]: sanitizeOriginStatusEntry({
       origin: originValue,
       final_origin: finalOrigin,
+      current_origin: finalOrigin,
       status,
       error_type: failedErrorType,
       refreshed_at: refreshedAt,
@@ -197,6 +202,8 @@ export function sanitizeAuthStateOutput(value) {
     last_refresh_at: normalizeIsoOrNull(state.last_refresh_at),
     auth_state: normalizeAuthState(state.auth_state),
     auth_state_expired: Boolean(state.auth_state_expired),
+    pending_manual_login: Boolean(state.pending_manual_login),
+    next_step: safeNextStep(state.next_step),
     origin_ready_state_stale: Boolean(state.origin_ready_state_stale),
     origin_status: sanitizeOriginStatusMap(state.origin_status),
     warmed_origins: sanitizeStringArray(state.warmed_origins),
@@ -263,6 +270,7 @@ function buildOriginStatus(origins, state, nowMs = Date.now()) {
     originStatus[originKey] = {
       origin: normalizeOriginString(origin.origin || origin.defaultOrigin),
       final_origin: null,
+      current_origin: null,
       status: "unknown",
       error_type: null,
       refreshed_at: null,
@@ -317,6 +325,7 @@ function sanitizeOriginStatusEntry(value) {
   return {
     origin: normalizeOriginString(entry.origin),
     final_origin: normalizeOriginString(entry.final_origin),
+    current_origin: normalizeOriginString(entry.current_origin || entry.final_origin),
     status: normalizeOriginStatus(entry.status),
     error_type: normalizeErrorType(entry.error_type || entry.last_error_type),
     refreshed_at: normalizeIsoOrNull(entry.refreshed_at || entry.last_refresh_at),
@@ -327,6 +336,8 @@ function sanitizeOriginStatusEntry(value) {
     last_error_type: normalizeErrorType(entry.last_error_type || entry.error_type),
     warmed: Boolean(entry.warmed),
     page_ready: Boolean(entry.page_ready),
+    pending_manual_login: Boolean(entry.pending_manual_login),
+    next_step: safeNextStep(entry.next_step),
     origin_ready_state_stale: Boolean(entry.origin_ready_state_stale),
     origin_freshness_age_ms: safeNullableNonNegativeInteger(entry.origin_freshness_age_ms),
     origin_freshness_ttl_ms: safePositiveInteger(entry.origin_freshness_ttl_ms) || DEFAULT_REFRESH_TTL_MS
@@ -395,8 +406,16 @@ function isAuthRequiredErrorType(errorType) {
     "landing_flow_blocked",
     "login_page",
     "manual_login_required",
+    "password_required",
+    "qr_required",
     "two_factor_required"
   ].includes(errorType);
+}
+
+function originStatusHasManualLogin(originStatus) {
+  return Object.values(originStatus || {}).some((entry) => (
+    entry?.status === "auth_required" || isAuthRequiredErrorType(entry?.error_type || entry?.last_error_type)
+  ));
 }
 
 function topLevelErrorType(originStatus) {
@@ -456,6 +475,11 @@ function safeString(value) {
   }
   const trimmed = value.trim();
   return FORBIDDEN_AUTH_MATERIAL_PATTERN.test(trimmed) ? "" : trimmed;
+}
+
+function safeNextStep(value) {
+  const text = safeString(value);
+  return text === "npm run worker:start" ? text : null;
 }
 
 function safeKey(value) {

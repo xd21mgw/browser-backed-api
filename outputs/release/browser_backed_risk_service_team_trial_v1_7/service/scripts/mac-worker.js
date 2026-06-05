@@ -306,7 +306,7 @@ export function needsManualLogin(summary) {
   if (!summary || typeof summary !== "object") {
     return false;
   }
-  if (summary.auth_state === "auth_required") {
+  if (summary.pending_manual_login === true || summary.auth_state === "auth_required") {
     return true;
   }
   if (MANUAL_LOGIN_ERROR_TYPES.includes(summary.last_error_type) || MANUAL_LOGIN_ERROR_TYPES.includes(summary.error_type)) {
@@ -322,10 +322,21 @@ export function needsManualLogin(summary) {
   });
 }
 
+export function serviceHealthReady(summary) {
+  if (!summary || typeof summary !== "object") {
+    return false;
+  }
+  return summary.ok === true &&
+    summary.auth_state === "ready" &&
+    summary.auth_state_expired !== true &&
+    summary.origin_ready_state_stale !== true &&
+    summary.pending_manual_login !== true;
+}
+
 async function startWorker() {
   const existing = await fetchHealth();
   let profileLockRecovery = null;
-  if (existing.ok && existing.body?.auth_state === "ready") {
+  if (existing.ok && serviceHealthReady(existing.body)) {
     printJson({
       ok: true,
       command: "worker:start",
@@ -432,7 +443,7 @@ async function startWorker() {
 
 async function startOrReuseService({ serviceAlreadyReachable, authRecoveryAttempted, openProfileAttempted, refreshSummary, profileLockRecovery = null }) {
   const postRefreshHealth = await fetchHealth();
-  if (postRefreshHealth.ok && postRefreshHealth.body?.auth_state === "ready") {
+  if (postRefreshHealth.ok && serviceHealthReady(postRefreshHealth.body)) {
     printJson({
       ok: true,
       command: "worker:start",
@@ -799,6 +810,10 @@ function summarizeHealth(body) {
     ok: Boolean(body.ok),
     service_mode: body.service_mode || null,
     auth_state: body.auth_state || null,
+    auth_state_expired: Boolean(body.auth_state_expired),
+    origin_ready_state_stale: Boolean(body.origin_ready_state_stale),
+    pending_manual_login: Boolean(body.pending_manual_login),
+    next_step: typeof body.next_step === "string" ? body.next_step : null,
     action_count: body.action_count ?? null,
     origin_status: body.origin_status || null,
     warmed_origins: body.warmed_origins || null,
@@ -893,6 +908,10 @@ function sanitizeWorkerRefreshSummary(summary) {
   return {
     ok: Boolean(summary.ok),
     auth_state: typeof summary.auth_state === "string" ? summary.auth_state : null,
+    auth_state_expired: Boolean(summary.auth_state_expired),
+    origin_ready_state_stale: Boolean(summary.origin_ready_state_stale),
+    pending_manual_login: Boolean(summary.pending_manual_login),
+    next_step: typeof summary.next_step === "string" ? summary.next_step : null,
     last_error_type: typeof summary.last_error_type === "string" ? summary.last_error_type : null,
     refreshed_origin_count: Number.isInteger(summary.refreshed_origin_count) ? summary.refreshed_origin_count : 0,
     origin_status: summary.origin_status && typeof summary.origin_status === "object"
@@ -901,7 +920,13 @@ function sanitizeWorkerRefreshSummary(summary) {
         {
           status: typeof value?.status === "string" ? value.status : null,
           page_ready: Boolean(value?.page_ready),
-          error_type: typeof value?.error_type === "string" ? value.error_type : null
+          current_origin: typeof value?.current_origin === "string" ? value.current_origin : null,
+          final_origin: typeof value?.final_origin === "string" ? value.final_origin : null,
+          error_type: typeof value?.error_type === "string" ? value.error_type : null,
+          origin_freshness_age_ms: Number.isInteger(value?.origin_freshness_age_ms) ? value.origin_freshness_age_ms : null,
+          origin_freshness_ttl_ms: Number.isInteger(value?.origin_freshness_ttl_ms) ? value.origin_freshness_ttl_ms : null,
+          origin_ready_state_stale: Boolean(value?.origin_ready_state_stale),
+          pending_manual_login: Boolean(value?.pending_manual_login)
         }
       ]))
       : {}

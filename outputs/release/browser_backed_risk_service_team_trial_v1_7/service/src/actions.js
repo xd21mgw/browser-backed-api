@@ -1937,6 +1937,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   const timedOut = Boolean(meta.timedOut || /timeout/i.test(errorType));
   const timeoutStage = typeof meta.timeoutStage === "string" && meta.timeoutStage ? meta.timeoutStage : null;
   const safeReason = meta.safe_reason || null;
+  const nextStep = meta.nextStep || null;
   return {
     ok: false,
     action: action.name,
@@ -1960,6 +1961,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
     raw_body_handling: "omitted",
     ...(safeReason ? { safe_reason: safeReason } : {}),
+    ...(nextStep ? { next_step: nextStep } : {}),
     auth_state_expired: Boolean(meta.auth_state_expired),
     origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
     upstream: {
@@ -1974,6 +1976,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       raw_body_handling: "omitted",
       error_type: errorType,
       ...(safeReason ? { safe_reason: safeReason } : {}),
+      ...(nextStep ? { next_step: nextStep } : {}),
       auth_state_expired: Boolean(meta.auth_state_expired),
       origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
       ...(timeoutStage ? { timeout_stage: timeoutStage } : {})
@@ -1998,7 +2001,8 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
-      safe_reason: safeReason || null
+      safe_reason: safeReason || null,
+      next_step: nextStep
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: false })
   };

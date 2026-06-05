@@ -45,6 +45,9 @@ export class BrowserBackedApiService {
       origins: Object.values(this.config.domains),
       refreshState: this.refreshState
     });
+    const originStatus = this.overlayLiveOriginStatus(authState.origin_status);
+    const pendingManualLogin = authState.pending_manual_login === true || hasPendingManualLogin(originStatus);
+    const authStateValue = pendingManualLogin ? "auth_required" : authState.auth_state;
     return {
       ok: true,
       service_mode: this.config.mode,
@@ -54,10 +57,12 @@ export class BrowserBackedApiService {
       profile_exists: authState.profile_exists,
       state_file_configured: authState.state_file_configured,
       last_refresh_at: authState.last_refresh_at,
-      auth_state: authState.auth_state,
-      auth_state_expired: authState.auth_state_expired,
-      origin_ready_state_stale: authState.origin_ready_state_stale,
-      origin_status: authState.origin_status,
+      auth_state: authStateValue,
+      auth_state_expired: authStateValue === "expired" || authState.auth_state_expired,
+      pending_manual_login: pendingManualLogin,
+      next_step: pendingManualLogin ? "npm run worker:start" : authState.next_step,
+      origin_ready_state_stale: authState.origin_ready_state_stale || Object.values(originStatus).some((entry) => entry.origin_ready_state_stale === true),
+      origin_status: originStatus,
       warmed_origins: this.warmedOrigins(),
       uptime_ms: Date.now() - this.startedAtMs,
       action_count: Object.keys(ACTIONS).length
@@ -471,7 +476,8 @@ export class BrowserBackedApiService {
       platformError: errorType,
       meta: {
         ...afterMeta,
-        safe_reason: "origin_ready_state_stale"
+        safe_reason: "origin_ready_state_stale",
+        nextStep: "npm run worker:start"
       }
     };
   }
@@ -497,15 +503,63 @@ export class BrowserBackedApiService {
       origin_ready_state_stale: freshness.origin_ready_state_stale,
       origin_freshness_age_ms: freshness.origin_freshness_age_ms,
       origin_freshness_ttl_ms: freshness.origin_freshness_ttl_ms,
+      pending_manual_login: authState.pending_manual_login,
+      nextStep: authState.pending_manual_login ? "npm run worker:start" : null,
       ...extra
     };
+  }
+
+  overlayLiveOriginStatus(originStatus = {}) {
+    const output = { ...originStatus };
+    if (!this.browserClient?.domainState || this.config.mode !== "live") {
+      return output;
+    }
+    for (const domain of Object.values(this.config.domains)) {
+      if (!domain?.key || domain.enabled === false) {
+        continue;
+      }
+      const browserState = this.browserClient.domainState(domain.key);
+      if (!browserState?.current_origin) {
+        continue;
+      }
+      const currentOrigin = browserState.current_origin;
+      const base = output[domain.key] || {};
+      const authRedirect = isAuthRedirectTarget({
+        origin: currentOrigin,
+        url: browserState.current_url || currentOrigin
+      });
+      const originMatch = currentOrigin === domain.origin;
+      if (browserState.page_ready === true && originMatch) {
+        output[domain.key] = {
+          ...base,
+          current_origin: currentOrigin,
+          final_origin: base.final_origin || currentOrigin,
+          page_ready: true
+        };
+        continue;
+      }
+      output[domain.key] = {
+        ...base,
+        current_origin: currentOrigin,
+        final_origin: currentOrigin,
+        status: authRedirect ? "auth_required" : base.status || "failed",
+        error_type: authRedirect ? "auth_redirect" : base.error_type || "origin_mismatch",
+        last_error_type: authRedirect ? "auth_redirect" : base.last_error_type || "origin_mismatch",
+        page_ready: false,
+        warmed: false,
+        origin_ready_state_stale: true,
+        pending_manual_login: authRedirect || base.pending_manual_login === true,
+        next_step: authRedirect ? "npm run worker:start" : base.next_step || null
+      };
+    }
+    return output;
   }
 
   warmedOrigins() {
     return Object.values(this.config.domains).map((domain) => {
       const state = this.warmState.get(domain.key) || defaultWarmState(domain, this.config);
       if (this.browserClient?.domainState && this.config.mode === "live") {
-        const browserState = this.browserClient.domainState(domain.key);
+        const browserState = this.browserClient.domainState(domain.key) || {};
         return {
           ...state,
           current_origin: browserState.current_origin,
@@ -1123,6 +1177,25 @@ function rewarmFailureErrorType(rewarmResult) {
     return errorType;
   }
   return "origin_refresh_failed";
+}
+
+function hasPendingManualLogin(originStatus = {}) {
+  return Object.values(originStatus).some((entry) => (
+    entry?.pending_manual_login === true ||
+    entry?.status === "auth_required" ||
+    [
+      "manual_login_required",
+      "auth_required",
+      "two_factor_required",
+      "captcha_required",
+      "password_required",
+      "qr_required",
+      "landing_flow_blocked",
+      "auth_flow_not_completed_in_bound_context",
+      "auth_redirect",
+      "login_page"
+    ].includes(entry?.error_type || entry?.last_error_type)
+  ));
 }
 
 function isContextRequestAction(action, browserClient) {

@@ -362,6 +362,9 @@ These commands reduce repeated Mac node approvals by grouping common operations.
   `two_factor_required`, or `captcha_required`, opens the visible profile flow,
   waits for the user to finish, then runs refresh again and starts/reuses the
   service.
+- If an action returns one of those manual auth states, the main Agent should
+  stop live source calls and run this command instead of trying profile copy,
+  cookie injection, or ad hoc auth repair.
 - Writes a pid file and log file under `~/.dennis-browser-backed`.
 - Prints `service_base_url=http://127.0.0.1:8787`.
 - Does not delete profile/state.

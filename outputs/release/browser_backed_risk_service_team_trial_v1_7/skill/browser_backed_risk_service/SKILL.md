@@ -110,6 +110,10 @@ Daily user experience should be low-friction:
   `auth_state_expired_or_api_session_not_ready` or
   `safe_reason=origin_ready_state_stale`, do not reinterpret it as no data; ask
   the user to run `npm run worker:start` or complete manual login if requested.
+- `npm run worker:start` is the only daily recovery entry point. It may open the
+  Mac profile flow when refresh/rewarm reports `manual_login_required`,
+  `auth_required`, `two_factor_required`, or `captcha_required`; after the user
+  finishes interaction it refreshes again and starts/reuses the service.
 
 Do not copy the Mac profile to Linux as a standard path. Joint testing showed
 that Track may become ready, but RCP, Weapon, Login Logs, and Archives can

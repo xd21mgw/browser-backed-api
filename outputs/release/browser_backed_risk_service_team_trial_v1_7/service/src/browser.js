@@ -316,7 +316,9 @@ export class BrowserBackedClient {
 
     return {
       current_origin: currentOrigin,
-      page_ready: Boolean(this.pageReady.get(domainKey) && originMatch)
+      current_url: sanitizeUrl(currentUrl),
+      page_ready: Boolean(this.pageReady.get(domainKey) && originMatch),
+      auth_redirect_detected: isAuthRedirectTarget({ origin: currentOrigin, url: currentUrl })
     };
   }
 
@@ -330,7 +332,8 @@ export class BrowserBackedClient {
       bound_page_origin: state.current_origin,
       origin_warmed: Boolean(originWarmed),
       page_ready: state.page_ready,
-      origin_match: Boolean(state.current_origin && domain?.origin && state.current_origin === domain.origin)
+      origin_match: Boolean(state.current_origin && domain?.origin && state.current_origin === domain.origin),
+      auth_redirect_detected: Boolean(state.auth_redirect_detected)
     };
   }
 

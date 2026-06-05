@@ -67,6 +67,9 @@ Origin `ready` is not identical to API-session `fresh`. `/health` reports
 age/TTL. Before a fixed action runs, the service refreshes/rewarm-checks a
 stale target origin; if manual login is required, the action is blocked instead
 of returning an HTML page shell as business data.
+`npm run worker:start` is the daily recovery entry point; it opens the profile
+flow when user SSO/2FA/captcha interaction is required, then refreshes again and
+starts or reuses the service.
 
 ## Capability Entry Points
 

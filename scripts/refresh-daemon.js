@@ -86,7 +86,8 @@ export async function runRefreshDaemon({
 
 export function isManualLoginRequiredSummary(summary) {
   const errorType = summary?.last_error_type;
-  return summary?.auth_state === "auth_required" ||
+  return summary?.pending_manual_login === true ||
+    summary?.auth_state === "auth_required" ||
     [
       "manual_login_required",
       "auth_required",

@@ -635,6 +635,10 @@ If an action reports `auth_state_expired_or_api_session_not_ready` or
 Run `npm run worker:start`; it will bounded-refresh/rewarm the target origin or
 ask for manual login if password, 2FA, QR, or captcha is required.
 
+If `/health` reports `pending_manual_login=true`, do not continue live source
+calls. The recovery path is `npm run worker:start`; the service will open the
+profile flow only for user interaction and then refresh/start again.
+
 For passthrough smoke, record only:
 
 - `http_status`

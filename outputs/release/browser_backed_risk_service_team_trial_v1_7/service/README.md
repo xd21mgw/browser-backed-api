@@ -48,6 +48,10 @@ Remote Mac worker day-to-day usage should be low-friction:
   age/TTL. Before every fixed action, the service ensures the target origin is
   fresh; stale origins are bounded-refreshed/rewarmed first, and failed refresh
   blocks the action instead of returning an HTML page shell as data.
+- `npm run worker:start` is the daily recovery entry point. If refresh/rewarm
+  hits `manual_login_required`, `auth_required`, `two_factor_required`, or
+  `captcha_required`, it opens the local profile flow for user interaction,
+  then runs refresh again and starts or reuses the service.
 
 MyFlicker / Mac node only provides a controlled way for the remote main Agent to
 run status/action calls on the Mac or reach the Mac worker `service_base_url`.

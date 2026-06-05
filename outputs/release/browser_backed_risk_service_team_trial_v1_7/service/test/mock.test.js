@@ -28,7 +28,8 @@ import {
   classifyProxyRequest,
   extractUserDataDir,
   needsManualLogin,
-  planWorkerStart
+  planWorkerStart,
+  serviceHealthReady
 } from "../scripts/mac-worker.js";
 
 const ACTION_INPUTS = Object.freeze({
@@ -1021,6 +1022,8 @@ test("auth freshness guard blocks action when rewarm requires manual login", asy
   assert.equal(response.meta.freshness_rewarm_attempted, true);
   assert.equal(response.meta.freshness_rewarm_status, "manual_login_required");
   assert.equal(response.safe_reason, "origin_ready_state_stale");
+  assert.equal(response.next_step, "npm run worker:start");
+  assert.equal(response.meta.next_step, "npm run worker:start");
   assertTransportEnvelope(response, "login_logs_search");
 });
 
@@ -1368,6 +1371,43 @@ test("health and refresh state expose auth readiness metadata only", () => {
   assert.equal(/"cookie"|"token"|"session"|"header"|"authorization"|"password"/i.test(serialized), false);
 });
 
+test("health overlays live SSO-bound origin instead of reporting stale ready", () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    domainState: (domainKey) => domainKey === "login_logs"
+      ? {
+          current_origin: "https://sso.corp.kuaishou.com",
+          current_url: "https://sso.corp.kuaishou.com/login",
+          page_ready: false,
+          auth_redirect_detected: true
+        }
+      : null
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  service.warmState.set("login_logs", readyState);
+  service.refreshState = updateOriginWarmState({}, config.domains.login_logs, readyState);
+
+  const health = service.health();
+  assert.equal(health.auth_state, "auth_required");
+  assert.equal(health.pending_manual_login, true);
+  assert.equal(health.next_step, "npm run worker:start");
+  assert.equal(health.origin_status.login_logs.status, "auth_required");
+  assert.equal(health.origin_status.login_logs.page_ready, false);
+  assert.equal(health.origin_status.login_logs.current_origin, "https://sso.corp.kuaishou.com");
+  assert.equal(health.origin_status.login_logs.origin_ready_state_stale, true);
+});
+
 test("auth-state decisions handle missing profile, missing state, and refresh ttl", () => {
   const config = createLiveConfig();
   const authState = computeAuthState({
@@ -1430,6 +1470,30 @@ test("worker:start plan reuses ready service without duplicate start", () => {
     serviceReachable: true,
     authState: "ready"
   }), ["return_ready"]);
+});
+
+test("worker service health readiness requires fresh auth and no pending manual login", () => {
+  assert.equal(serviceHealthReady({
+    ok: true,
+    auth_state: "ready",
+    auth_state_expired: false,
+    origin_ready_state_stale: false,
+    pending_manual_login: false
+  }), true);
+  assert.equal(serviceHealthReady({
+    ok: true,
+    auth_state: "ready",
+    auth_state_expired: false,
+    origin_ready_state_stale: true,
+    pending_manual_login: false
+  }), false);
+  assert.equal(serviceHealthReady({
+    ok: true,
+    auth_state: "ready",
+    auth_state_expired: false,
+    origin_ready_state_stale: false,
+    pending_manual_login: true
+  }), false);
 });
 
 test("worker:start plan refreshes before starting when service is not running", () => {
