@@ -1827,11 +1827,18 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   let platformError = errorType;
   let transportError = null;
   const unexpectedHtml = detectUnexpectedHtmlApiResponse(action, contentType, bodyText);
+  const staleApiSession = Boolean(
+    meta.auth_state_expired === true ||
+      meta.origin_ready_state_stale === true ||
+      (meta.freshness_rewarm_attempted === true && meta.freshness_rewarm_status && meta.freshness_rewarm_status !== "ready")
+  );
+  let safeReason = meta.safe_reason || null;
 
   if (unexpectedHtml) {
     ok = false;
-    errorType = "unexpected_html_response";
-    platformError = "api_contract_mismatch";
+    errorType = staleApiSession ? "auth_state_expired_or_api_session_not_ready" : "unexpected_html_response";
+    platformError = staleApiSession ? "api_session_not_ready" : "api_contract_mismatch";
+    safeReason = staleApiSession ? "auth_state_expired_or_api_session_not_ready" : "html_response_not_business_json";
     upstream.body_omitted = true;
     upstream.response_too_large = false;
     upstream.error_type = errorType;
@@ -1839,6 +1846,9 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     upstream.expected_content_type = "application/json";
     upstream.api_contract_mismatch = true;
     upstream.response_body_kind = "html_page";
+    upstream.safe_reason = safeReason;
+    upstream.auth_state_expired = Boolean(meta.auth_state_expired);
+    upstream.origin_ready_state_stale = Boolean(meta.origin_ready_state_stale);
   } else if (bodyPresent && bodyTruncated && jsonArrayCap?.ok) {
     ok = false;
     errorType = "response_too_large";
@@ -1896,12 +1906,24 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
     raw_body_handling: upstream.raw_body_handling,
     cap_reason: upstream.cap_reason || null,
+    ...(safeReason ? { safe_reason: safeReason } : {}),
+    auth_state_expired: Boolean(meta.auth_state_expired),
+    origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
     upstream,
     ...(errorType ? { error_type: errorType } : {}),
     meta: {
       origin: action.domainKey,
       latency_ms: meta.latencyMs ?? null,
-      fetched_at: fetchedAt
+      fetched_at: fetchedAt,
+      auth_state: safeString(meta.auth_state) || null,
+      auth_state_expired: Boolean(meta.auth_state_expired),
+      origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
+      origin_freshness_age_ms: safeNullableInteger(meta.origin_freshness_age_ms),
+      origin_freshness_ttl_ms: safeNullableInteger(meta.origin_freshness_ttl_ms),
+      freshness_check_attempted: Boolean(meta.freshness_check_attempted),
+      freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
+      freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      safe_reason: safeReason || null
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: bodyPresent && !upstream.body_omitted })
   };
@@ -1914,6 +1936,7 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   const invalidParams = Boolean(meta.invalidParams || /parameter/i.test(errorType));
   const timedOut = Boolean(meta.timedOut || /timeout/i.test(errorType));
   const timeoutStage = typeof meta.timeoutStage === "string" && meta.timeoutStage ? meta.timeoutStage : null;
+  const safeReason = meta.safe_reason || null;
   return {
     ok: false,
     action: action.name,
@@ -1936,6 +1959,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     ...(timeoutStage ? { timeout_stage: timeoutStage } : {}),
     auth_redirect_detected: Boolean(meta.authRedirectDetected),
     raw_body_handling: "omitted",
+    ...(safeReason ? { safe_reason: safeReason } : {}),
+    auth_state_expired: Boolean(meta.auth_state_expired),
+    origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
     upstream: {
       status: httpStatus,
       content_type: null,
@@ -1947,6 +1973,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       returned_bytes: 0,
       raw_body_handling: "omitted",
       error_type: errorType,
+      ...(safeReason ? { safe_reason: safeReason } : {}),
+      auth_state_expired: Boolean(meta.auth_state_expired),
+      origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
       ...(timeoutStage ? { timeout_stage: timeoutStage } : {})
     },
     ...(meta.parameterError
@@ -1960,7 +1989,16 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     meta: {
       origin: action.domainKey,
       latency_ms: meta.latencyMs ?? null,
-      fetched_at: meta.fetchedAt || new Date().toISOString()
+      fetched_at: meta.fetchedAt || new Date().toISOString(),
+      auth_state: safeString(meta.auth_state) || null,
+      auth_state_expired: Boolean(meta.auth_state_expired),
+      origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
+      origin_freshness_age_ms: safeNullableInteger(meta.origin_freshness_age_ms),
+      origin_freshness_ttl_ms: safeNullableInteger(meta.origin_freshness_ttl_ms),
+      freshness_check_attempted: Boolean(meta.freshness_check_attempted),
+      freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
+      freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      safe_reason: safeReason || null
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: false })
   };
@@ -4046,6 +4084,18 @@ function safeNonNegativeInteger(value) {
     return 0;
   }
   return Math.trunc(number);
+}
+
+function safeNullableInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function safeString(value) {
+  return typeof value === "string" ? value.trim().slice(0, 128) : "";
 }
 
 function isJsonContentType(contentType) {

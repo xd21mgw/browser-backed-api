@@ -201,11 +201,16 @@ business summarization; the caller/main agent should parse `upstream.body` or
 Fixed actions expect API JSON by default. Business action fetches use the
 browser-context request API by default, while browser pages remain responsible
 for origin readiness, local login state, and lightweight account confirmation.
+Origin `ready` only means the browser is on the expected platform origin; it is
+not sufficient when the API session is stale. Action execution first checks
+`auth_state` and target-origin freshness (`origin_ready_state_stale`,
+freshness age, freshness TTL). If stale, the service performs a bounded
+refresh/rewarm for that fixed origin and only then calls the fixed API.
 If the fixed API returns a front-end HTML/page shell, the service returns
-`error_type=unexpected_html_response` with
-`platform_error=api_contract_mismatch` and omits the HTML body. This is not
-`no_data` and not source evidence; it means the fixed API contract or auth flow
-needs repair.
+`error_type=auth_state_expired_or_api_session_not_ready` when freshness failed,
+or `error_type=unexpected_html_response` with
+`platform_error=api_contract_mismatch` when the origin is fresh. The HTML body is
+omitted. This is not `no_data` and not source evidence.
 
 The only current page-context business fetch exception is `weapon_inventory`,
 which uses a service-owned `graphData -> riskData` follow-up chain. Timeout

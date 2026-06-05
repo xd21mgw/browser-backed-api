@@ -60,6 +60,14 @@ out, stop with `mac_command_approval_required`. Do not switch to base64 chunks,
 per-file writes, KCDN/ad hoc uploads, SSH/SCP guessing, profile copy, cookie
 injection, storageState injection, or arbitrary URL fetch.
 
+## Readiness Freshness
+
+Origin `ready` is not identical to API-session `fresh`. `/health` reports
+`auth_state_expired`, `origin_ready_state_stale`, and per-origin freshness
+age/TTL. Before a fixed action runs, the service refreshes/rewarm-checks a
+stale target origin; if manual login is required, the action is blocked instead
+of returning an HTML page shell as business data.
+
 ## Capability Entry Points
 
 Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` instead of memorizing all

@@ -104,6 +104,12 @@ Daily user experience should be low-friction:
 - If readiness expires, the service tries lightweight landing-flow activation in
   refresh/prewarm/ensure-ready. If password, 2FA, QR, or captcha appears, return
   `manual_login_required` and ask the user to open the Mac login page.
+- Treat `ready` and `fresh` separately. `/health` reports
+  `auth_state_expired`, `origin_ready_state_stale`, and per-origin freshness
+  age/TTL. If an action returns
+  `auth_state_expired_or_api_session_not_ready` or
+  `safe_reason=origin_ready_state_stale`, do not reinterpret it as no data; ask
+  the user to run `npm run worker:start` or complete manual login if requested.
 
 Do not copy the Mac profile to Linux as a standard path. Joint testing showed
 that Track may become ready, but RCP, Weapon, Login Logs, and Archives can

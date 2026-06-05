@@ -608,12 +608,32 @@ Collect only sanitized information:
 - origin key
 - `status`
 - `page_ready`
+- `auth_state_expired`
+- `origin_ready_state_stale`
+- `origin_freshness_age_ms`
+- `origin_freshness_ttl_ms`
 - `final_origin`
 - `error_type`
 
 Do not share profile directories, refresh-state files, `.env`, cookies, tokens,
 sessions, headers, screenshots with sensitive content, or full raw upstream
 response bodies.
+
+## ready But Stale
+
+`origin_status.<origin>.status=ready` and `page_ready=true` only mean the bound
+browser page is still on the expected platform origin. They do not prove the API
+session is fresh. Check `/health` for:
+
+- `auth_state_expired`
+- `origin_ready_state_stale`
+- `origin_freshness_age_ms`
+- `origin_freshness_ttl_ms`
+
+If an action reports `auth_state_expired_or_api_session_not_ready` or
+`safe_reason=origin_ready_state_stale`, do not treat the result as `no_data`.
+Run `npm run worker:start`; it will bounded-refresh/rewarm the target origin or
+ask for manual login if password, 2FA, QR, or captcha is required.
 
 For passthrough smoke, record only:
 

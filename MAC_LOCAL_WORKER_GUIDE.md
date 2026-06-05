@@ -103,6 +103,11 @@ If readiness expires, refresh/prewarm/ensure-ready attempts lightweight landing
 flow activation. If the page is only username prefilled plus `Next`,
 `Continue`, or `Confirm`, the service can handle it. If password, 2FA, QR, or
 captcha appears, `worker:start` opens the profile flow for manual recovery.
+Origin `ready` is not identical to API-session `fresh`. `/health` exposes
+`auth_state_expired`, `origin_ready_state_stale`, and per-origin freshness
+age/TTL. Before a fixed action runs, the service rewarms stale target origins;
+if rewarm needs manual login, the action is blocked instead of returning an
+HTML page shell as business data.
 
 ## Expose A Low-Approval Worker URL
 

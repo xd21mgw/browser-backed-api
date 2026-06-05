@@ -8,6 +8,7 @@ const SAFE_ERROR_TYPES = Object.freeze(new Set([
   "auth_required",
   "auth_redirect",
   "auth_flow_not_completed_in_bound_context",
+  "auth_state_expired_or_api_session_not_ready",
   "captcha_required",
   "expired",
   "landing_flow_blocked",
@@ -16,6 +17,7 @@ const SAFE_ERROR_TYPES = Object.freeze(new Set([
   "navigation_timeout",
   "network_error",
   "origin_mismatch",
+  "origin_refresh_failed",
   "page_load_error",
   "permission_blocked",
   "platform_not_enabled",
@@ -77,7 +79,7 @@ export function computeAuthState({
   const exists = profileExists(profileDir);
   const stateFileExists = fs.existsSync(stateFile);
   const state = refreshState ? sanitizeRefreshState(refreshState) : loadRefreshState(stateFile);
-  const originStatus = buildOriginStatus(origins, state);
+  const originStatus = buildOriginStatus(origins, state, nowMs);
   const authState = resolveAuthState({
     profileExists: exists,
     stateFileExists,
@@ -92,6 +94,8 @@ export function computeAuthState({
     state_file_configured: Boolean(stateFile),
     last_refresh_at: state.last_refresh_at,
     auth_state: authState,
+    auth_state_expired: authState === "expired",
+    origin_ready_state_stale: Object.values(originStatus).some((entry) => entry.origin_ready_state_stale === true),
     origin_status: originStatus,
     warmed_origins: state.warmed_origins,
     service_version: state.service_version,
@@ -153,25 +157,35 @@ export function updateOriginWarmState(refreshState, origin, warmResult, { now = 
 }
 
 export function shouldRefreshOrigin(origin, refreshState, nowMs = Date.now()) {
+  return originFreshness(origin, refreshState, nowMs).origin_ready_state_stale;
+}
+
+export function originFreshness(origin, refreshState, nowMs = Date.now()) {
   const state = sanitizeRefreshState(refreshState);
   const originKey = origin?.key || origin?.name;
-  const status = originKey ? state.origin_status[originKey] : null;
-  if (!originKey || !status) {
-    return true;
-  }
-  if (status.status !== "ready" || status.page_ready !== true) {
-    return true;
-  }
-
-  const lastRefreshMs = Date.parse(status.refreshed_at || status.last_refresh_at || state.last_refresh_at || "");
-  if (!Number.isFinite(lastRefreshMs)) {
-    return true;
-  }
-
-  const ttlMs = Number.isInteger(origin.refreshTtlMs) && origin.refreshTtlMs > 0
+  const ttlMs = Number.isInteger(origin?.refreshTtlMs) && origin.refreshTtlMs > 0
     ? origin.refreshTtlMs
     : DEFAULT_REFRESH_TTL_MS;
-  return nowMs - lastRefreshMs >= ttlMs;
+  const status = originKey ? state.origin_status[originKey] : null;
+  const stale = {
+    origin_ready_state_stale: true,
+    origin_freshness_age_ms: null,
+    origin_freshness_ttl_ms: ttlMs
+  };
+  if (!originKey || !status || status.status !== "ready" || status.page_ready !== true) {
+    return stale;
+  }
+  const lastRefreshMs = Date.parse(status.refreshed_at || status.last_refresh_at || state.last_refresh_at || "");
+  if (!Number.isFinite(lastRefreshMs)) {
+    return stale;
+  }
+
+  const ageMs = Math.max(0, nowMs - lastRefreshMs);
+  return {
+    origin_ready_state_stale: ageMs >= ttlMs,
+    origin_freshness_age_ms: ageMs,
+    origin_freshness_ttl_ms: ttlMs
+  };
 }
 
 export function sanitizeAuthStateOutput(value) {
@@ -182,6 +196,8 @@ export function sanitizeAuthStateOutput(value) {
     state_file_configured: Boolean(state.state_file_configured),
     last_refresh_at: normalizeIsoOrNull(state.last_refresh_at),
     auth_state: normalizeAuthState(state.auth_state),
+    auth_state_expired: Boolean(state.auth_state_expired),
+    origin_ready_state_stale: Boolean(state.origin_ready_state_stale),
     origin_status: sanitizeOriginStatusMap(state.origin_status),
     warmed_origins: sanitizeStringArray(state.warmed_origins),
     service_version: safeString(state.service_version) || DEFAULT_SERVICE_VERSION,
@@ -237,7 +253,7 @@ function resolveAuthState({ profileExists: exists, stateFileExists, state, origi
   return "unknown";
 }
 
-function buildOriginStatus(origins, state) {
+function buildOriginStatus(origins, state, nowMs = Date.now()) {
   const originStatus = { ...state.origin_status };
   for (const origin of origins) {
     const originKey = origin?.key || origin?.name;
@@ -259,7 +275,21 @@ function buildOriginStatus(origins, state) {
       page_ready: false
     };
   }
-  return sanitizeOriginStatusMap(originStatus);
+  const sanitized = sanitizeOriginStatusMap(originStatus);
+  for (const origin of origins) {
+    const originKey = origin?.key || origin?.name;
+    if (!originKey || origin?.enabled === false || !sanitized[originKey]) {
+      continue;
+    }
+    sanitized[originKey] = sanitizeOriginStatusEntry({
+      ...sanitized[originKey],
+      ...originFreshness(origin, {
+        ...state,
+        origin_status: sanitized
+      }, nowMs)
+    });
+  }
+  return sanitized;
 }
 
 function hasAnyReadyOrigin(state) {
@@ -296,7 +326,10 @@ function sanitizeOriginStatusEntry(value) {
     last_refresh_at: normalizeIsoOrNull(entry.last_refresh_at || entry.refreshed_at),
     last_error_type: normalizeErrorType(entry.last_error_type || entry.error_type),
     warmed: Boolean(entry.warmed),
-    page_ready: Boolean(entry.page_ready)
+    page_ready: Boolean(entry.page_ready),
+    origin_ready_state_stale: Boolean(entry.origin_ready_state_stale),
+    origin_freshness_age_ms: safeNullableNonNegativeInteger(entry.origin_freshness_age_ms),
+    origin_freshness_ttl_ms: safePositiveInteger(entry.origin_freshness_ttl_ms) || DEFAULT_REFRESH_TTL_MS
   };
 }
 
@@ -432,6 +465,19 @@ function safeKey(value) {
 function safeNonNegativeInteger(value) {
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function safeNullableNonNegativeInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function safePositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : 0;
 }
 
 function homeDir(env) {

@@ -43,6 +43,11 @@ Remote Mac worker day-to-day usage should be low-friction:
 - If login/confirmation expires, readiness/prewarm/ensure-ready first attempts
   lightweight landing-flow activation. If password, 2FA, QR, or captcha appears,
   the service returns `manual_login_required`.
+- `ready` is not the same as `fresh`: `/health` now reports
+  `auth_state_expired`, `origin_ready_state_stale`, and per-origin freshness
+  age/TTL. Before every fixed action, the service ensures the target origin is
+  fresh; stale origins are bounded-refreshed/rewarmed first, and failed refresh
+  blocks the action instead of returning an HTML page shell as data.
 
 MyFlicker / Mac node only provides a controlled way for the remote main Agent to
 run status/action calls on the Mac or reach the Mac worker `service_base_url`.

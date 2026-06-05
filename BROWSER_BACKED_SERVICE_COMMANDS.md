@@ -122,8 +122,10 @@ Report:
 - `ok`
 - `service_mode`
 - `auth_state`
+- `auth_state_expired`
 - `action_count`
-- origin readiness
+- origin readiness plus `origin_ready_state_stale`,
+  `origin_freshness_age_ms`, and `origin_freshness_ttl_ms`
 - `safety.credential_material_output`
 
 Do not print cookies, tokens, sessions, request headers, profile contents, or
@@ -352,6 +354,8 @@ These commands reduce repeated Mac node approvals by grouping common operations.
 - If stale lock auto-clear fails, or if the lock is daily/live/unknown, stops
   with `service_ready=false` and a blocking issue.
 - If service is missing or auth is not ready, runs `refresh:once`.
+- Action execution also enforces target-origin freshness; a stale `ready` origin
+  is rewarm-checked before a fixed action is sent.
 - If refresh succeeds, starts `SERVICE_MODE=live node src/server.js` in the
   background when needed.
 - If refresh reports `manual_login_required`, `auth_required`,

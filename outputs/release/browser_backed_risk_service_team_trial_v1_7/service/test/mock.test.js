@@ -431,6 +431,27 @@ function createLiveConfig(extraEnv = {}) {
   });
 }
 
+function markOriginReady(service, config, domainKey) {
+  const domain = config.domains[domainKey];
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: domain.origin,
+    current_origin: domain.origin,
+    same_origin_actual: true
+  };
+  service.warmState.set(domainKey, readyState);
+  service.refreshState = updateOriginWarmState(service.refreshState, domain, readyState);
+}
+
+function markAllOriginsReady(service, config) {
+  for (const domainKey of Object.keys(config.domains)) {
+    markOriginReady(service, config, domainKey);
+  }
+}
+
 function buildLargeLoginLogsBody(count) {
   return {
     code: 0,
@@ -757,15 +778,7 @@ test("context request actions do not use page-context fetch", async () => {
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  for (const domainKey of Object.keys(config.domains)) {
-    service.warmState.set(domainKey, {
-      warmed: true,
-      page_ready: true,
-      status: "ready",
-      error_type: null,
-      final_origin: config.domains[domainKey].origin
-    });
-  }
+  markAllOriginsReady(service, config);
 
   for (const actionName of ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request")) {
     const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
@@ -809,13 +822,7 @@ test("weapon_inventory uses page follow-up fetch and does not call context reque
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  service.warmState.set("weapon", {
-    warmed: true,
-    page_ready: true,
-    status: "ready",
-    error_type: null,
-    final_origin: config.domains.weapon.origin
-  });
+  markOriginReady(service, config, "weapon");
 
   const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
   assert.equal(pageFetchCalled, true);
@@ -843,13 +850,7 @@ test("login_logs_search context API timeout reports api fetch stage", async () =
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  service.warmState.set("login_logs", {
-    warmed: true,
-    page_ready: true,
-    status: "ready",
-    error_type: null,
-    final_origin: config.domains.login_logs.origin
-  });
+  markOriginReady(service, config, "login_logs");
 
   const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
   assert.equal(response.ok, false);
@@ -893,13 +894,7 @@ test("context request action returns API contract mismatch when the fixed API re
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  service.warmState.set("archives", {
-    warmed: true,
-    page_ready: true,
-    status: "ready",
-    error_type: null,
-    final_origin: config.domains.archives.origin
-  });
+  markOriginReady(service, config, "archives");
 
   const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
   assert.equal(contextRequestCalled, true);
@@ -909,6 +904,124 @@ test("context request action returns API contract mismatch when the fixed API re
   assert.equal(response.upstream.response_body_kind, "html_page");
   assert.equal(response.safety.credential_material_output, false);
   assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("auth freshness guard rewarms stale ready origin before action fetch", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let prewarmCalls = 0;
+  let contextRequestCalled = false;
+  const bodyText = JSON.stringify({ code: 0, data: { logSearchModels: [] } });
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      assert.equal(domainKey, "login_logs");
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.login_logs.origin,
+        current_origin: config.domains.login_logs.origin,
+        same_origin_actual: true,
+        error_type: null
+      };
+    },
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runActionWithContextRequest: async () => {
+      contextRequestCalled = true;
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", readyState);
+  service.refreshState = updateOriginWarmState({}, config.domains.login_logs, readyState, {
+    now: new Date(Date.now() - DEFAULT_REFRESH_TTL_MS - 1000)
+  });
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(prewarmCalls, 1);
+  assert.equal(contextRequestCalled, true);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.freshness_rewarm_attempted, true);
+  assert.equal(response.meta.freshness_rewarm_status, "ready");
+  assert.equal(response.meta.origin_ready_state_stale, false);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("auth freshness guard blocks action when rewarm requires manual login", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let contextRequestCalled = false;
+  const readyState = {
+    warmed: true,
+    page_ready: true,
+    status: "ready",
+    error_type: null,
+    final_origin: config.domains.login_logs.origin,
+    current_origin: config.domains.login_logs.origin,
+    same_origin_actual: true
+  };
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      status: "auth_required",
+      page_ready: false,
+      final_origin: config.domains.login_logs.origin,
+      current_origin: config.domains.login_logs.origin,
+      same_origin_actual: true,
+      error_type: "manual_login_required"
+    }),
+    actionDiagnostics: () => ({
+      action_name: "login_logs_search",
+      expected_origin: config.domains.login_logs.origin,
+      bound_page_origin: config.domains.login_logs.origin,
+      origin_warmed: false,
+      page_ready: false,
+      origin_match: true
+    }),
+    runActionWithContextRequest: async () => {
+      contextRequestCalled = true;
+      return {};
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  service.warmState.set("login_logs", readyState);
+  service.refreshState = updateOriginWarmState({}, config.domains.login_logs, readyState, {
+    now: new Date(Date.now() - DEFAULT_REFRESH_TTL_MS - 1000)
+  });
+
+  const response = await service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+  assert.equal(contextRequestCalled, false);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "manual_login_required");
+  assert.equal(response.meta.freshness_rewarm_attempted, true);
+  assert.equal(response.meta.freshness_rewarm_status, "manual_login_required");
+  assert.equal(response.safe_reason, "origin_ready_state_stale");
+  assertTransportEnvelope(response, "login_logs_search");
 });
 
 test("login_logs_search treats HTML page shell as API contract mismatch", () => {
@@ -926,16 +1039,45 @@ test("login_logs_search treats HTML page shell as API contract mismatch", () => 
   assert.equal(response.ok, false);
   assert.equal(response.error_type, "unexpected_html_response");
   assert.equal(response.platform_error, "api_contract_mismatch");
+  assert.equal(response.safe_reason, "html_response_not_business_json");
   assert.equal(response.raw_body_handling, "omitted");
   assert.equal(response.upstream.body_present, true);
   assert.equal(response.upstream.body_omitted, true);
   assert.equal(response.upstream.response_too_large, false);
   assert.equal(response.upstream.api_contract_mismatch, true);
   assert.equal(response.upstream.response_body_kind, "html_page");
+  assert.equal(response.upstream.safe_reason, "html_response_not_business_json");
   assert.equal(Object.hasOwn(response.upstream, "body"), false);
   assert.equal(Object.hasOwn(response.upstream, "body_snippet"), false);
   assert.equal(Object.hasOwn(response.upstream, "capped_body"), false);
   assert.equal(response.safety.upstream_business_body_visible, false);
+  assertTransportEnvelope(response, "login_logs_search");
+});
+
+test("expected JSON action maps stale HTML shell to auth session freshness error", () => {
+  const html = "<!doctype html><html><head><title>Workbench</title></head><body>app shell</body></html>";
+  const response = buildLiveActionResponse(ACTIONS.login_logs_search, ACTION_INPUTS.login_logs_search, {}, {
+    ok: true,
+    status: 200,
+    contentType: "text/html;charset=UTF-8",
+    bodyText: html,
+    observedBytes: Buffer.byteLength(html),
+    returnedBytes: Buffer.byteLength(html),
+    bodyTruncated: false
+  }, {
+    latencyMs: 8,
+    auth_state_expired: true,
+    origin_ready_state_stale: true,
+    freshness_rewarm_attempted: true,
+    freshness_rewarm_status: "origin_refresh_failed"
+  });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "auth_state_expired_or_api_session_not_ready");
+  assert.equal(response.platform_error, "api_session_not_ready");
+  assert.equal(response.safe_reason, "auth_state_expired_or_api_session_not_ready");
+  assert.equal(response.upstream.safe_reason, "auth_state_expired_or_api_session_not_ready");
+  assert.equal(response.upstream.body_omitted, true);
   assertTransportEnvelope(response, "login_logs_search");
 });
 
@@ -1236,6 +1378,8 @@ test("auth-state decisions handle missing profile, missing state, and refresh tt
   });
   assert.equal(authState.profile_exists, false);
   assert.equal(["auth_required", "unknown"].includes(authState.auth_state), true);
+  assert.equal(typeof authState.auth_state_expired, "boolean");
+  assert.equal(typeof authState.origin_ready_state_stale, "boolean");
 
   const stale = {
     origin_status: {
@@ -1257,6 +1401,17 @@ test("auth-state decisions handle missing profile, missing state, and refresh tt
   };
   assert.equal(shouldRefreshOrigin(config.domains.rcp, stale), true);
   assert.equal(shouldRefreshOrigin(config.domains.rcp, fresh), false);
+
+  const expiredHealth = computeAuthState({
+    profileDir: config.profileDir,
+    stateFile: config.stateFile,
+    origins: [config.domains.rcp],
+    refreshState: stale,
+    nowMs: Date.now()
+  });
+  assert.equal(expiredHealth.origin_status.rcp.origin_ready_state_stale, true);
+  assert.equal(expiredHealth.origin_status.rcp.origin_freshness_ttl_ms, DEFAULT_REFRESH_TTL_MS);
+  assert.equal(Number.isInteger(expiredHealth.origin_status.rcp.origin_freshness_age_ms), true);
 });
 
 test("refresh daemon event output does not include credential material", () => {

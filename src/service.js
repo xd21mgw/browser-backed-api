@@ -9,7 +9,13 @@ import {
   runMockAction,
   validateActionInput
 } from "./actions.js";
-import { computeAuthState, loadRefreshState, saveRefreshState, updateOriginWarmState } from "./authState.js";
+import {
+  computeAuthState,
+  loadRefreshState,
+  originFreshness,
+  saveRefreshState,
+  updateOriginWarmState
+} from "./authState.js";
 import { BrowserBackedClient } from "./browser.js";
 import { isAuthRedirectTarget, sanitizeErrorMessage } from "./diagnostics.js";
 
@@ -49,6 +55,8 @@ export class BrowserBackedApiService {
       state_file_configured: authState.state_file_configured,
       last_refresh_at: authState.last_refresh_at,
       auth_state: authState.auth_state,
+      auth_state_expired: authState.auth_state_expired,
+      origin_ready_state_stale: authState.origin_ready_state_stale,
       origin_status: authState.origin_status,
       warmed_origins: this.warmedOrigins(),
       uptime_ms: Date.now() - this.startedAtMs,
@@ -212,14 +220,22 @@ export class BrowserBackedApiService {
       });
     }
 
-    if (!this.warmState.get(action.domainKey)?.warmed) {
-      await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+    const freshnessResult = await this.ensureOriginFresh(action);
+    if (!freshnessResult.ok) {
+      return buildPassthroughFailureResponse(action, input, {
+        latencyMs: Date.now() - startedAt,
+        errorType: freshnessResult.errorType,
+        platformError: freshnessResult.platformError,
+        authRedirectDetected: Boolean(freshnessResult.meta.auth_redirect_detected),
+        ...freshnessResult.meta
+      });
     }
 
-    let originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
+    let originWarmed = Boolean(freshnessResult.originWarmed);
     const actionRequest = buildActionBody(action, input);
     let actionDiagnostics = this.browserClient.actionDiagnostics(action, originWarmed);
     const lazyMeta = {
+      ...freshnessResult.meta,
       lazyRewarmAttempted: false,
       lazyRewarmStatus: "not_attempted",
       pageReadyBeforeFetch: Boolean(actionDiagnostics.page_ready),
@@ -232,6 +248,11 @@ export class BrowserBackedApiService {
       const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
       lazyMeta.lazyRewarmStatus = rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed";
       originWarmed = Boolean(rewarmResult.warmed);
+      Object.assign(lazyMeta, this.freshnessMeta(action.domainKey, {
+        freshness_check_attempted: true,
+        freshness_rewarm_attempted: true,
+        freshness_rewarm_status: lazyMeta.lazyRewarmStatus
+      }));
       actionDiagnostics = this.browserClient.actionDiagnostics(action, originWarmed);
       lazyMeta.boundPageOriginAfterRewarm = actionDiagnostics.bound_page_origin || null;
       lazyMeta.pageReadyBeforeFetch = Boolean(actionDiagnostics.page_ready);
@@ -406,6 +427,78 @@ export class BrowserBackedApiService {
         exceptionMessage: sanitizeErrorMessage(error)
       });
     }
+  }
+
+  async ensureOriginFresh(action) {
+    const domain = this.config.domains[action.domainKey];
+    const beforeMeta = this.freshnessMeta(action.domainKey, {
+      freshness_check_attempted: true,
+      freshness_rewarm_attempted: false,
+      freshness_rewarm_status: "not_needed"
+    });
+    const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
+    const needsRewarm = !originWarmed || beforeMeta.auth_state_expired === true || beforeMeta.origin_ready_state_stale === true;
+    if (!needsRewarm) {
+      return {
+        ok: true,
+        originWarmed,
+        meta: beforeMeta
+      };
+    }
+
+    const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+    const afterMeta = this.freshnessMeta(action.domainKey, {
+      freshness_check_attempted: true,
+      freshness_rewarm_attempted: true,
+      freshness_rewarm_status: rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed",
+      auth_redirect_detected: Boolean(rewarmResult.auth_redirect_detected),
+      landing_flow_status: rewarmResult.last_landing_flow_status || rewarmResult.landing_flow_status || null
+    });
+    const targetFresh = rewarmResult.warmed === true && afterMeta.origin_ready_state_stale !== true;
+    if (targetFresh) {
+      return {
+        ok: true,
+        originWarmed: true,
+        meta: afterMeta
+      };
+    }
+
+    const errorType = rewarmFailureErrorType(rewarmResult);
+    return {
+      ok: false,
+      originWarmed: false,
+      errorType,
+      platformError: errorType,
+      meta: {
+        ...afterMeta,
+        safe_reason: "origin_ready_state_stale"
+      }
+    };
+  }
+
+  freshnessMeta(domainKey, extra = {}) {
+    const domain = this.config.domains[domainKey];
+    const authState = computeAuthState({
+      profileDir: this.config.profileDir,
+      stateFile: this.config.stateFile,
+      origins: Object.values(this.config.domains),
+      refreshState: this.refreshState
+    });
+    const freshness = domain
+      ? originFreshness(domain, this.refreshState)
+      : {
+          origin_ready_state_stale: true,
+          origin_freshness_age_ms: null,
+          origin_freshness_ttl_ms: null
+        };
+    return {
+      auth_state: authState.auth_state,
+      auth_state_expired: authState.auth_state === "expired",
+      origin_ready_state_stale: freshness.origin_ready_state_stale,
+      origin_freshness_age_ms: freshness.origin_freshness_age_ms,
+      origin_freshness_ttl_ms: freshness.origin_freshness_ttl_ms,
+      ...extra
+    };
   }
 
   warmedOrigins() {
@@ -1016,6 +1109,20 @@ function shouldLazyRewarm(actionDiagnostics) {
         url: actionDiagnostics.bound_page_origin
       })
   );
+}
+
+function rewarmFailureErrorType(rewarmResult) {
+  const errorType = rewarmResult?.error_type || rewarmResult?.last_error_type || rewarmResult?.status;
+  if ([
+    "manual_login_required",
+    "auth_required",
+    "two_factor_required",
+    "captcha_required",
+    "permission_blocked"
+  ].includes(errorType)) {
+    return errorType;
+  }
+  return "origin_refresh_failed";
 }
 
 function isContextRequestAction(action, browserClient) {
