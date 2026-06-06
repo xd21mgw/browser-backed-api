@@ -64,7 +64,10 @@ incomplete evidence.
 ## 设备图谱
 
 - 适用问题：查用户关联设备、设备风险标签、设备活跃和关联用户。
-- 推荐 action：`weapon_inventory`, `track_analysis_summary`
+- 推荐 action：`weapon_inventory`, `weapon_device_info`,
+  `track_analysis_summary`
+- 补充 action：`weapon_device_app_list`, `weapon_device_location_info`,
+  `weapon_user_klink_status`
 - 必填参数：`user_id` or `device_id`
 - 可选参数：`include_risk_data`, `max_device_ids`, `appName`,
   `sub_interface`
@@ -81,6 +84,29 @@ curl -sS -X POST "{service_base_url}/actions/weapon_inventory" \
 Notes: `weapon_inventory` is the current page-follow-up exception because it
 chains service-owned graph/risk fixed paths. It still does not build a risk
 judgment.
+
+## 设备详情
+
+- 适用问题：查设备指纹明细、设备信息 tab、安装应用、位置信息、账号侧会话状态。
+- 推荐 action：`weapon_device_info`, `weapon_device_app_list`,
+  `weapon_device_location_info`
+- 补充 action：`weapon_user_klink_status`, `weapon_inventory`
+- 必填参数：`device_id`; `weapon_device_location_info` 还需要 `user_id`
+- 可选参数：`product`，默认 `KUAISHOU`
+- 常见下一跳：设备图谱、登录历史、用户画像。
+
+Example:
+
+```sh
+curl -sS -X POST "{service_base_url}/actions/weapon_device_info" \
+  -H 'content-type: application/json' \
+  -d '{"response_mode":"passthrough","device_id":"<device_id>"}'
+```
+
+Notes: `weapon_device_info` 直打 Weapon riskData 固定路径，用于拿设备详情 /
+设备信息 tab 对应的上游业务体；不会做字段投影或风险结论。安装应用、位置
+信息、账号侧会话状态分别用 `weapon_device_app_list`、
+`weapon_device_location_info`、`weapon_user_klink_status`。
 
 ## 作品/内容
 

@@ -165,7 +165,7 @@ Expected:
 
 - `/health ok=true`
 - `auth_state=ready`, or the needed origin is ready
-- `action_count=70`
+- `action_count=74`
 - no credential material output
 
 Or use:
@@ -195,7 +195,7 @@ Before action calls, the main Agent should verify:
 
 - Mac node connected.
 - `{service_base_url}/health` reachable.
-- `{service_base_url}/actions` returns `action_count=70`.
+- `{service_base_url}/actions` returns `action_count=74`.
 - Required origin readiness is acceptable for the intended action.
 
 When recording smoke results, capture only envelope fields:

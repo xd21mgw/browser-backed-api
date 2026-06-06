@@ -76,7 +76,7 @@ quality scoring, risk judgments, no-data interpretation, next-step
 recommendations, DataAgent/Hive calls, permission bypass, or automatic upstream
 write/disposal actions.
 
-Current `action_count=70`.
+Current `action_count=74`.
 
 Useful entry points:
 
@@ -130,6 +130,10 @@ to `passthrough`; legacy modes are rejected.
 | `track_analysis_summary` | `track_analysis` |
 | `login_logs_search` | `login_logs` |
 | `weapon_inventory` | `weapon` |
+| `weapon_device_info` | `weapon` |
+| `weapon_device_app_list` | `weapon` |
+| `weapon_device_location_info` | `weapon` |
+| `weapon_user_klink_status` | `weapon` |
 | `rcp_snapshot` | `rcp` |
 | `archives_user_profile` | `archives` |
 | `archives_user_analysis` | `archives` |
@@ -314,7 +318,7 @@ Optional smoke:
 Expected self-test output:
 
 - `service_ready`
-- `action_count=70`
+- `action_count=74`
 - per-action envelope summary
 - per-action `live_status`
 - main-agent observation summary such as `track_profile_observed`,
@@ -354,7 +358,7 @@ in [`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`](./REMOTE_MAIN_AGENT_SUCCESS_PATHS.md).
 
 ## Capability Playbook
 
-Users and main agents do not need to memorize all 70 action names. Use
+Users and main agents do not need to memorize all 74 action names. Use
 [`CAPABILITY_INDEX.yaml`](./CAPABILITY_INDEX.yaml) for capability-to-action
 mapping and [`ACTION_PLAYBOOK.md`](./ACTION_PLAYBOOK.md) for user-facing "what
 do I want to inspect" guidance.
@@ -364,6 +368,7 @@ Supported command intents include:
 - `/browser-backed-risk-service 用户画像 <user_id>`
 - `/browser-backed-risk-service 登录历史 <user_id>`
 - `/browser-backed-risk-service 设备图谱 <user_id>`
+- `/browser-backed-risk-service 设备详情 <device_id>`
 - `/browser-backed-risk-service 作品查询 <user_id>`
 - `/browser-backed-risk-service 私信样本 <user_id>`
 - `/browser-backed-risk-service 资料变更 <user_id>`

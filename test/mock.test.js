@@ -43,6 +43,19 @@ const ACTION_INPUTS = Object.freeze({
   weapon_inventory: {
     user_id: "2871834924"
   },
+  weapon_device_info: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF"
+  },
+  weapon_device_app_list: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF"
+  },
+  weapon_device_location_info: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF",
+    user_id: "4559196013"
+  },
+  weapon_user_klink_status: {
+    user_id: "4559196013"
+  },
   login_logs_search: {
     user_id: "2871834924",
     from_timestamp: 1780000000000,
@@ -568,7 +581,7 @@ test("origin registry and fixed action allowlist remain explicit", () => {
     assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
     assert.equal(origin.enabled, true);
   }
-  assert.equal(Object.keys(ACTIONS).length, 70);
+  assert.equal(Object.keys(ACTIONS).length, 74);
   assert.deepEqual(Object.keys(ACTIONS), ACTION_ALLOWLIST);
 });
 
@@ -692,6 +705,26 @@ test("fixed request builders keep typed params on fixed paths", () => {
   assert.equal(rcpRequest.method, "POST");
   assert.equal(rcpRequest.path, "/v2/rest/event/eventList");
   assert.equal(rcpRequest.body.eventV2.sourceIds, "mock_source_id");
+
+  const weaponDeviceInfoRequest = buildActionBody(ACTIONS.weapon_device_info, ACTION_INPUTS.weapon_device_info);
+  assert.equal(weaponDeviceInfoRequest.method, "GET");
+  assert.equal(weaponDeviceInfoRequest.path.startsWith("/apiv2/riskData?"), true);
+  assert.equal(weaponDeviceInfoRequest.path.includes("deviceIds=1504354E-BE57-727A-A8BD-3A1AEF1D35DF"), true);
+  assert.equal(decodeURIComponent(weaponDeviceInfoRequest.displayPath).includes("[typed_device_id]"), true);
+
+  const weaponDeviceAppListRequest = buildActionBody(ACTIONS.weapon_device_app_list, ACTION_INPUTS.weapon_device_app_list);
+  assert.equal(weaponDeviceAppListRequest.method, "GET");
+  assert.equal(weaponDeviceAppListRequest.path, "/api/dataReport/getDeviceAppList?deviceId=1504354E-BE57-727A-A8BD-3A1AEF1D35DF");
+
+  const weaponDeviceLocationInfoRequest = buildActionBody(ACTIONS.weapon_device_location_info, ACTION_INPUTS.weapon_device_location_info);
+  assert.equal(weaponDeviceLocationInfoRequest.method, "GET");
+  assert.equal(weaponDeviceLocationInfoRequest.path.startsWith("/api/dataReport/getLocationInfo?"), true);
+  assert.equal(weaponDeviceLocationInfoRequest.path.includes("deviceId=1504354E-BE57-727A-A8BD-3A1AEF1D35DF"), true);
+  assert.equal(weaponDeviceLocationInfoRequest.path.includes("userId=4559196013"), true);
+
+  const weaponUserKlinkStatusRequest = buildActionBody(ACTIONS.weapon_user_klink_status, ACTION_INPUTS.weapon_user_klink_status);
+  assert.equal(weaponUserKlinkStatusRequest.method, "GET");
+  assert.equal(weaponUserKlinkStatusRequest.path, "/api/dataReport/getKlinkStatusByUsers?userId=4559196013");
 
   const recoveredRequest = buildActionBody(ACTIONS.rcp_node_bind_policy_attribution, ACTION_INPUTS.rcp_node_bind_policy_attribution);
   assert.equal(recoveredRequest.method, "GET");

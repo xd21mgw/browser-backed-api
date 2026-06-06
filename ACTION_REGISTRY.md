@@ -4,7 +4,7 @@ This is the controlled passthrough action registry for the local
 browser-backed service. It describes service-callable fixed actions, fixed
 platform origin/path, typed params, mock/live status, and safety boundary.
 
-Current callable action count: 70.
+Current callable action count: 74.
 
 This file is service-layer documentation only. It does not define how an
 upper-layer Agent interprets returned transport status or any platform data.
@@ -52,11 +52,11 @@ JavaScript context.
 
 Current runtime fetch modes:
 
-- `context_request`: 69 fixed actions. The browser context supplies the local
+- `context_request`: 72 fixed actions. The browser context supplies the local
   login state while the service calls the allowlisted fixed origin/path directly.
-- `page_followup`: `weapon_inventory` only. This action chains the
-  service-owned `graphData -> riskData` fixed paths and remains on
-  page-context fetch for that follow-up flow.
+- `page_followup`: `weapon_inventory`, `login_logs_search`. `weapon_inventory`
+  chains the service-owned `graphData -> riskData` fixed paths; `login_logs_search`
+  keeps its page-session guard and stale-page retry flow.
 - `page_fetch`: no current default action uses this mode.
 
 ## Callable Action Matrix
@@ -66,6 +66,10 @@ Current runtime fetch modes:
 | `track_analysis_summary` | Track Analysis / `track_analysis` | `GET` or `POST` by `sub_interface` | Track Analysis sequence fixed paths | `user_id` or `device_id`, `appName`, optional `sub_interface`, `time_window` | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Fixed sub-interface enum only; no caller path/url/header/auth/raw body. |
 | `login_logs_search` | Login Logs / `login_logs` | `GET` | `/rest/unified/log/search` | `user_id`, optional time window/limit/recall source | passthrough only | bounded | yes | yes | `live_complete`; `live_smoke_verified` | `open_default` | Fixed path and typed query only. |
 | `weapon_inventory` | Weapon / `weapon` | `GET` | `/apiv2/graphData`; chained `/apiv2/riskData` | `user_id` or `device_id`, optional product/search controls | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Chained risk path is service-owned. |
+| `weapon_device_info` | Weapon / `weapon` | `GET` | `/apiv2/riskData` | `device_id`, optional `product` | passthrough only | bounded | yes | yes | `har_recovered`; live not run | `open_default` | Fixed `deviceIds` query only; direct risk-data device detail. |
+| `weapon_device_app_list` | Weapon / `weapon` | `GET` | `/api/dataReport/getDeviceAppList` | `device_id` | passthrough only | bounded | yes | yes | `har_recovered`; live not run | `open_default` | Fixed `deviceId` query only; app list passthrough. |
+| `weapon_device_location_info` | Weapon / `weapon` | `GET` | `/api/dataReport/getLocationInfo` | `device_id`, `user_id`, optional `product` | passthrough only | bounded | yes | yes | `har_recovered`; live not run | `open_default` | Fixed device/user/product query only; no caller path/url/header/auth/raw body. |
+| `weapon_user_klink_status` | Weapon / `weapon` | `GET` | `/api/dataReport/getKlinkStatusByUsers` | `user_id` | passthrough only | bounded | yes | yes | `har_recovered`; live not run | `open_default` | Fixed `userId` query only; account-session status passthrough. |
 | `rcp_snapshot` | RCP / `rcp` | `POST` | `/v2/rest/event/eventList` | typed event/time/source/device/page/column controls | passthrough only | bounded | yes | yes | `live_complete` | `open_default` | Service builds fixed request body. |
 | `archives_user_profile` | Archives Center / `archives` | `GET` | `/archives/user/home/info` | `user_id` | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed path only. |
 | `archives_user_analysis` | Archives Center / `archives` | `POST` | `/v3/user/log/coreLogs/fetch` | `user_id`, `beginTime`, `endTime`, optional page controls | passthrough only | bounded | yes | yes | `live_smoke_verified` | `open_explicit` | Fixed request body from typed fields only. |

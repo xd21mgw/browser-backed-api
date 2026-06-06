@@ -4,6 +4,10 @@ import { classifyHttpStatus } from "./diagnostics.js";
 export const ACTION_ALLOWLIST = Object.freeze([
   "rcp_snapshot",
   "weapon_inventory",
+  "weapon_device_info",
+  "weapon_device_app_list",
+  "weapon_device_location_info",
+  "weapon_user_klink_status",
   "login_logs_search",
   "track_analysis_summary",
   "archives_user_analysis",
@@ -197,6 +201,9 @@ const RCP_COLUMN_COMMENTS = Object.freeze({
 
 const WEAPON_GRAPH_DATA_PATH = "/apiv2/graphData";
 const WEAPON_RISK_DATA_PATH = "/apiv2/riskData";
+const WEAPON_DEVICE_APP_LIST_PATH = "/api/dataReport/getDeviceAppList";
+const WEAPON_LOCATION_INFO_PATH = "/api/dataReport/getLocationInfo";
+const WEAPON_KLINK_STATUS_PATH = "/api/dataReport/getKlinkStatusByUsers";
 const WEAPON_DEFAULT_PRODUCT = "KUAISHOU";
 const WEAPON_DEFAULT_PRODUCT_NAME = "KUAISHOU";
 const WEAPON_DEFAULT_SEARCH_LEVEL = 2;
@@ -391,6 +398,61 @@ export const ACTIONS = Object.freeze({
     validateParams: validateWeaponInventoryInput,
     buildRequest: buildWeaponInventoryRequest,
     mockData: mockWeaponInventoryData
+  }),
+  weapon_device_info: freezeAction({
+    name: "weapon_device_info",
+    domainKey: "weapon",
+    description: "Return direct Weapon riskData device detail for a typed device_id.",
+    method: "GET",
+    apiPath: WEAPON_RISK_DATA_PATH,
+    inputContract: {
+      device_id: "required string; maps to deviceIds",
+      product: "optional enum; default KUAISHOU"
+    },
+    validateParams: validateWeaponDeviceInfoInput,
+    buildRequest: buildWeaponDeviceInfoRequest,
+    mockData: mockWeaponDeviceInfoData
+  }),
+  weapon_device_app_list: freezeAction({
+    name: "weapon_device_app_list",
+    domainKey: "weapon",
+    description: "Return Weapon installed application list for a typed device_id.",
+    method: "GET",
+    apiPath: WEAPON_DEVICE_APP_LIST_PATH,
+    inputContract: {
+      device_id: "required string"
+    },
+    validateParams: validateWeaponDeviceOnlyInput("weapon_device_app_list"),
+    buildRequest: buildWeaponDeviceAppListRequest,
+    mockData: mockWeaponDeviceAppListData
+  }),
+  weapon_device_location_info: freezeAction({
+    name: "weapon_device_location_info",
+    domainKey: "weapon",
+    description: "Return Weapon device location detail for typed device_id and user_id.",
+    method: "GET",
+    apiPath: WEAPON_LOCATION_INFO_PATH,
+    inputContract: {
+      device_id: "required string",
+      user_id: "required decimal string",
+      product: "optional enum; default KUAISHOU"
+    },
+    validateParams: validateWeaponDeviceLocationInfoInput,
+    buildRequest: buildWeaponDeviceLocationInfoRequest,
+    mockData: mockWeaponDeviceLocationInfoData
+  }),
+  weapon_user_klink_status: freezeAction({
+    name: "weapon_user_klink_status",
+    domainKey: "weapon",
+    description: "Return Weapon account session/Klink status records for a typed user_id.",
+    method: "GET",
+    apiPath: WEAPON_KLINK_STATUS_PATH,
+    inputContract: {
+      user_id: "required decimal string"
+    },
+    validateParams: validateDecimalUserIdAction("weapon_user_klink_status"),
+    buildRequest: buildWeaponUserKlinkStatusRequest,
+    mockData: mockWeaponUserKlinkStatusData
   }),
   login_logs_search: freezeAction({
     name: "login_logs_search",
@@ -4257,6 +4319,17 @@ function weaponProductName(input) {
   return isNonEmptyString(input.productName) ? input.productName.trim() : WEAPON_DEFAULT_PRODUCT_NAME;
 }
 
+function validateWeaponProductInput(actionName, input) {
+  if (Object.hasOwn(input, "product") && weaponProduct(input) !== WEAPON_DEFAULT_PRODUCT) {
+    return {
+      message: `${actionName} product must be ${WEAPON_DEFAULT_PRODUCT}`,
+      required: [`product=${WEAPON_DEFAULT_PRODUCT}`],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
 function weaponSearchLevel(input) {
   return Object.hasOwn(input, "searchLevel") ? Math.trunc(input.searchLevel) : WEAPON_DEFAULT_SEARCH_LEVEL;
 }
@@ -4267,6 +4340,99 @@ function weaponIncludeRiskData(input) {
 
 function weaponMaxDeviceIds(input) {
   return Object.hasOwn(input, "max_device_ids") ? Math.trunc(input.max_device_ids) : WEAPON_DEFAULT_MAX_DEVICE_IDS;
+}
+
+function validateWeaponDeviceOnlyInput(actionName) {
+  return (input) => {
+    if (!isNonEmptyString(input.device_id)) {
+      return {
+        message: `${actionName} requires device_id as a non-empty string`,
+        required: ["device_id string"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function validateWeaponDeviceInfoInput(input) {
+  const deviceError = validateWeaponDeviceOnlyInput("weapon_device_info")(input);
+  if (deviceError) {
+    return deviceError;
+  }
+  return validateWeaponProductInput("weapon_device_info", input);
+}
+
+function validateWeaponDeviceLocationInfoInput(input) {
+  const deviceError = validateWeaponDeviceOnlyInput("weapon_device_location_info")(input);
+  if (deviceError) {
+    return deviceError;
+  }
+  const userError = validateDecimalUserId("weapon_device_location_info", input);
+  if (userError) {
+    return userError;
+  }
+  return validateWeaponProductInput("weapon_device_location_info", input);
+}
+
+function buildWeaponDeviceInfoRequest(input) {
+  const product = weaponProduct(input);
+  const params = new URLSearchParams({
+    product,
+    deviceIds: input.device_id.trim()
+  });
+  const displayParams = new URLSearchParams({
+    product,
+    deviceIds: "[typed_device_id]"
+  });
+  return {
+    path: `${WEAPON_RISK_DATA_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_RISK_DATA_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponDeviceAppListRequest(input) {
+  const params = new URLSearchParams({ deviceId: input.device_id.trim() });
+  const displayParams = new URLSearchParams({ deviceId: "[typed_device_id]" });
+  return {
+    path: `${WEAPON_DEVICE_APP_LIST_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_DEVICE_APP_LIST_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponDeviceLocationInfoRequest(input) {
+  const product = weaponProduct(input);
+  const params = new URLSearchParams({
+    deviceId: input.device_id.trim(),
+    product,
+    userId: input.user_id.trim()
+  });
+  const displayParams = new URLSearchParams({
+    deviceId: "[typed_device_id]",
+    product,
+    userId: "[typed_user_id]"
+  });
+  return {
+    path: `${WEAPON_LOCATION_INFO_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_LOCATION_INFO_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponUserKlinkStatusRequest(input) {
+  const params = new URLSearchParams({ userId: input.user_id.trim() });
+  const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+  return {
+    path: `${WEAPON_KLINK_STATUS_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_KLINK_STATUS_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
 }
 
 function validateLoginLogsInput(input) {
@@ -5143,6 +5309,150 @@ function mockWeaponInventoryData(input) {
         ok: true,
         status: 200,
         body: riskValue
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceInfoData(input) {
+  const request = buildWeaponDeviceInfoRequest(input);
+  return {
+    fixed_paths: {
+      riskData: WEAPON_RISK_DATA_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath,
+      product: weaponProduct(input),
+      device_ids_exposed_raw: false
+    },
+    data: [
+      {
+        deviceId: input.device_id.trim(),
+        productName: weaponProduct(input),
+        labelInfo: {
+          OldLeable: {
+            groupName: "较弱风险",
+            groupLevel: "1",
+            labels: [
+              {
+                labelType: "ANDROID",
+                labelDesc: "mock device label",
+                riskLevel: "0",
+                labelName: "mock_label",
+                riskTime: "2026-06-06 10:00:00"
+              }
+            ]
+          }
+        },
+        originalLog: {
+          deviceId: input.device_id.trim(),
+          model: "mock_model",
+          appVersion: "14.4.30.9822",
+          resolution: "2532*1170"
+        },
+        userLevel: "HIGH"
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceAppListData(input) {
+  const request = buildWeaponDeviceAppListRequest(input);
+  return {
+    fixed_paths: {
+      deviceAppList: WEAPON_DEVICE_APP_LIST_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath
+    },
+    data: [
+      {
+        package_name: "weixin",
+        name: "微信",
+        version_name: "8.0.0",
+        version_code: 8000000,
+        system: false,
+        running: false,
+        first_installation_timestamp: 1766722520426
+      },
+      {
+        package_name: "com.smile.gifmaker",
+        name: "快手",
+        version_name: "14.4.30.9822",
+        version_code: 144309822,
+        system: false,
+        running: true,
+        first_installation_timestamp: 1766722520426
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceLocationInfoData(input) {
+  const request = buildWeaponDeviceLocationInfoRequest(input);
+  return {
+    fixed_paths: {
+      locationInfo: WEAPON_LOCATION_INFO_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath,
+      product: weaponProduct(input)
+    },
+    data: {
+      code: 0,
+      msg: "success",
+      has_permission: false,
+      location_result: {
+        user_info: {
+          device_id: input.device_id.trim(),
+          user_id: Number(input.user_id)
+        },
+        location_info: {
+          lat: 25.97410833,
+          lon: 108.39160523,
+          source: 9,
+          mode: 0,
+          timestamp: 1780037588000,
+          range: 0,
+          confidence_rate: 0
+        },
+        ad_code_location_info: {
+          province: { name: "贵州省", province_code: "520000" },
+          city: { name: "黔东南苗族侗族自治州", city_code: "522600" },
+          county: { name: "榕江县", county_code: "522632" }
+        }
+      }
+    },
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponUserKlinkStatusData(input) {
+  const request = buildWeaponUserKlinkStatusRequest(input);
+  return {
+    fixed_paths: {
+      klinkStatus: WEAPON_KLINK_STATUS_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath
+    },
+    data: [
+      {
+        uid: Number(input.user_id),
+        app_id: 26,
+        event: 2,
+        event_timestamp_ms: 1780718448547,
+        client_ip_str: "1.206.186.49",
+        net: "MOBILE",
+        device_id: "mock_device_id",
+        kpn: "KUAISHOU"
       }
     ],
     generated_at: fixedMockTime()
