@@ -506,7 +506,7 @@ export const ACTIONS = Object.freeze({
   archives_user_analysis: freezeAction({
     name: "archives_user_analysis",
     domainKey: "archives",
-    description: "Return a compact Archives Center user action timeline shape summary for typed user/time params.",
+    description: "Passthrough Archives Center user action timeline rows for typed user/time params.",
     method: "POST",
     apiPath: ARCHIVES_USER_ANALYSIS_PATH,
     registryStatus: "service_registered",
@@ -1893,6 +1893,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   let platformError = errorType;
   let transportError = null;
   const unexpectedHtml = detectUnexpectedHtmlApiResponse(action, contentType, bodyText);
+  const businessAuthFailure = detectBusinessAuthFailure(action, returnedBody.body);
   const staleApiSession = Boolean(
     meta.auth_state_expired === true ||
       meta.origin_ready_state_stale === true ||
@@ -1900,7 +1901,15 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   );
   let safeReason = meta.safe_reason || null;
 
-  if (unexpectedHtml) {
+  if (businessAuthFailure) {
+    ok = false;
+    errorType = businessAuthFailure.errorType;
+    platformError = businessAuthFailure.platformError;
+    safeReason = businessAuthFailure.safeReason;
+    upstream.error_type = errorType;
+    upstream.safe_reason = safeReason;
+    upstream.business_error = businessAuthFailure.businessError;
+  } else if (unexpectedHtml) {
     ok = false;
     const loginLogsRetryStillHtml = action.name === "login_logs_search" &&
       meta.page_context_retry_attempted === true &&
@@ -2001,6 +2010,9 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      context_request_recovery_attempted: Boolean(meta.context_request_recovery_attempted),
+      context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
+      context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
       page_context_retry_attempted: Boolean(meta.page_context_retry_attempted),
       page_context_retry_reason: safeString(meta.page_context_retry_reason) || null,
       page_context_retry_status: safeString(meta.page_context_retry_status) || null,
@@ -2082,6 +2094,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      context_request_recovery_attempted: Boolean(meta.context_request_recovery_attempted),
+      context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
+      context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
       safe_reason: safeReason || null,
       next_step: nextStep
     },
@@ -4132,6 +4147,29 @@ function detectUnexpectedHtmlApiResponse(action, contentType, bodyText) {
   }
   const text = typeof bodyText === "string" ? bodyText.trimStart().slice(0, 512).toLowerCase() : "";
   return text.startsWith("<!doctype html") || text.startsWith("<html") || /<html[\s>]/i.test(text);
+}
+
+function detectBusinessAuthFailure(action, body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  const code = body.result ?? body.code ?? null;
+  if (
+    action?.domainKey === "archives" &&
+    /没有授权|联系管理员授权|无权限|未授权/i.test(message)
+  ) {
+    return {
+      errorType: "auth_failed",
+      platformError: "auth_failed",
+      safeReason: "upstream_business_auth_required",
+      businessError: {
+        code,
+        message
+      }
+    };
+  }
+  return null;
 }
 
 function normalizeJsonArrayCap(value) {

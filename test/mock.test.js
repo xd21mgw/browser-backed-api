@@ -797,8 +797,20 @@ test("live response builder exposes small text upstream body", () => {
 
 test("context request actions do not use page-context fetch", async () => {
   const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
   const calledActions = [];
   const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains[domainKey].origin,
+      current_origin: config.domains[domainKey].origin,
+      origin: config.domains[domainKey].origin
+    }),
     actionDiagnostics: (action) => ({
       action_name: action.name,
       expected_origin: config.domains[action.domainKey].origin,
@@ -828,13 +840,16 @@ test("context request actions do not use page-context fetch", async () => {
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
   markAllOriginsReady(service, config);
 
-  for (const actionName of ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request")) {
+  const contextRequestActions = ACTION_ALLOWLIST.filter((name) =>
+    ACTIONS[name].fetchMode === "context_request" && ACTIONS[name].domainKey !== "archives"
+  );
+  for (const actionName of contextRequestActions) {
     const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
     assert.equal(response.ok, true, actionName);
     assert.equal(response.upstream.body.data.action, actionName);
     assertTransportEnvelope(response, actionName);
   }
-  assert.deepEqual(calledActions, ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request"));
+  assert.deepEqual(calledActions, contextRequestActions);
 });
 
 test("rcp_event_detail forwards action-specific request timeout to context request", async () => {
@@ -873,6 +888,212 @@ test("rcp_event_detail forwards action-specific request timeout to context reque
   assert.equal(seenTimeoutMs, 30000);
   assert.equal(response.ok, true);
   assertTransportEnvelope(response, "rcp_event_detail");
+});
+
+test("context request actions recover once from network error by rebuilding browser context", async () => {
+  const config = createLiveConfig();
+  let requestAttempts = 0;
+  let closeCalled = 0;
+  let startCalled = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    start: async () => {
+      startCalled += 1;
+    },
+    close: async () => {
+      closeCalled += 1;
+    },
+    prewarmDomain: async (domainKey) => {
+      prewarmCalled += 1;
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.weapon.origin,
+        current_origin: config.domains.weapon.origin,
+        same_origin_actual: true,
+        latency_ms: 10,
+        error_type: null,
+        warmed: true
+      };
+    },
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for context_request actions");
+    },
+    runActionWithContextRequest: async (action) => {
+      requestAttempts += 1;
+      if (requestAttempts === 1) {
+        throw new Error("fetch failed");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name, recovered: true } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_device_info", ACTION_INPUTS.weapon_device_info);
+  assert.equal(requestAttempts, 2);
+  assert.equal(closeCalled, 1);
+  assert.equal(startCalled, 1);
+  assert.equal(prewarmCalled, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.context_request_recovery_attempted, true);
+  assert.equal(response.meta.context_request_recovery_status, "ready");
+  assert.equal(response.upstream.body.data.recovered, true);
+  assertTransportEnvelope(response, "weapon_device_info");
+});
+
+test("archives page-bound request retries once when upstream business body signals auth-required stale page state", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let requestAttempts = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    close: async () => {
+      throw new Error("archives business auth recovery should not close the browser context");
+    },
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.archives.origin,
+      current_origin: config.domains.archives.origin,
+      origin: config.domains.archives.origin
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      requestAttempts += 1;
+      if (requestAttempts === 1) {
+        const bodyText = JSON.stringify({ result: 468, message: "没有授权，请联系管理员授权" });
+        return {
+          ok: true,
+          status: 200,
+          contentType: "application/json;charset=UTF-8",
+          bodyText,
+          observedBytes: Buffer.byteLength(bodyText),
+          returnedBytes: Buffer.byteLength(bodyText),
+          bodyTruncated: false
+        };
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { rows: [{ userId: "5521564836", operationType: "loginStart" }] } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("archives actions should use page-bound fetch");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  const originalPrewarmDomain = service.prewarmDomain.bind(service);
+  service.prewarmDomain = async (...args) => {
+    prewarmCalled += 1;
+    return originalPrewarmDomain(...args);
+  };
+  markAllOriginsReady(service, config);
+
+  const response = await service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis);
+  assert.equal(requestAttempts, 2);
+  assert.equal(prewarmCalled, 2);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "upstream_business_auth_required");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.upstream.body.data.rows[0].operationType, "loginStart");
+});
+
+test("page follow-up actions recover once from fetch failure by rewarming page context", async () => {
+  const config = createLiveConfig();
+  let pageFetchAttempts = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "weapon",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.weapon.origin,
+      current_origin: config.domains.weapon.origin,
+      origin: config.domains.weapon.origin
+    }),
+    actionDiagnostics: () => ({
+      action_name: "weapon_inventory",
+      expected_origin: config.domains.weapon.origin,
+      bound_page_origin: config.domains.weapon.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      pageFetchAttempts += 1;
+      if (pageFetchAttempts === 1) {
+        throw new Error("Failed to fetch");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { recovered: true } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for page-followup actions");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  const originalPrewarmDomain = service.prewarmDomain.bind(service);
+  service.prewarmDomain = async (...args) => {
+    prewarmCalled += 1;
+    return originalPrewarmDomain(...args);
+  };
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
+  assert.equal(pageFetchAttempts, 2);
+  assert.equal(prewarmCalled, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "page_followup_fetch_failed");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.upstream.body.data.recovered, true);
 });
 
 test("weapon_inventory uses page follow-up fetch and does not call context request", async () => {
@@ -915,6 +1136,68 @@ test("weapon_inventory uses page follow-up fetch and does not call context reque
   assert.equal(response.ok, true);
   assert.equal(response.upstream.body.data.action, "weapon_inventory");
   assertTransportEnvelope(response, "weapon_inventory");
+});
+
+test("page-followup action rewarms when bound page origin drifts before fetch", async () => {
+  const config = createLiveConfig();
+  let prewarmCalls = 0;
+  let diagnosticsReady = false;
+  const bodyText = JSON.stringify({ code: 0, data: { action: "weapon_inventory", rewarm: true } });
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      diagnosticsReady = true;
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.weapon.origin,
+        current_origin: config.domains.weapon.origin,
+        same_origin_actual: true,
+        latency_ms: 10,
+        error_type: null,
+        warmed: true
+      };
+    },
+    actionDiagnostics: () => diagnosticsReady
+      ? {
+          action_name: "weapon_inventory",
+          expected_origin: config.domains.weapon.origin,
+          bound_page_origin: config.domains.weapon.origin,
+          origin_warmed: true,
+          page_ready: true,
+          origin_match: true
+        }
+      : {
+          action_name: "weapon_inventory",
+          expected_origin: config.domains.weapon.origin,
+          bound_page_origin: config.domains.login_logs.origin,
+          origin_warmed: true,
+          page_ready: false,
+          origin_match: false
+        },
+    runAction: async () => ({
+      ok: true,
+      status: 200,
+      contentType: "application/json;charset=UTF-8",
+      bodyText,
+      observedBytes: Buffer.byteLength(bodyText),
+      returnedBytes: Buffer.byteLength(bodyText),
+      bodyTruncated: false
+    }),
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for page-followup actions");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
+  assert.equal(prewarmCalls, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.freshness_rewarm_attempted, true);
+  assert.equal(response.meta.freshness_rewarm_status, "ready");
+  assert.equal(response.upstream.body.data.rewarm, true);
 });
 
 test("login_logs_search page-session API timeout reports api fetch stage", async () => {
@@ -960,11 +1243,23 @@ test("login_logs_search page-session API timeout reports api fetch stage", async
   assertTransportEnvelope(response, "login_logs_search");
 });
 
-test("context request action returns API contract mismatch when the fixed API returns HTML shell", async () => {
+test("archives page-bound action returns API contract mismatch when the fixed API returns HTML shell", async () => {
   const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
   const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
-  let contextRequestCalled = false;
+  let pageFetchCalled = false;
   const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.archives.origin,
+      current_origin: config.domains.archives.origin,
+      origin: config.domains.archives.origin
+    }),
     actionDiagnostics: () => ({
       action_name: "archives_user_profile",
       expected_origin: config.domains.archives.origin,
@@ -973,11 +1268,8 @@ test("context request action returns API contract mismatch when the fixed API re
       page_ready: true,
       origin_match: true
     }),
-    runAction: async () => {
-      throw new Error("page fetch should not be used for archives_user_profile");
-    },
-    runActionWithContextRequest: async (action, actionRequest) => {
-      contextRequestCalled = true;
+    runAction: async (action, actionRequest) => {
+      pageFetchCalled = true;
       assert.equal(action.name, "archives_user_profile");
       assert.equal(actionRequest.method, "GET");
       assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
@@ -990,13 +1282,16 @@ test("context request action returns API contract mismatch when the fixed API re
         returnedBytes: Buffer.byteLength(html),
         bodyTruncated: false
       };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("archives actions should use page-bound fetch");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  markOriginReady(service, config, "archives");
+  markAllOriginsReady(service, config);
 
   const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
-  assert.equal(contextRequestCalled, true);
+  assert.equal(pageFetchCalled, true);
   assert.equal(response.ok, false);
   assert.equal(response.error_type, "unexpected_html_response");
   assert.equal(response.platform_error, "api_contract_mismatch");
@@ -1424,6 +1719,33 @@ test("JSON fixed action response builder treats HTML page shell as API contract 
   assert.equal(response.upstream.response_body_kind, "html_page");
   assert.equal(Object.hasOwn(response.upstream, "body"), false);
   assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("archives business auth body maps to auth_failed with safe reason", () => {
+  const bodyText = JSON.stringify({
+    result: 468,
+    currentTime: 1780796054607,
+    message: "没有授权，请联系管理员授权"
+  });
+  const response = buildLiveActionResponse(ACTIONS.archives_user_analysis, ACTION_INPUTS.archives_user_analysis, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json;charset=utf-8",
+    bodyText,
+    observedBytes: Buffer.byteLength(bodyText),
+    returnedBytes: Buffer.byteLength(bodyText),
+    bodyTruncated: false
+  }, { latencyMs: 8 });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.platform_error, "auth_failed");
+  assert.equal(response.safe_reason, "upstream_business_auth_required");
+  assert.equal(response.upstream.business_error.code, 468);
+  assert.equal(response.upstream.business_error.message, "没有授权，请联系管理员授权");
+  assert.equal(response.body_present, true);
+  assert.equal(response.upstream.body_present, true);
+  assertNoCredentialMaterial(response);
 });
 
 test("response too large returns capped passthrough body without summary fallback", () => {
@@ -2111,6 +2433,161 @@ test("batch executes independent parallel sources and returns transport matrix",
   assert.equal(response.missing_or_failed_sources.length, 0);
   assertNoOldBusinessFields(response);
   assertNoCredentialMaterial(response);
+});
+
+test("batch serializes page-followup fetches globally and archives context actions per domain lane", async () => {
+  const service = createService();
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  let activePageFollowup = 0;
+  let maxActivePageFollowup = 0;
+  service.executeAction = async (action) => {
+    if (action === "archives_user_analysis") {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeArchives -= 1;
+    }
+    if (action === "login_logs_search" || action === "weapon_inventory") {
+      activePageFollowup += 1;
+      maxActivePageFollowup = Math.max(maxActivePageFollowup, activePageFollowup);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activePageFollowup -= 1;
+    }
+    return {
+      ok: true,
+      source_status: "completed",
+      error_type: null,
+      platform_error: null,
+      body_present: true,
+      raw_body_handling: "visible",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body_present: true,
+        body_omitted: false,
+        body_truncated: false,
+        observed_bytes: 32,
+        returned_bytes: 32,
+        raw_body_handling: "visible",
+        body: { action }
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "shared_chain",
+        execution: "independent_parallel",
+        sources: [
+          { source_id: "archives_a", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis },
+          { source_id: "archives_b", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis },
+          { source_id: "login_a", action: "login_logs_search", params: ACTION_INPUTS.login_logs_search },
+          { source_id: "weapon_a", action: "weapon_inventory", params: ACTION_INPUTS.weapon_inventory }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "completed");
+  assert.equal(maxActiveArchives, 1);
+  assert.equal(maxActivePageFollowup, 1);
+});
+
+test("batch source results preserve safe_reason for downstream diagnosis", async () => {
+  const service = createService();
+  service.executeAction = async () => ({
+    ok: false,
+    source_status: "failed",
+    error_type: "auth_failed",
+    safe_reason: "upstream_business_auth_required",
+    platform_error: "auth_failed",
+    body_present: true,
+    upstream: {
+      status: 200,
+      content_type: "application/json",
+      body_present: true,
+      body_omitted: false,
+      body_truncated: false,
+      observed_bytes: 64,
+      returned_bytes: 64,
+      error_type: "auth_failed",
+      safe_reason: "upstream_business_auth_required",
+      raw_body_handling: "visible"
+    }
+  });
+  const response = await service.executeBatch({
+    sources: [
+      { source_id: "analysis", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis }
+    ]
+  });
+  assert.equal(response.source_results.analysis.safe_reason, "upstream_business_auth_required");
+  assert.equal(response.transport_status_matrix.analysis.safe_reason, "upstream_business_auth_required");
+});
+
+test("batch source inherits context request recovery for weapon device detail", async () => {
+  const config = createLiveConfig();
+  let requestAttempts = 0;
+  const fakeBrowserClient = {
+    start: async () => {},
+    close: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.weapon.origin,
+      current_origin: config.domains.weapon.origin,
+      same_origin_actual: true,
+      latency_ms: 10,
+      error_type: null,
+      warmed: true
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for context_request actions");
+    },
+    runActionWithContextRequest: async (action) => {
+      requestAttempts += 1;
+      if (requestAttempts === 1) {
+        throw new Error("fetch failed");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeBatch({
+    execution: "independent_parallel",
+    sources: [
+      {
+        source_id: "weapon_device_detail",
+        action: "weapon_device_info",
+        params: ACTION_INPUTS.weapon_device_info
+      }
+    ]
+  });
+  assert.equal(requestAttempts, 2);
+  assert.equal(response.batch_status, "completed");
+  assert.equal(response.completed_count, 1);
+  assert.equal(response.source_results.weapon_device_detail.ok, true);
+  assert.equal(response.source_results.weapon_device_detail.upstream.body.data.action, "weapon_device_info");
 });
 
 test("batch preserves capped upstream body snippets in source results", async () => {
