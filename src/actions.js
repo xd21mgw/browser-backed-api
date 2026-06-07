@@ -241,6 +241,7 @@ const TRACK_ANALYSIS_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const TRACK_ANALYSIS_DEFAULT_PRODUCT = "KUAISHOU";
 
 const ARCHIVES_USER_ANALYSIS_PATH = "/v3/user/log/coreLogs/fetch";
+const ARCHIVES_PAGE_REFERER_PATH = "/frontend/archives/index.html";
 const ARCHIVES_PHOTO_SEARCH_PATH = "/v4/archives/report/photo/search";
 const ARCHIVES_PHOTO_PROFILE_PATH = "/v3/photo/profile";
 const ARCHIVES_PHOTO_META_PATH = "/v3/photo/meta";
@@ -2188,6 +2189,7 @@ function buildArchivesUserAnalysisRequest(input) {
     path: ARCHIVES_USER_ANALYSIS_PATH,
     displayPath: ARCHIVES_USER_ANALYSIS_PATH,
     method: "POST",
+    headers: archivesPageRequestHeaders(),
     body
   };
 }
@@ -2197,13 +2199,21 @@ function validateArchivesUserProfileInput(input) {
 }
 
 function buildArchivesUserProfileRequest(input) {
-  const params = new URLSearchParams({ userId: input.user_id.trim() });
-  const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+  const params = new URLSearchParams({ keyword: input.user_id.trim() });
+  const displayParams = new URLSearchParams({ keyword: "[typed_user_id]" });
   return {
     path: `${ARCHIVES_USER_PROFILE_PATH}?${params.toString()}`,
     displayPath: `${ARCHIVES_USER_PROFILE_PATH}?${displayParams.toString()}`,
     method: "GET",
+    headers: archivesPageRequestHeaders(),
     body: {}
+  };
+}
+
+function archivesPageRequestHeaders() {
+  return {
+    accept: "application/json, text/plain, */*",
+    referer: ARCHIVES_PAGE_REFERER_PATH
   };
 }
 

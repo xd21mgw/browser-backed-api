@@ -1650,9 +1650,6 @@ function hasPendingManualLogin(originStatus = {}) {
 }
 
 function isContextRequestAction(action, browserClient) {
-  if (action?.domainKey === "archives") {
-    return false;
-  }
   return Boolean(action?.fetchMode === "context_request" && typeof browserClient?.runActionWithContextRequest === "function");
 }
 

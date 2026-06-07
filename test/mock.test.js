@@ -841,7 +841,7 @@ test("context request actions do not use page-context fetch", async () => {
   markAllOriginsReady(service, config);
 
   const contextRequestActions = ACTION_ALLOWLIST.filter((name) =>
-    ACTIONS[name].fetchMode === "context_request" && ACTIONS[name].domainKey !== "archives"
+    ACTIONS[name].fetchMode === "context_request"
   );
   for (const actionName of contextRequestActions) {
     const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
@@ -959,7 +959,7 @@ test("context request actions recover once from network error by rebuilding brow
   assertTransportEnvelope(response, "weapon_device_info");
 });
 
-test("archives page-bound request retries once when upstream business body signals auth-required stale page state", async () => {
+test("archives context request retries once when upstream business body signals auth-required stale page state", async () => {
   const config = createLiveConfig();
   fs.mkdirSync(config.profileDir, { recursive: true });
   let requestAttempts = 0;
@@ -988,7 +988,13 @@ test("archives page-bound request retries once when upstream business body signa
       origin_match: true
     }),
     runAction: async () => {
+      throw new Error("page fetch should not be used for archives context request");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
       requestAttempts += 1;
+      assert.equal(action.name, "archives_user_analysis");
+      assert.equal(action.fetchMode, "context_request");
+      assert.equal(actionRequest.headers.referer, "/frontend/archives/index.html");
       if (requestAttempts === 1) {
         const bodyText = JSON.stringify({ result: 468, message: "没有授权，请联系管理员授权" });
         return {
@@ -1011,9 +1017,6 @@ test("archives page-bound request retries once when upstream business body signa
         returnedBytes: Buffer.byteLength(bodyText),
         bodyTruncated: false
       };
-    },
-    runActionWithContextRequest: async () => {
-      throw new Error("archives actions should use page-bound fetch");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
@@ -1243,11 +1246,11 @@ test("login_logs_search page-session API timeout reports api fetch stage", async
   assertTransportEnvelope(response, "login_logs_search");
 });
 
-test("archives page-bound action returns API contract mismatch when the fixed API returns HTML shell", async () => {
+test("archives context request returns API contract mismatch when the fixed API returns HTML shell", async () => {
   const config = createLiveConfig();
   fs.mkdirSync(config.profileDir, { recursive: true });
   const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
-  let pageFetchCalled = false;
+  let contextRequestCalled = false;
   const fakeBrowserClient = {
     status: () => ({ browser_initialized: true, context_initialized: true }),
     start: async () => {},
@@ -1268,11 +1271,15 @@ test("archives page-bound action returns API contract mismatch when the fixed AP
       page_ready: true,
       origin_match: true
     }),
-    runAction: async (action, actionRequest) => {
-      pageFetchCalled = true;
+    runAction: async () => {
+      throw new Error("page fetch should not be used for archives context request");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      contextRequestCalled = true;
       assert.equal(action.name, "archives_user_profile");
       assert.equal(actionRequest.method, "GET");
-      assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
+      assert.equal(actionRequest.path, `/archives/user/home/info?keyword=${ACTION_INPUTS.archives_user_profile.user_id}`);
+      assert.equal(actionRequest.headers.referer, "/frontend/archives/index.html");
       return {
         ok: true,
         status: 200,
@@ -1282,16 +1289,13 @@ test("archives page-bound action returns API contract mismatch when the fixed AP
         returnedBytes: Buffer.byteLength(html),
         bodyTruncated: false
       };
-    },
-    runActionWithContextRequest: async () => {
-      throw new Error("archives actions should use page-bound fetch");
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
   markAllOriginsReady(service, config);
 
   const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
-  assert.equal(pageFetchCalled, true);
+  assert.equal(contextRequestCalled, true);
   assert.equal(response.ok, false);
   assert.equal(response.error_type, "unexpected_html_response");
   assert.equal(response.platform_error, "api_contract_mismatch");
