@@ -2213,7 +2213,15 @@ function buildArchivesUserProfileRequest(input) {
 function archivesPageRequestHeaders() {
   return {
     accept: "application/json, text/plain, */*",
-    referer: ARCHIVES_PAGE_REFERER_PATH
+    referer: ARCHIVES_PAGE_REFERER_PATH,
+    origin: "@same_origin"
+  };
+}
+
+function withArchivesPageHeaders(request) {
+  return {
+    ...request,
+    headers: archivesPageRequestHeaders()
   };
 }
 
@@ -2248,7 +2256,7 @@ function validateArchivesPhotoSearchInput(input) {
 }
 
 function buildArchivesPhotoSearchRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PHOTO_SEARCH_PATH,
     displayPath: ARCHIVES_PHOTO_SEARCH_PATH,
     method: "POST",
@@ -2261,7 +2269,7 @@ function buildArchivesPhotoSearchRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateArchivesPhotoIdInput(actionName) {
@@ -2278,7 +2286,7 @@ function validateArchivesPhotoIdInput(actionName) {
 }
 
 function buildArchivesPhotoIdRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2301,7 +2309,7 @@ function validateArchivesGalleryPhotoListInput(input) {
 }
 
 function buildArchivesGalleryPhotoListRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
     displayPath: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
     method: "POST",
@@ -2311,7 +2319,7 @@ function buildArchivesGalleryPhotoListRequest(input) {
       pageSize: positiveIntegerParam(input, "pageSize", 20),
       filters: {}
     }
-  };
+  });
 }
 
 function validateDecimalUserIdAction(actionName) {
@@ -2319,7 +2327,7 @@ function validateDecimalUserIdAction(actionName) {
 }
 
 function buildArchivesUserIdPostRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2333,12 +2341,12 @@ function buildArchivesUserIdGetRequest(fixedPath) {
   return (input) => {
     const params = new URLSearchParams({ userId: input.user_id.trim() });
     const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
-    return {
+    return withArchivesPageHeaders({
       path: `${fixedPath}?${params.toString()}`,
       displayPath: `${fixedPath}?${displayParams.toString()}`,
       method: "GET",
       body: {}
-    };
+    });
   };
 }
 
@@ -2353,7 +2361,7 @@ function validateArchivesUserPageIndexInput(actionName, defaultSize) {
 }
 
 function buildArchivesUserPageIndexRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2376,7 +2384,7 @@ function validateArchivesUserPageCountInput(actionName, defaultCount) {
 }
 
 function buildArchivesUserPageCountRequest(fixedPath, defaultCount) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2399,7 +2407,7 @@ function validateArchivesUserPageSizeInput(actionName, defaultSize) {
 }
 
 function buildArchivesUserPageSizeRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2426,7 +2434,7 @@ function validateArchivesTimedUserPageInput(actionName, defaultSize) {
 }
 
 function buildArchivesTimedUserPageRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2455,7 +2463,7 @@ function validateArchivesPunishStatusInput(input) {
 
 function buildArchivesPunishStatusRequest(input) {
   const scope = archivesPunishTargetScope(input);
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PUNISH_STATUS_PATH,
     displayPath: ARCHIVES_PUNISH_STATUS_PATH,
     method: "POST",
@@ -2463,7 +2471,7 @@ function buildArchivesPunishStatusRequest(input) {
       targetId: scope.targetId,
       targetType: scope.targetType
     }
-  };
+  });
 }
 
 function archivesPunishTargetScope(input) {
@@ -2523,12 +2531,12 @@ function buildArchivesCommentSearchRequest(input) {
     body.photoId = input.photo_id.trim();
     body.containsPhotoInfo = Object.hasOwn(input, "containsPhotoInfo") ? input.containsPhotoInfo : true;
   }
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_COMMENT_SEARCH_PATH,
     displayPath: ARCHIVES_COMMENT_SEARCH_PATH,
     method: "POST",
     body
-  };
+  });
 }
 
 function validateArchivesLiveStreamIdInput(actionName) {
@@ -2545,7 +2553,7 @@ function validateArchivesLiveStreamIdInput(actionName) {
 }
 
 function buildArchivesLiveStreamIdRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2586,12 +2594,12 @@ function buildArchivesLiveStreamPageRequest(fixedPath) {
       body.beginTime = input.beginTime;
       body.endTime = input.endTime;
     }
-    return {
+    return withArchivesPageHeaders({
       path: fixedPath,
       displayPath: fixedPath,
       method: "POST",
       body
-    };
+    });
   };
 }
 
@@ -2623,12 +2631,12 @@ function buildArchivesUserReportSearchRequest(input) {
     body.begin = input.begin;
     body.end = input.end;
   }
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_USER_REPORT_SEARCH_PATH,
     displayPath: ARCHIVES_USER_REPORT_SEARCH_PATH,
     method: "POST",
     body
-  };
+  });
 }
 
 function validateArchivesRelatedUsersInput(input) {
@@ -2649,7 +2657,7 @@ function validateArchivesRelatedUsersInput(input) {
 
 function buildArchivesRelatedUsersRequest(input) {
   const relationType = archivesRelationType(input);
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_RELATED_USERS_PATH,
     displayPath: ARCHIVES_RELATED_USERS_PATH,
     method: "POST",
@@ -2658,7 +2666,7 @@ function buildArchivesRelatedUsersRequest(input) {
       inputType: 0,
       type: ARCHIVES_RELATED_USER_TYPES[relationType]
     }
-  };
+  });
 }
 
 function validateArchivesPrivateMessageSearchInput(input) {
@@ -2696,7 +2704,7 @@ function validateArchivesPrivateMessageSearchInput(input) {
 
 function buildArchivesPrivateMessageSearchRequest(input) {
   const directionKey = ARCHIVES_PRIVATE_MESSAGE_DIRECTIONS[input.direction];
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
     displayPath: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
     method: "POST",
@@ -2707,7 +2715,7 @@ function buildArchivesPrivateMessageSearchRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateArchivesPastFourItemsInput(input) {
@@ -2736,7 +2744,7 @@ function validateArchivesPastFourItemsInput(input) {
 }
 
 function buildArchivesPastFourItemsRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PAST_FOUR_ITEMS_PATH,
     displayPath: ARCHIVES_PAST_FOUR_ITEMS_PATH,
     method: "POST",
@@ -2748,7 +2756,7 @@ function buildArchivesPastFourItemsRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateRcpEventIdentityInput(input) {

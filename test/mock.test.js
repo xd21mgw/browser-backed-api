@@ -852,6 +852,70 @@ test("context request actions do not use page-context fetch", async () => {
   assert.deepEqual(calledActions, contextRequestActions);
 });
 
+test("archives context request builders include HAR-aligned referer and origin headers", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const seen = [];
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains[domainKey].origin,
+      current_origin: config.domains[domainKey].origin,
+      origin: config.domains[domainKey].origin
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for archives context request");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      seen.push({
+        action: action.name,
+        path: actionRequest.path,
+        headers: actionRequest.headers
+      });
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markAllOriginsReady(service, config);
+
+  await service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search);
+  await service.executeAction("archives_gallery_photo_list", ACTION_INPUTS.archives_gallery_photo_list);
+
+  assert.deepEqual(
+    seen.map((entry) => ({
+      action: entry.action,
+      referer: entry.headers?.referer,
+      origin: entry.headers?.origin
+    })),
+    [
+      { action: "archives_photo_search", referer: "/frontend/archives/index.html", origin: "@same_origin" },
+      { action: "archives_gallery_photo_list", referer: "/frontend/archives/index.html", origin: "@same_origin" }
+    ]
+  );
+});
+
 test("rcp_event_detail forwards action-specific request timeout to context request", async () => {
   const config = createLiveConfig();
   let seenTimeoutMs = null;

@@ -871,6 +871,8 @@ function resolveFixedRequestHeaders(headers, origin) {
     const normalizedName = name.toLowerCase();
     if (normalizedName === "referer" && value.startsWith("/")) {
       resolved[normalizedName] = `${origin}${value}`;
+    } else if (normalizedName === "origin" && value === "@same_origin") {
+      resolved[normalizedName] = origin;
     } else {
       resolved[normalizedName] = value;
     }
