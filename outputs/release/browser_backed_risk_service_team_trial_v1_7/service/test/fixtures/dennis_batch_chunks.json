@@ -1,0 +1,235 @@
+[
+  {
+    "request_id": "sample_expand_validate_batch:round_1:chunk_1:general",
+    "dry_run": false,
+    "response_mode": "controlled_batch_passthrough",
+    "default_timeout_ms": 30000,
+    "execution_groups": [
+      {
+        "group_id": "independent_parallel",
+        "execution": "independent_parallel",
+        "sources": [
+          {
+            "source_id": "round_1_entity_1_archives_profile",
+            "action": "archives_user_profile",
+            "params": {
+              "user_id": "5521564836",
+              "mode": "archives_user_home_profile"
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_1_weapon",
+            "action": "weapon_inventory",
+            "params": {
+              "user_id": "5521564836",
+              "mode": "batch_user_device_graph_summary",
+              "include_risk_data": true,
+              "max_device_ids": 10
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_2_archives_profile",
+            "action": "archives_user_profile",
+            "params": {
+              "user_id": "5523394618",
+              "mode": "archives_user_home_profile"
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_2_weapon",
+            "action": "weapon_inventory",
+            "params": {
+              "user_id": "5523394618",
+              "mode": "batch_user_device_graph_summary",
+              "include_risk_data": true,
+              "max_device_ids": 10
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_3_archives_profile",
+            "action": "archives_user_profile",
+            "params": {
+              "user_id": "5523620454",
+              "mode": "archives_user_home_profile"
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_3_weapon",
+            "action": "weapon_inventory",
+            "params": {
+              "user_id": "5523620454",
+              "mode": "batch_user_device_graph_summary",
+              "include_risk_data": true,
+              "max_device_ids": 10
+            },
+            "timeout_ms": 30000
+          }
+        ]
+      },
+      {
+        "group_id": "auth_sensitive_serial",
+        "execution": "auth_sensitive_serial",
+        "sources": [
+          {
+            "source_id": "round_1_entity_1_photo",
+            "action": "archives_photo_search",
+            "params": {
+              "user_id": "5521564836",
+              "begin": 1779724800000,
+              "end": 1780330000000,
+              "page": 1,
+              "count": 20
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_2_photo",
+            "action": "archives_photo_search",
+            "params": {
+              "user_id": "5523394618",
+              "begin": 1779724800000,
+              "end": 1780330000000,
+              "page": 1,
+              "count": 20
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_3_photo",
+            "action": "archives_photo_search",
+            "params": {
+              "user_id": "5523620454",
+              "begin": 1779724800000,
+              "end": 1780330000000,
+              "page": 1,
+              "count": 20
+            },
+            "timeout_ms": 30000
+          }
+        ],
+        "depends_on": [
+          "independent_parallel"
+        ]
+      }
+    ]
+  },
+  {
+    "request_id": "sample_expand_validate_batch:round_1:chunk_2:login_logs_search",
+    "dry_run": false,
+    "response_mode": "controlled_batch_passthrough",
+    "default_timeout_ms": 30000,
+    "execution_groups": [
+      {
+        "group_id": "independent_parallel",
+        "execution": "independent_parallel",
+        "sources": [
+          {
+            "source_id": "round_1_entity_1_login",
+            "action": "login_logs_search",
+            "params": {
+              "user_id": "5521564836",
+              "from_timestamp": 1779725200000,
+              "to_timestamp": 1780330000000,
+              "recallSource": "2,0,1,3",
+              "max_records": 50
+            },
+            "timeout_ms": 45000
+          },
+          {
+            "source_id": "round_1_entity_2_login",
+            "action": "login_logs_search",
+            "params": {
+              "user_id": "5523394618",
+              "from_timestamp": 1779725200000,
+              "to_timestamp": 1780330000000,
+              "recallSource": "2,0,1,3",
+              "max_records": 50
+            },
+            "timeout_ms": 45000
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "request_id": "sample_expand_validate_batch:round_1:chunk_3:login_logs_search",
+    "dry_run": false,
+    "response_mode": "controlled_batch_passthrough",
+    "default_timeout_ms": 30000,
+    "execution_groups": [
+      {
+        "group_id": "independent_parallel",
+        "execution": "independent_parallel",
+        "sources": [
+          {
+            "source_id": "round_1_entity_3_login",
+            "action": "login_logs_search",
+            "params": {
+              "user_id": "5523620454",
+              "from_timestamp": 1779725200000,
+              "to_timestamp": 1780330000000,
+              "recallSource": "2,0,1,3",
+              "max_records": 50
+            },
+            "timeout_ms": 45000
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "request_id": "sample_expand_validate_batch:round_1:chunk_4:rcp_fast_query_hbase",
+    "dry_run": false,
+    "response_mode": "controlled_batch_passthrough",
+    "default_timeout_ms": 30000,
+    "execution_groups": [
+      {
+        "group_id": "independent_parallel",
+        "execution": "independent_parallel",
+        "sources": [
+          {
+            "source_id": "round_1_entity_1_strategy",
+            "action": "rcp_fast_query_hbase",
+            "params": {
+              "source_id": "5521564836",
+              "startTime": 1779724800000,
+              "endTime": 1780330000000,
+              "eventTypeCodes": "",
+              "limit": 100
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_2_strategy",
+            "action": "rcp_fast_query_hbase",
+            "params": {
+              "source_id": "5523394618",
+              "startTime": 1779724800000,
+              "endTime": 1780330000000,
+              "eventTypeCodes": "",
+              "limit": 100
+            },
+            "timeout_ms": 30000
+          },
+          {
+            "source_id": "round_1_entity_3_strategy",
+            "action": "rcp_fast_query_hbase",
+            "params": {
+              "source_id": "5523620454",
+              "startTime": 1779724800000,
+              "endTime": 1780330000000,
+              "eventTypeCodes": "",
+              "limit": 100
+            },
+            "timeout_ms": 30000
+          }
+        ]
+      }
+    ]
+  }
+]

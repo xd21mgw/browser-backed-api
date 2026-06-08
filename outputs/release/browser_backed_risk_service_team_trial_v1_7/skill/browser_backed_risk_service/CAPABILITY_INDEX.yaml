@@ -1,6 +1,6 @@
 version: 1
 service: browser_backed_risk_service
-action_count: 70
+action_count: 74
 contract_source: ACTION_REGISTRY.md
 positioning: fixed_action_typed_params_safe_passthrough
 
@@ -40,11 +40,30 @@ capabilities:
       - 查用户关联设备、设备风险标签和设备活跃
     default_actions:
       - weapon_inventory
+      - weapon_device_info
       - track_analysis_summary
     actions:
       - weapon_inventory
+      - weapon_device_info
+      - weapon_device_app_list
+      - weapon_device_location_info
+      - weapon_user_klink_status
       - track_analysis_summary
       - archives_related_users
+
+  - capability: device_detail
+    display_name: 设备详情
+    suitable_questions:
+      - 查设备指纹明细、安装应用、位置信息和账号侧会话状态
+    default_actions:
+      - weapon_device_info
+      - weapon_device_app_list
+      - weapon_device_location_info
+    actions:
+      - weapon_device_info
+      - weapon_device_app_list
+      - weapon_device_location_info
+      - weapon_user_klink_status
 
   - capability: content_and_photo
     display_name: 作品/内容
@@ -164,6 +183,10 @@ command_aliases:
     capability: device_graph
     required_params:
       - user_id
+  设备详情:
+    capability: device_detail
+    required_params:
+      - device_id
   作品查询:
     capability: content_and_photo
     required_params:

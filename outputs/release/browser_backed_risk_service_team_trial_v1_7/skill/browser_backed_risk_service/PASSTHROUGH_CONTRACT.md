@@ -201,6 +201,10 @@ business summarization; the caller/main agent should parse `upstream.body` or
 Fixed actions expect API JSON by default. Business action fetches use the
 browser-context request API by default, while browser pages remain responsible
 for origin readiness, local login state, and lightweight account confirmation.
+Archives actions stay on browser-context request as well, but the service
+attaches a fixed HAR-recovered page contract: Referer
+`/frontend/archives/index.html` and same-origin Origin. Callers still cannot
+pass headers, cookies, sessions, or arbitrary request bodies.
 Origin `ready` only means the browser is on the expected platform origin; it is
 not sufficient when the API session is stale. Action execution first checks
 `auth_state` and target-origin freshness (`origin_ready_state_stale`,
@@ -212,12 +216,20 @@ or `error_type=unexpected_html_response` with
 `platform_error=api_contract_mismatch` when the origin is fresh. The HTML body is
 omitted. This is not `no_data` and not source evidence.
 
-The only current page-context business fetch exception is `weapon_inventory`,
-which uses a service-owned `graphData -> riskData` follow-up chain. Timeout
-failures include `timeout_stage` when the service can classify the stage, such
-as `api_fetch_timeout` for fixed API request timeout, `page_followup_timeout`
-for the Weapon follow-up chain, and `source_timeout` for controlled batch source
-timeout.
+The current page-context business fetch exceptions are:
+
+- `weapon_inventory`, which uses a service-owned `graphData -> riskData`
+  follow-up chain.
+- `login_logs_search`, because the user-center workbench page can become idle
+  and stop reacting even while still on the expected origin. The service
+  refreshes that page session before the fixed API request and retries once
+  after `unexpected_html_response` or `api_fetch_timeout`. A second HTML shell is
+  reported as `login_logs_page_context_stale`.
+
+Timeout failures include `timeout_stage` when the service can classify the
+stage, such as `api_fetch_timeout` for fixed API request timeout,
+`page_followup_timeout` for the Weapon follow-up chain, and `source_timeout` for
+controlled batch source timeout.
 
 ## Input Boundary
 

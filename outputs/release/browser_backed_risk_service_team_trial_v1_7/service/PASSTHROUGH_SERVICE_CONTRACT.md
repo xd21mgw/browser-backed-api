@@ -201,6 +201,10 @@ business summarization; the caller/main agent should parse `upstream.body` or
 Fixed actions expect API JSON by default. Business action fetches use the
 browser-context request API by default, while browser pages remain responsible
 for origin readiness, local login state, and lightweight account confirmation.
+Archives actions stay on browser-context request as well, but the service
+attaches a fixed HAR-recovered page contract: Referer
+`/frontend/archives/index.html` and same-origin Origin. Callers still cannot
+pass headers, cookies, sessions, or arbitrary request bodies.
 Origin `ready` only means the browser is on the expected platform origin; it is
 not sufficient when the API session is stale. Action execution first checks
 `auth_state` and target-origin freshness (`origin_ready_state_stale`,

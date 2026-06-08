@@ -341,6 +341,9 @@ export class BrowserBackedClient {
     await this.start();
 
     const domain = this.config.domains[action.domainKey];
+    const requestTimeoutMs = Number(actionRequest.requestTimeoutMs) > 0
+      ? Number(actionRequest.requestTimeoutMs)
+      : this.config.browser.requestTimeoutMs;
     let page = this.pages.get(action.domainKey);
     if (!page) {
       await this.prewarmDomain(action.domainKey);
@@ -567,7 +570,7 @@ export class BrowserBackedClient {
           product: actionRequest.followUp.product,
           includeRiskData: actionRequest.followUp.includeRiskData,
           maxDeviceIds: actionRequest.followUp.maxDeviceIds,
-          timeoutMs: this.config.browser.requestTimeoutMs,
+          timeoutMs: requestTimeoutMs,
           maxBodyBytes: this.config.browser.maxLiveBodyBytes
         }
       );
@@ -795,7 +798,8 @@ export class BrowserBackedClient {
         path: actionRequest.path,
         method: actionRequest.method,
         body: actionRequest.body,
-        timeoutMs: this.config.browser.requestTimeoutMs,
+        headers: actionRequest.headers || null,
+        timeoutMs: requestTimeoutMs,
         maxBodyBytes: this.config.browser.maxLiveBodyBytes,
         responseBodyCap: actionRequest.responseBodyCap || null
       }
@@ -808,14 +812,19 @@ export class BrowserBackedClient {
     const domain = this.config.domains[action.domainKey];
     const requestUrl = sameOriginActionUrl(domain, actionRequest.path);
     const method = actionRequest.method || action.method || "GET";
+    const requestTimeoutMs = Number(actionRequest.requestTimeoutMs) > 0
+      ? Number(actionRequest.requestTimeoutMs)
+      : this.config.browser.requestTimeoutMs;
+    const requestHeaders = resolveFixedRequestHeaders(actionRequest.headers || {}, domain.origin);
     const response = await this.context.request.fetch(requestUrl, {
       method,
       headers: {
         accept: "application/json",
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...requestHeaders
       },
       data: method === "GET" ? undefined : JSON.stringify(actionRequest.body || {}),
-      timeout: this.config.browser.requestTimeoutMs,
+      timeout: requestTimeoutMs,
       failOnStatusCode: false
     });
     const body = await response.body();
@@ -851,6 +860,24 @@ export class BrowserBackedClient {
       context_initialized: Boolean(this.context)
     };
   }
+}
+
+function resolveFixedRequestHeaders(headers, origin) {
+  const resolved = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (typeof value !== "string" || value.length === 0) {
+      continue;
+    }
+    const normalizedName = name.toLowerCase();
+    if (normalizedName === "referer" && value.startsWith("/")) {
+      resolved[normalizedName] = `${origin}${value}`;
+    } else if (normalizedName === "origin" && value === "@same_origin") {
+      resolved[normalizedName] = origin;
+    } else {
+      resolved[normalizedName] = value;
+    }
+  }
+  return resolved;
 }
 
 function buildNavigationDiagnostics({ domain, target, page, response, navigationError }) {

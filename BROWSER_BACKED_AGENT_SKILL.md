@@ -117,6 +117,11 @@ Daily user experience should be low-friction:
   returns `login_logs_page_context_stale`, report that the login logs source is
   blocked by stale page context; do not call it `no_data` and do not retry
   indefinitely.
+- Archives actions are still browser-context request actions. The service
+  injects the fixed Archives page contract recovered from HAR
+  (`/frontend/archives/index.html` Referer plus same-origin Origin) before
+  calling fixed APIs such as `archives_user_profile`, `archives_user_analysis`,
+  `archives_photo_search`, and `archives_gallery_photo_list`.
 - `npm run worker:start` is the only daily recovery entry point. It may open the
   Mac profile flow when refresh/rewarm reports `manual_login_required`,
   `auth_required`, `two_factor_required`, or `captcha_required`; after the user

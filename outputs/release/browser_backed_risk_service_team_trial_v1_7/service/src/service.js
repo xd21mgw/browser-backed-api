@@ -251,7 +251,7 @@ export class BrowserBackedApiService {
     const actionSessionRewarmAlreadyDone = freshnessResult.meta.freshness_rewarm_attempted === true &&
       freshnessResult.meta.freshness_rewarm_status === "ready";
     const forceActionRewarm = shouldForceActionRewarm(action) && !actionSessionRewarmAlreadyDone;
-    if (originWarmed && (forceActionRewarm || shouldLazyRewarm(actionDiagnostics))) {
+    if (originWarmed && (forceActionRewarm || shouldLazyRewarm(action, actionDiagnostics))) {
       lazyMeta.lazyRewarmAttempted = true;
       lazyMeta.lazyRewarmReason = forceActionRewarm
         ? "action_requires_fresh_page_session"
@@ -283,16 +283,50 @@ export class BrowserBackedApiService {
       if (isContextRequestAction(action, this.browserClient)) {
         try {
           const fetchResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
-          return buildLiveActionResponse(action, input, this.config, fetchResult, {
+          const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
             latencyMs: Date.now() - startedAt,
             authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
             ...lazyMeta
           });
+          if (shouldRetryAfterRecoverableResponse(action, response)) {
+            if (action.domainKey === "archives") {
+              return this.retryAfterPageSessionRefresh({
+                action,
+                input,
+                actionRequest,
+                startedAt,
+                baseMeta: lazyMeta,
+                reason: response.safe_reason || response.error_type || "recoverable_business_auth_required"
+              });
+            }
+            return this.retryAfterContextRequestRecovery({
+              action,
+              input,
+              actionRequest,
+              startedAt,
+              baseMeta: lazyMeta,
+              reason: response.safe_reason || response.error_type || "recoverable_business_auth_required"
+            });
+          }
+          return response;
         } catch (error) {
-          const errorType = classifyError(error);
+          const failure = classifyActionFetchFailure(error, action, actionDiagnostics);
+          const errorType = failure.errorType;
+          if (shouldRetryAfterContextRequestError(errorType)) {
+            return this.retryAfterContextRequestRecovery({
+              action,
+              input,
+              actionRequest,
+              startedAt,
+              baseMeta: lazyMeta,
+              reason: failure.safeReason || errorType
+            });
+          }
           return buildPassthroughFailureResponse(action, input, {
             latencyMs: Date.now() - startedAt,
             errorType,
+            safe_reason: failure.safeReason,
+            platformError: failure.platformError,
             timeoutStage: timeoutStageForFetchError(errorType, "api_fetch_timeout"),
             ...lazyMeta
           });
@@ -305,6 +339,16 @@ export class BrowserBackedApiService {
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
         ...lazyMeta
       });
+      if (shouldRetryAfterRecoverableResponse(action, response)) {
+        return this.retryAfterPageSessionRefresh({
+          action,
+          input,
+          actionRequest,
+          startedAt,
+          baseMeta: lazyMeta,
+          reason: response.safe_reason || response.error_type || "recoverable_business_auth_required"
+        });
+      }
       if (shouldRetryAfterPageSessionResponse(action, response)) {
         return this.retryAfterPageSessionRefresh({
           action,
@@ -317,7 +361,8 @@ export class BrowserBackedApiService {
       }
       return response;
     } catch (error) {
-      const errorType = classifyError(error);
+      const failure = classifyActionFetchFailure(error, action, actionDiagnostics);
+      const errorType = failure.errorType;
       if (shouldRetryAfterPageSessionError(action, errorType)) {
         return this.retryAfterPageSessionRefresh({
           action,
@@ -325,12 +370,14 @@ export class BrowserBackedApiService {
           actionRequest,
           startedAt,
           baseMeta: lazyMeta,
-          reason: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)) || errorType
+          reason: failure.safeReason || timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)) || errorType
         });
       }
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
         errorType,
+        safe_reason: failure.safeReason,
+        platformError: failure.platformError,
         timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
         ...lazyMeta
       });
@@ -338,10 +385,11 @@ export class BrowserBackedApiService {
   }
 
   async retryAfterPageSessionRefresh({ action, input, actionRequest, startedAt, baseMeta, reason }) {
+    const staleSafeReason = pageSessionStaleSafeReason(action, reason);
     const retryMeta = {
       ...baseMeta,
       page_context_retry_attempted: true,
-      page_context_retry_reason: reason || "login_logs_page_context_stale",
+      page_context_retry_reason: staleSafeReason,
       page_context_retry_status: "not_attempted"
     };
     const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
@@ -363,14 +411,16 @@ export class BrowserBackedApiService {
         errorType,
         platformError: errorType,
         authRedirectDetected: Boolean(rewarmResult.auth_redirect_detected),
-        safe_reason: "login_logs_page_context_stale",
+        safe_reason: staleSafeReason,
         nextStep: "npm run worker:start",
         ...retryMeta
       });
     }
 
     try {
-      const retryFetchResult = await this.browserClient.runAction(action, actionRequest);
+      const retryFetchResult = isContextRequestAction(action, this.browserClient)
+        ? await this.browserClient.runActionWithContextRequest(action, actionRequest)
+        : await this.browserClient.runAction(action, actionRequest);
       return buildLiveActionResponse(action, input, this.config, retryFetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: false,
@@ -382,7 +432,67 @@ export class BrowserBackedApiService {
         latencyMs: Date.now() - startedAt,
         errorType,
         timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
-        safe_reason: "login_logs_page_context_stale",
+        safe_reason: staleSafeReason,
+        ...retryMeta
+      });
+    }
+  }
+
+  async retryAfterContextRequestRecovery({ action, input, actionRequest, startedAt, baseMeta, reason }) {
+    const retryMeta = {
+      ...baseMeta,
+      context_request_recovery_attempted: true,
+      context_request_recovery_reason: reason || "network_error",
+      context_request_recovery_status: "not_attempted"
+    };
+
+    try {
+      if (typeof this.browserClient?.close === "function") {
+        await this.browserClient.close();
+      }
+      if (typeof this.browserClient?.start === "function") {
+        await this.browserClient.start();
+      }
+      const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+      retryMeta.context_request_recovery_status = rewarmResult.warmed
+        ? "ready"
+        : rewarmResult.error_type || rewarmResult.status || "failed";
+      Object.assign(retryMeta, this.freshnessMeta(action.domainKey, {
+        freshness_check_attempted: true,
+        freshness_rewarm_attempted: true,
+        freshness_rewarm_status: retryMeta.context_request_recovery_status,
+        auth_redirect_detected: Boolean(rewarmResult.auth_redirect_detected),
+        landing_flow_status: rewarmResult.last_landing_flow_status || rewarmResult.landing_flow_status || null
+      }));
+
+      if (!rewarmResult.warmed || retryMeta.origin_ready_state_stale === true) {
+        const errorType = rewarmFailureErrorType(rewarmResult);
+        return buildPassthroughFailureResponse(action, input, {
+          latencyMs: Date.now() - startedAt,
+          errorType,
+          platformError: errorType,
+          authRedirectDetected: Boolean(rewarmResult.auth_redirect_detected),
+          safe_reason: "context_request_not_recovered",
+          nextStep: "npm run worker:start",
+          ...retryMeta
+        });
+      }
+
+      const retryFetchResult = await this.browserClient.runActionWithContextRequest(action, actionRequest);
+      return buildLiveActionResponse(action, input, this.config, retryFetchResult, {
+        latencyMs: Date.now() - startedAt,
+        authRedirectDetected: false,
+        ...retryMeta
+      });
+    } catch (error) {
+      const failure = classifyActionFetchFailure(error, action, this.browserClient.actionDiagnostics(action, false));
+      const errorType = failure.errorType;
+      return buildPassthroughFailureResponse(action, input, {
+        latencyMs: Date.now() - startedAt,
+        errorType,
+        safe_reason: failure.safeReason || "context_request_not_recovered",
+        platformError: failure.platformError,
+        timeoutStage: timeoutStageForFetchError(errorType, "api_fetch_timeout"),
         ...retryMeta
       });
     }
@@ -395,9 +505,25 @@ export class BrowserBackedApiService {
     const groupResults = [];
 
     for (const group of plan.groups) {
+      if (batchDeadlineExceeded(plan)) {
+        const timedOutSources = group.sources.map((source) => buildBatchDeadlineTimeoutResult(source, plan));
+        for (const sourceResult of timedOutSources) {
+          sourceResults[sourceResult.source_id] = sourceResult;
+        }
+        groupResults.push({
+          group_id: group.group_id,
+          execution: group.execution,
+          dependency_group_ids: group.depends_on,
+          source_ids: group.sources.map((source) => source.source_id),
+          latency_ms: 0,
+          completed_at: new Date().toISOString(),
+          skipped_by_batch_deadline: true
+        });
+        continue;
+      }
       const groupStartedAt = Date.now();
       const sources = isParallelExecution(group.execution)
-        ? await Promise.all(group.sources.map((source) => this.executeBatchSource(source, plan)))
+        ? await executeConflictAwareParallel(group.sources, (source) => this.executeBatchSource(source, plan))
         : await executeSerial(group.sources, (source) => this.executeBatchSource(source, plan));
 
       for (const sourceResult of sources) {
@@ -432,11 +558,25 @@ export class BrowserBackedApiService {
         source_count: plan.source_count,
         default_source_timeout_ms: plan.default_timeout_ms,
         max_source_timeout_ms: MAX_BATCH_SOURCE_TIMEOUT_MS,
+        batch_deadline_ms: plan.batch_deadline_ms,
         upstream_business_body_output: "bounded"
       },
+      batch_payload_shape: summarizeBatchPlanShape(plan),
       execution_groups: groupResults,
       source_results: sourceResults,
       transport_status_matrix: transportStatusMatrix,
+      completed_count: classifications.completed.length,
+      no_data_count: classifications.no_data.length,
+      partial_count: classifications.partial.length,
+      auth_failed_count: classifications.auth_failed.length,
+      blocked_count: classifications.blocked.length,
+      timeout_count: classifications.timeout.length,
+      parse_error_count: classifications.parse_error.length,
+      planned_count: classifications.planned.length,
+      failed_count: classifications.auth_failed.length +
+        classifications.blocked.length +
+        classifications.timeout.length +
+        classifications.parse_error.length,
       classifications,
       missing_or_failed_sources: missingOrFailedSources,
       safety: batchSafety()
@@ -445,6 +585,10 @@ export class BrowserBackedApiService {
 
   async executeBatchSource(source, plan) {
     const startedAt = Date.now();
+    const remainingMs = remainingBatchTimeMs(plan);
+    if (remainingMs <= BATCH_DEADLINE_MARGIN_MS) {
+      return buildBatchDeadlineTimeoutResult(source, plan);
+    }
     if (source.validation_error) {
       return buildBatchSourceResult({
         source,
@@ -471,9 +615,13 @@ export class BrowserBackedApiService {
     }
 
     try {
+      const effectiveTimeoutMs = Math.max(
+        MIN_BATCH_SOURCE_TIMEOUT_MS,
+        Math.min(source.timeout_ms, remainingMs - BATCH_DEADLINE_MARGIN_MS)
+      );
       const response = await withSourceTimeout(
         () => this.executeAction(source.action, source.params),
-        source.timeout_ms
+        effectiveTimeoutMs
       );
       if (response?.timed_out) {
         return buildBatchSourceResult({
@@ -485,7 +633,7 @@ export class BrowserBackedApiService {
           latencyMs: Date.now() - startedAt,
           response: null,
           timedOut: true,
-          timeoutStage: "source_timeout"
+          timeoutStage: effectiveTimeoutMs < source.timeout_ms ? "batch_deadline" : "source_timeout"
         });
       }
 
@@ -686,6 +834,10 @@ const BATCH_EXECUTION_MODES = Object.freeze([
 ]);
 const DEFAULT_BATCH_SOURCE_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SOURCE_TIMEOUT_MS = 120_000;
+const MIN_BATCH_SOURCE_TIMEOUT_MS = 100;
+const BATCH_DEADLINE_MARGIN_MS = 1_000;
+const DEFAULT_BATCH_DEADLINE_OVERHEAD_MS = 10_000;
+const MAX_BATCH_DEADLINE_MS = 115_000;
 const MAX_BATCH_GROUPS = 12;
 const MAX_BATCH_SOURCES = 30;
 const SAFE_BATCH_ID_PATTERN = /^[A-Za-z0-9_:-]{1,96}$/;
@@ -713,6 +865,7 @@ function buildBatchPlan(input) {
   const groupIds = new Set();
   const sourceIds = new Set();
   let sourceCount = 0;
+  let maxSourceTimeoutMs = defaultTimeoutMs;
 
   const groups = groupsInput.map((groupInput, groupIndex) => {
     if (!groupInput || typeof groupInput !== "object" || Array.isArray(groupInput)) {
@@ -744,6 +897,7 @@ function buildBatchPlan(input) {
         throw publicError(400, "invalid_batch_request", `Duplicate source_id: ${source.source_id}`);
       }
       sourceIds.add(source.source_id);
+      maxSourceTimeoutMs = Math.max(maxSourceTimeoutMs, source.timeout_ms);
       return source;
     });
 
@@ -780,7 +934,9 @@ function buildBatchPlan(input) {
     request_id: requestId,
     dry_run: input.dry_run === true,
     started_at: new Date().toISOString(),
+    deadline_started_at_ms: Date.now(),
     default_timeout_ms: defaultTimeoutMs,
+    batch_deadline_ms: boundedBatchDeadline(input.batch_timeout_ms, maxSourceTimeoutMs),
     source_count: sourceCount,
     groups
   };
@@ -823,9 +979,28 @@ function normalizeBatchSource(sourceInput, { groupId, sourceIndex, defaultTimeou
     source_id: sourceId,
     action: action.name,
     origin_key: action.domainKey,
+    fetch_mode: action.fetchMode || "context_request",
     params,
     timeout_ms: timeoutMs,
     validation_error: validationError
+  };
+}
+
+function summarizeBatchPlanShape(plan) {
+  return {
+    request_id: plan.request_id,
+    group_count: plan.groups.length,
+    source_count: plan.source_count,
+    groups: plan.groups.map((group) => ({
+      group_id: group.group_id,
+      execution: group.execution,
+      dependency_group_ids: group.depends_on,
+      source_count: group.sources.length,
+      sources: group.sources.map((source) => ({
+        source_id: source.source_id,
+        action: source.action
+      }))
+    }))
   };
 }
 
@@ -858,6 +1033,43 @@ function boundedTimeout(value, fallback) {
   return Math.min(Math.max(Math.trunc(number), 100), MAX_BATCH_SOURCE_TIMEOUT_MS);
 }
 
+function boundedBatchDeadline(value, maxSourceTimeoutMs) {
+  const fallback = Math.min(
+    MAX_BATCH_DEADLINE_MS,
+    Math.max(maxSourceTimeoutMs + DEFAULT_BATCH_DEADLINE_OVERHEAD_MS, 20_000)
+  );
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw publicError(400, "invalid_batch_request", "batch_timeout_ms must be a positive number");
+  }
+  return Math.min(Math.max(Math.trunc(number), 1_000), MAX_BATCH_DEADLINE_MS);
+}
+
+function remainingBatchTimeMs(plan) {
+  return Math.max(0, plan.deadline_started_at_ms + plan.batch_deadline_ms - Date.now());
+}
+
+function batchDeadlineExceeded(plan) {
+  return remainingBatchTimeMs(plan) <= BATCH_DEADLINE_MARGIN_MS;
+}
+
+function buildBatchDeadlineTimeoutResult(source, plan) {
+  return buildBatchSourceResult({
+    source,
+    plan,
+    category: "timeout",
+    sourceStatus: "timeout",
+    errorType: "batch_deadline_exceeded",
+    latencyMs: 0,
+    response: null,
+    timedOut: true,
+    timeoutStage: "batch_deadline"
+  });
+}
+
 function isParallelExecution(execution) {
   return execution === "independent_parallel";
 }
@@ -872,6 +1084,44 @@ async function executeSerial(sources, runner) {
     results.push(await runner(source));
   }
   return results;
+}
+
+async function executeConflictAwareParallel(sources, runner) {
+  const lanes = new Map();
+  for (const source of sources) {
+    const laneKey = batchConflictLaneKey(source);
+    if (!lanes.has(laneKey)) {
+      lanes.set(laneKey, []);
+    }
+    lanes.get(laneKey).push(source);
+  }
+  const laneResults = await Promise.all(
+    [...lanes.values()].map((laneSources) => executeSerial(laneSources, runner))
+  );
+  return laneResults.flat();
+}
+
+function batchConflictLaneKey(source) {
+  if (source.fetch_mode === "page_followup" || source.origin_key === "archives") {
+    return "browser_session_exclusive";
+  }
+  return `parallel:${source.source_id}`;
+}
+
+function pageSessionStaleSafeReason(action, fallback) {
+  if (typeof fallback === "string" && fallback.trim()) {
+    return fallback;
+  }
+  switch (action?.domainKey) {
+    case "login_logs":
+      return "login_logs_page_context_stale";
+    case "weapon":
+      return "weapon_page_context_stale";
+    case "archives":
+      return "archives_page_context_stale";
+    default:
+      return "page_context_stale";
+  }
 }
 
 function withSourceTimeout(runner, timeoutMs) {
@@ -901,7 +1151,7 @@ function buildBatchSourceResult({
   exceptionMessage = null
 }) {
   const upstream = summarizeBatchUpstream(response);
-  const sourceTimeoutStage = timedOut ? "source_timeout" : response?.timeout_stage || upstream.timeout_stage || timeoutStage || null;
+  const sourceTimeoutStage = timedOut ? (timeoutStage || "source_timeout") : response?.timeout_stage || upstream.timeout_stage || timeoutStage || null;
   return {
     source_id: source.source_id,
     action: source.action,
@@ -922,6 +1172,7 @@ function buildBatchSourceResult({
     content_type: upstream.content_type,
     body_present: upstream.body_present,
     body_truncated: upstream.body_truncated,
+    safe_reason: upstream.safe_reason || response?.safe_reason || null,
     observed_bytes: upstream.observed_bytes,
     elapsed_ms: latencyMs,
     transport_error: timedOut ? "timeout" : null,
@@ -951,6 +1202,7 @@ function summarizeBatchUpstream(response) {
       returned_bytes: upstream.returned_bytes ?? null,
       platform_error: response?.platform_error || null,
       error_type: upstream.error_type || null,
+      safe_reason: response?.safe_reason || upstream.safe_reason || null,
       raw_body_handling: upstream.raw_body_handling || "omitted",
       raw_body_suppressed: Boolean(upstream.body_omitted && !Object.hasOwn(upstream, "body") && !Object.hasOwn(upstream, "body_snippet") && !Object.hasOwn(upstream, "capped_body")),
       ...(Object.hasOwn(upstream, "capped_json_path") ? { capped_json_path: upstream.capped_json_path } : {}),
@@ -975,6 +1227,7 @@ function summarizeBatchUpstream(response) {
     returned_bytes: null,
     platform_error: response?.platform_error || null,
     error_type: response?.error_type || null,
+    safe_reason: response?.safe_reason || null,
     timeout_stage: response?.timeout_stage || null,
     raw_body_handling: response?.raw_body_handling || "omitted",
     raw_body_suppressed: true
@@ -1061,6 +1314,7 @@ function buildTransportStatusMatrix(sourceResults) {
         category: sourceResult.category,
         source_status: sourceResult.source_status,
         error_type: sourceResult.error_type,
+        safe_reason: sourceResult.safe_reason,
         http_status: sourceResult.http_status,
         content_type: sourceResult.content_type,
         body_present: sourceResult.body_present,
@@ -1233,7 +1487,83 @@ function classifyError(error) {
   return "page_load_error";
 }
 
-function shouldLazyRewarm(actionDiagnostics) {
+function classifyActionFetchFailure(error, action, actionDiagnostics = {}) {
+  const message = String(error?.message || "");
+  const lowered = message.toLowerCase();
+  if (error?.name === "TimeoutError" || /timeout|timed\s+out/i.test(message)) {
+    return {
+      errorType: "navigation_timeout",
+      safeReason: action?.fetchMode === "page_followup" ? "page_followup_timeout" : "api_fetch_timeout",
+      platformError: null
+    };
+  }
+  if (actionDiagnostics?.auth_redirect_detected) {
+    return {
+      errorType: "auth_flow_not_completed_in_bound_context",
+      safeReason: "auth_redirected_before_api_fetch",
+      platformError: "auth_failed"
+    };
+  }
+  if (actionDiagnostics?.origin_match === false) {
+    return {
+      errorType: "origin_mismatch",
+      safeReason: "same_origin_context_not_ready",
+      platformError: "page_context_not_ready"
+    };
+  }
+  if (actionDiagnostics?.page_ready === false) {
+    return {
+      errorType: "page_load_error",
+      safeReason: "page_context_not_ready",
+      platformError: "page_context_not_ready"
+    };
+  }
+  if (/target page, context or browser has been closed|browser has been closed|context closed|execution context was destroyed/i.test(lowered)) {
+    return {
+      errorType: "page_load_error",
+      safeReason: "browser_context_closed",
+      platformError: "page_context_not_ready"
+    };
+  }
+  if (/err_name_not_resolved|dns|host resolver/i.test(lowered)) {
+    return {
+      errorType: "network_error",
+      safeReason: "dns_or_host_resolution_failed",
+      platformError: null
+    };
+  }
+  if (/proxy|tunnel|certificate|ssl/i.test(lowered)) {
+    return {
+      errorType: "network_error",
+      safeReason: "proxy_or_tls_network_failure",
+      platformError: null
+    };
+  }
+  if (/connection refused|econnrefused|connection reset|failed to fetch|fetch failed|net::|network/i.test(lowered)) {
+    return {
+      errorType: "network_error",
+      safeReason: action?.fetchMode === "page_followup" ? "page_followup_fetch_failed" : "browser_context_request_failed",
+      platformError: null
+    };
+  }
+  if (/origin/i.test(lowered)) {
+    return {
+      errorType: "origin_mismatch",
+      safeReason: "same_origin_context_not_ready",
+      platformError: "page_context_not_ready"
+    };
+  }
+  return {
+    errorType: "page_load_error",
+    safeReason: "unexpected_fetch_failure",
+    platformError: null
+  };
+}
+
+function shouldLazyRewarm(action, actionDiagnostics) {
+  if (action?.fetchMode === "page_followup" && (!actionDiagnostics.origin_match || !actionDiagnostics.page_ready)) {
+    return true;
+  }
   return Boolean(
     (!actionDiagnostics.origin_match || !actionDiagnostics.page_ready) &&
       isAuthRedirectTarget({
@@ -1244,7 +1574,7 @@ function shouldLazyRewarm(actionDiagnostics) {
 }
 
 function shouldForceActionRewarm(action) {
-  return action?.name === "login_logs_search";
+  return action?.name === "login_logs_search" || action?.domainKey === "archives";
 }
 
 function shouldRetryAfterPageSessionResponse(action, response) {
@@ -1259,7 +1589,24 @@ function shouldRetryAfterPageSessionResponse(action, response) {
 }
 
 function shouldRetryAfterPageSessionError(action, errorType) {
-  return action?.name === "login_logs_search" && /timeout|navigation_timeout/i.test(String(errorType || ""));
+  if (action?.name === "login_logs_search" && /timeout|navigation_timeout/i.test(String(errorType || ""))) {
+    return true;
+  }
+  return action?.fetchMode === "page_followup" && /timeout|navigation_timeout|network_error|page_load_error/i.test(String(errorType || ""));
+}
+
+function shouldRetryAfterContextRequestError(errorType) {
+  return /network_error|page_load_error/i.test(String(errorType || ""));
+}
+
+function shouldRetryAfterRecoverableResponse(action, response) {
+  if (!response || response.ok !== false) {
+    return false;
+  }
+  if (action?.domainKey === "archives" && response.safe_reason === "upstream_business_auth_required") {
+    return true;
+  }
+  return false;
 }
 
 function pageSessionRetryReason(response) {

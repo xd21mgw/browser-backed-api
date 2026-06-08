@@ -4,6 +4,10 @@ import { classifyHttpStatus } from "./diagnostics.js";
 export const ACTION_ALLOWLIST = Object.freeze([
   "rcp_snapshot",
   "weapon_inventory",
+  "weapon_device_info",
+  "weapon_device_app_list",
+  "weapon_device_location_info",
+  "weapon_user_klink_status",
   "login_logs_search",
   "track_analysis_summary",
   "archives_user_analysis",
@@ -197,6 +201,9 @@ const RCP_COLUMN_COMMENTS = Object.freeze({
 
 const WEAPON_GRAPH_DATA_PATH = "/apiv2/graphData";
 const WEAPON_RISK_DATA_PATH = "/apiv2/riskData";
+const WEAPON_DEVICE_APP_LIST_PATH = "/api/dataReport/getDeviceAppList";
+const WEAPON_LOCATION_INFO_PATH = "/api/dataReport/getLocationInfo";
+const WEAPON_KLINK_STATUS_PATH = "/api/dataReport/getKlinkStatusByUsers";
 const WEAPON_DEFAULT_PRODUCT = "KUAISHOU";
 const WEAPON_DEFAULT_PRODUCT_NAME = "KUAISHOU";
 const WEAPON_DEFAULT_SEARCH_LEVEL = 2;
@@ -234,6 +241,7 @@ const TRACK_ANALYSIS_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const TRACK_ANALYSIS_DEFAULT_PRODUCT = "KUAISHOU";
 
 const ARCHIVES_USER_ANALYSIS_PATH = "/v3/user/log/coreLogs/fetch";
+const ARCHIVES_PAGE_REFERER_PATH = "/frontend/archives/index.html";
 const ARCHIVES_PHOTO_SEARCH_PATH = "/v4/archives/report/photo/search";
 const ARCHIVES_PHOTO_PROFILE_PATH = "/v3/photo/profile";
 const ARCHIVES_PHOTO_META_PATH = "/v3/photo/meta";
@@ -392,6 +400,61 @@ export const ACTIONS = Object.freeze({
     buildRequest: buildWeaponInventoryRequest,
     mockData: mockWeaponInventoryData
   }),
+  weapon_device_info: freezeAction({
+    name: "weapon_device_info",
+    domainKey: "weapon",
+    description: "Return direct Weapon riskData device detail for a typed device_id.",
+    method: "GET",
+    apiPath: WEAPON_RISK_DATA_PATH,
+    inputContract: {
+      device_id: "required string; maps to deviceIds",
+      product: "optional enum; default KUAISHOU"
+    },
+    validateParams: validateWeaponDeviceInfoInput,
+    buildRequest: buildWeaponDeviceInfoRequest,
+    mockData: mockWeaponDeviceInfoData
+  }),
+  weapon_device_app_list: freezeAction({
+    name: "weapon_device_app_list",
+    domainKey: "weapon",
+    description: "Return Weapon installed application list for a typed device_id.",
+    method: "GET",
+    apiPath: WEAPON_DEVICE_APP_LIST_PATH,
+    inputContract: {
+      device_id: "required string"
+    },
+    validateParams: validateWeaponDeviceOnlyInput("weapon_device_app_list"),
+    buildRequest: buildWeaponDeviceAppListRequest,
+    mockData: mockWeaponDeviceAppListData
+  }),
+  weapon_device_location_info: freezeAction({
+    name: "weapon_device_location_info",
+    domainKey: "weapon",
+    description: "Return Weapon device location detail for typed device_id and user_id.",
+    method: "GET",
+    apiPath: WEAPON_LOCATION_INFO_PATH,
+    inputContract: {
+      device_id: "required string",
+      user_id: "required decimal string",
+      product: "optional enum; default KUAISHOU"
+    },
+    validateParams: validateWeaponDeviceLocationInfoInput,
+    buildRequest: buildWeaponDeviceLocationInfoRequest,
+    mockData: mockWeaponDeviceLocationInfoData
+  }),
+  weapon_user_klink_status: freezeAction({
+    name: "weapon_user_klink_status",
+    domainKey: "weapon",
+    description: "Return Weapon account session/Klink status records for a typed user_id.",
+    method: "GET",
+    apiPath: WEAPON_KLINK_STATUS_PATH,
+    inputContract: {
+      user_id: "required decimal string"
+    },
+    validateParams: validateDecimalUserIdAction("weapon_user_klink_status"),
+    buildRequest: buildWeaponUserKlinkStatusRequest,
+    mockData: mockWeaponUserKlinkStatusData
+  }),
   login_logs_search: freezeAction({
     name: "login_logs_search",
     domainKey: "login_logs",
@@ -444,7 +507,7 @@ export const ACTIONS = Object.freeze({
   archives_user_analysis: freezeAction({
     name: "archives_user_analysis",
     domainKey: "archives",
-    description: "Return a compact Archives Center user action timeline shape summary for typed user/time params.",
+    description: "Passthrough Archives Center user action timeline rows for typed user/time params.",
     method: "POST",
     apiPath: ARCHIVES_USER_ANALYSIS_PATH,
     registryStatus: "service_registered",
@@ -1057,6 +1120,7 @@ export const ACTIONS = Object.freeze({
     description: "Return a compact RCP event detail shape summary for a typed event id and exact query time.",
     method: "GET",
     apiPath: RCP_EVENT_DETAIL_PATH,
+    requestTimeoutMs: 30_000,
     registryStatus: "service_registered",
     inputContract: {
       eventType: "required safe event type string",
@@ -1746,6 +1810,7 @@ export function buildActionBody(action, input) {
       path: normalizeRelativePath(request.path, `${action.name}.requestPath`),
       method: request.method || action.method,
       body: request.body || {},
+      requestTimeoutMs: request.requestTimeoutMs || action.requestTimeoutMs || null,
       displayPath: request.displayPath
         ? normalizeRelativePath(request.displayPath, `${action.name}.displayPath`)
         : undefined
@@ -1754,7 +1819,8 @@ export function buildActionBody(action, input) {
   return {
     path: action.apiPath,
     method: action.method,
-    body: safeInput
+    body: safeInput,
+    requestTimeoutMs: action.requestTimeoutMs || null
   };
 }
 
@@ -1828,6 +1894,7 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   let platformError = errorType;
   let transportError = null;
   const unexpectedHtml = detectUnexpectedHtmlApiResponse(action, contentType, bodyText);
+  const businessAuthFailure = detectBusinessAuthFailure(action, returnedBody.body);
   const staleApiSession = Boolean(
     meta.auth_state_expired === true ||
       meta.origin_ready_state_stale === true ||
@@ -1835,7 +1902,15 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
   );
   let safeReason = meta.safe_reason || null;
 
-  if (unexpectedHtml) {
+  if (businessAuthFailure) {
+    ok = false;
+    errorType = businessAuthFailure.errorType;
+    platformError = businessAuthFailure.platformError;
+    safeReason = businessAuthFailure.safeReason;
+    upstream.error_type = errorType;
+    upstream.safe_reason = safeReason;
+    upstream.business_error = businessAuthFailure.businessError;
+  } else if (unexpectedHtml) {
     ok = false;
     const loginLogsRetryStillHtml = action.name === "login_logs_search" &&
       meta.page_context_retry_attempted === true &&
@@ -1936,6 +2011,9 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      context_request_recovery_attempted: Boolean(meta.context_request_recovery_attempted),
+      context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
+      context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
       page_context_retry_attempted: Boolean(meta.page_context_retry_attempted),
       page_context_retry_reason: safeString(meta.page_context_retry_reason) || null,
       page_context_retry_status: safeString(meta.page_context_retry_status) || null,
@@ -2017,6 +2095,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       freshness_check_attempted: Boolean(meta.freshness_check_attempted),
       freshness_rewarm_attempted: Boolean(meta.freshness_rewarm_attempted),
       freshness_rewarm_status: safeString(meta.freshness_rewarm_status) || null,
+      context_request_recovery_attempted: Boolean(meta.context_request_recovery_attempted),
+      context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
+      context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
       safe_reason: safeReason || null,
       next_step: nextStep
     },
@@ -2108,6 +2189,7 @@ function buildArchivesUserAnalysisRequest(input) {
     path: ARCHIVES_USER_ANALYSIS_PATH,
     displayPath: ARCHIVES_USER_ANALYSIS_PATH,
     method: "POST",
+    headers: archivesPageRequestHeaders(),
     body
   };
 }
@@ -2117,13 +2199,29 @@ function validateArchivesUserProfileInput(input) {
 }
 
 function buildArchivesUserProfileRequest(input) {
-  const params = new URLSearchParams({ userId: input.user_id.trim() });
-  const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+  const params = new URLSearchParams({ keyword: input.user_id.trim() });
+  const displayParams = new URLSearchParams({ keyword: "[typed_user_id]" });
   return {
     path: `${ARCHIVES_USER_PROFILE_PATH}?${params.toString()}`,
     displayPath: `${ARCHIVES_USER_PROFILE_PATH}?${displayParams.toString()}`,
     method: "GET",
+    headers: archivesPageRequestHeaders(),
     body: {}
+  };
+}
+
+function archivesPageRequestHeaders() {
+  return {
+    accept: "application/json, text/plain, */*",
+    referer: ARCHIVES_PAGE_REFERER_PATH,
+    origin: "@same_origin"
+  };
+}
+
+function withArchivesPageHeaders(request) {
+  return {
+    ...request,
+    headers: archivesPageRequestHeaders()
   };
 }
 
@@ -2158,7 +2256,7 @@ function validateArchivesPhotoSearchInput(input) {
 }
 
 function buildArchivesPhotoSearchRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PHOTO_SEARCH_PATH,
     displayPath: ARCHIVES_PHOTO_SEARCH_PATH,
     method: "POST",
@@ -2171,7 +2269,7 @@ function buildArchivesPhotoSearchRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateArchivesPhotoIdInput(actionName) {
@@ -2188,7 +2286,7 @@ function validateArchivesPhotoIdInput(actionName) {
 }
 
 function buildArchivesPhotoIdRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2211,7 +2309,7 @@ function validateArchivesGalleryPhotoListInput(input) {
 }
 
 function buildArchivesGalleryPhotoListRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
     displayPath: ARCHIVES_GALLERY_PHOTO_LIST_PATH,
     method: "POST",
@@ -2221,7 +2319,7 @@ function buildArchivesGalleryPhotoListRequest(input) {
       pageSize: positiveIntegerParam(input, "pageSize", 20),
       filters: {}
     }
-  };
+  });
 }
 
 function validateDecimalUserIdAction(actionName) {
@@ -2229,7 +2327,7 @@ function validateDecimalUserIdAction(actionName) {
 }
 
 function buildArchivesUserIdPostRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2243,12 +2341,12 @@ function buildArchivesUserIdGetRequest(fixedPath) {
   return (input) => {
     const params = new URLSearchParams({ userId: input.user_id.trim() });
     const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
-    return {
+    return withArchivesPageHeaders({
       path: `${fixedPath}?${params.toString()}`,
       displayPath: `${fixedPath}?${displayParams.toString()}`,
       method: "GET",
       body: {}
-    };
+    });
   };
 }
 
@@ -2263,7 +2361,7 @@ function validateArchivesUserPageIndexInput(actionName, defaultSize) {
 }
 
 function buildArchivesUserPageIndexRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2286,7 +2384,7 @@ function validateArchivesUserPageCountInput(actionName, defaultCount) {
 }
 
 function buildArchivesUserPageCountRequest(fixedPath, defaultCount) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2309,7 +2407,7 @@ function validateArchivesUserPageSizeInput(actionName, defaultSize) {
 }
 
 function buildArchivesUserPageSizeRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2336,7 +2434,7 @@ function validateArchivesTimedUserPageInput(actionName, defaultSize) {
 }
 
 function buildArchivesTimedUserPageRequest(fixedPath, defaultSize) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2365,7 +2463,7 @@ function validateArchivesPunishStatusInput(input) {
 
 function buildArchivesPunishStatusRequest(input) {
   const scope = archivesPunishTargetScope(input);
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PUNISH_STATUS_PATH,
     displayPath: ARCHIVES_PUNISH_STATUS_PATH,
     method: "POST",
@@ -2373,7 +2471,7 @@ function buildArchivesPunishStatusRequest(input) {
       targetId: scope.targetId,
       targetType: scope.targetType
     }
-  };
+  });
 }
 
 function archivesPunishTargetScope(input) {
@@ -2433,12 +2531,12 @@ function buildArchivesCommentSearchRequest(input) {
     body.photoId = input.photo_id.trim();
     body.containsPhotoInfo = Object.hasOwn(input, "containsPhotoInfo") ? input.containsPhotoInfo : true;
   }
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_COMMENT_SEARCH_PATH,
     displayPath: ARCHIVES_COMMENT_SEARCH_PATH,
     method: "POST",
     body
-  };
+  });
 }
 
 function validateArchivesLiveStreamIdInput(actionName) {
@@ -2455,7 +2553,7 @@ function validateArchivesLiveStreamIdInput(actionName) {
 }
 
 function buildArchivesLiveStreamIdRequest(fixedPath) {
-  return (input) => ({
+  return (input) => withArchivesPageHeaders({
     path: fixedPath,
     displayPath: fixedPath,
     method: "POST",
@@ -2496,12 +2594,12 @@ function buildArchivesLiveStreamPageRequest(fixedPath) {
       body.beginTime = input.beginTime;
       body.endTime = input.endTime;
     }
-    return {
+    return withArchivesPageHeaders({
       path: fixedPath,
       displayPath: fixedPath,
       method: "POST",
       body
-    };
+    });
   };
 }
 
@@ -2533,12 +2631,12 @@ function buildArchivesUserReportSearchRequest(input) {
     body.begin = input.begin;
     body.end = input.end;
   }
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_USER_REPORT_SEARCH_PATH,
     displayPath: ARCHIVES_USER_REPORT_SEARCH_PATH,
     method: "POST",
     body
-  };
+  });
 }
 
 function validateArchivesRelatedUsersInput(input) {
@@ -2559,7 +2657,7 @@ function validateArchivesRelatedUsersInput(input) {
 
 function buildArchivesRelatedUsersRequest(input) {
   const relationType = archivesRelationType(input);
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_RELATED_USERS_PATH,
     displayPath: ARCHIVES_RELATED_USERS_PATH,
     method: "POST",
@@ -2568,7 +2666,7 @@ function buildArchivesRelatedUsersRequest(input) {
       inputType: 0,
       type: ARCHIVES_RELATED_USER_TYPES[relationType]
     }
-  };
+  });
 }
 
 function validateArchivesPrivateMessageSearchInput(input) {
@@ -2606,7 +2704,7 @@ function validateArchivesPrivateMessageSearchInput(input) {
 
 function buildArchivesPrivateMessageSearchRequest(input) {
   const directionKey = ARCHIVES_PRIVATE_MESSAGE_DIRECTIONS[input.direction];
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
     displayPath: ARCHIVES_PRIVATE_MESSAGE_SEARCH_PATH,
     method: "POST",
@@ -2617,7 +2715,7 @@ function buildArchivesPrivateMessageSearchRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateArchivesPastFourItemsInput(input) {
@@ -2646,7 +2744,7 @@ function validateArchivesPastFourItemsInput(input) {
 }
 
 function buildArchivesPastFourItemsRequest(input) {
-  return {
+  return withArchivesPageHeaders({
     path: ARCHIVES_PAST_FOUR_ITEMS_PATH,
     displayPath: ARCHIVES_PAST_FOUR_ITEMS_PATH,
     method: "POST",
@@ -2658,7 +2756,7 @@ function buildArchivesPastFourItemsRequest(input) {
       page: positiveIntegerParam(input, "page", 1),
       count: positiveIntegerParam(input, "count", 20)
     }
-  };
+  });
 }
 
 function validateRcpEventIdentityInput(input) {
@@ -4069,6 +4167,29 @@ function detectUnexpectedHtmlApiResponse(action, contentType, bodyText) {
   return text.startsWith("<!doctype html") || text.startsWith("<html") || /<html[\s>]/i.test(text);
 }
 
+function detectBusinessAuthFailure(action, body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  const code = body.result ?? body.code ?? null;
+  if (
+    action?.domainKey === "archives" &&
+    /没有授权|联系管理员授权|无权限|未授权/i.test(message)
+  ) {
+    return {
+      errorType: "auth_failed",
+      platformError: "auth_failed",
+      safeReason: "upstream_business_auth_required",
+      businessError: {
+        code,
+        message
+      }
+    };
+  }
+  return null;
+}
+
 function normalizeJsonArrayCap(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -4254,6 +4375,17 @@ function weaponProductName(input) {
   return isNonEmptyString(input.productName) ? input.productName.trim() : WEAPON_DEFAULT_PRODUCT_NAME;
 }
 
+function validateWeaponProductInput(actionName, input) {
+  if (Object.hasOwn(input, "product") && weaponProduct(input) !== WEAPON_DEFAULT_PRODUCT) {
+    return {
+      message: `${actionName} product must be ${WEAPON_DEFAULT_PRODUCT}`,
+      required: [`product=${WEAPON_DEFAULT_PRODUCT}`],
+      errorType: "invalid_parameter"
+    };
+  }
+  return null;
+}
+
 function weaponSearchLevel(input) {
   return Object.hasOwn(input, "searchLevel") ? Math.trunc(input.searchLevel) : WEAPON_DEFAULT_SEARCH_LEVEL;
 }
@@ -4264,6 +4396,99 @@ function weaponIncludeRiskData(input) {
 
 function weaponMaxDeviceIds(input) {
   return Object.hasOwn(input, "max_device_ids") ? Math.trunc(input.max_device_ids) : WEAPON_DEFAULT_MAX_DEVICE_IDS;
+}
+
+function validateWeaponDeviceOnlyInput(actionName) {
+  return (input) => {
+    if (!isNonEmptyString(input.device_id)) {
+      return {
+        message: `${actionName} requires device_id as a non-empty string`,
+        required: ["device_id string"],
+        errorType: "parameter_error"
+      };
+    }
+    return null;
+  };
+}
+
+function validateWeaponDeviceInfoInput(input) {
+  const deviceError = validateWeaponDeviceOnlyInput("weapon_device_info")(input);
+  if (deviceError) {
+    return deviceError;
+  }
+  return validateWeaponProductInput("weapon_device_info", input);
+}
+
+function validateWeaponDeviceLocationInfoInput(input) {
+  const deviceError = validateWeaponDeviceOnlyInput("weapon_device_location_info")(input);
+  if (deviceError) {
+    return deviceError;
+  }
+  const userError = validateDecimalUserId("weapon_device_location_info", input);
+  if (userError) {
+    return userError;
+  }
+  return validateWeaponProductInput("weapon_device_location_info", input);
+}
+
+function buildWeaponDeviceInfoRequest(input) {
+  const product = weaponProduct(input);
+  const params = new URLSearchParams({
+    product,
+    deviceIds: input.device_id.trim()
+  });
+  const displayParams = new URLSearchParams({
+    product,
+    deviceIds: "[typed_device_id]"
+  });
+  return {
+    path: `${WEAPON_RISK_DATA_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_RISK_DATA_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponDeviceAppListRequest(input) {
+  const params = new URLSearchParams({ deviceId: input.device_id.trim() });
+  const displayParams = new URLSearchParams({ deviceId: "[typed_device_id]" });
+  return {
+    path: `${WEAPON_DEVICE_APP_LIST_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_DEVICE_APP_LIST_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponDeviceLocationInfoRequest(input) {
+  const product = weaponProduct(input);
+  const params = new URLSearchParams({
+    deviceId: input.device_id.trim(),
+    product,
+    userId: input.user_id.trim()
+  });
+  const displayParams = new URLSearchParams({
+    deviceId: "[typed_device_id]",
+    product,
+    userId: "[typed_user_id]"
+  });
+  return {
+    path: `${WEAPON_LOCATION_INFO_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_LOCATION_INFO_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
+}
+
+function buildWeaponUserKlinkStatusRequest(input) {
+  const params = new URLSearchParams({ userId: input.user_id.trim() });
+  const displayParams = new URLSearchParams({ userId: "[typed_user_id]" });
+  return {
+    path: `${WEAPON_KLINK_STATUS_PATH}?${params.toString()}`,
+    displayPath: `${WEAPON_KLINK_STATUS_PATH}?${displayParams.toString()}`,
+    method: "GET",
+    body: {}
+  };
 }
 
 function validateLoginLogsInput(input) {
@@ -5140,6 +5365,150 @@ function mockWeaponInventoryData(input) {
         ok: true,
         status: 200,
         body: riskValue
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceInfoData(input) {
+  const request = buildWeaponDeviceInfoRequest(input);
+  return {
+    fixed_paths: {
+      riskData: WEAPON_RISK_DATA_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath,
+      product: weaponProduct(input),
+      device_ids_exposed_raw: false
+    },
+    data: [
+      {
+        deviceId: input.device_id.trim(),
+        productName: weaponProduct(input),
+        labelInfo: {
+          OldLeable: {
+            groupName: "较弱风险",
+            groupLevel: "1",
+            labels: [
+              {
+                labelType: "ANDROID",
+                labelDesc: "mock device label",
+                riskLevel: "0",
+                labelName: "mock_label",
+                riskTime: "2026-06-06 10:00:00"
+              }
+            ]
+          }
+        },
+        originalLog: {
+          deviceId: input.device_id.trim(),
+          model: "mock_model",
+          appVersion: "14.4.30.9822",
+          resolution: "2532*1170"
+        },
+        userLevel: "HIGH"
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceAppListData(input) {
+  const request = buildWeaponDeviceAppListRequest(input);
+  return {
+    fixed_paths: {
+      deviceAppList: WEAPON_DEVICE_APP_LIST_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath
+    },
+    data: [
+      {
+        package_name: "weixin",
+        name: "微信",
+        version_name: "8.0.0",
+        version_code: 8000000,
+        system: false,
+        running: false,
+        first_installation_timestamp: 1766722520426
+      },
+      {
+        package_name: "com.smile.gifmaker",
+        name: "快手",
+        version_name: "14.4.30.9822",
+        version_code: 144309822,
+        system: false,
+        running: true,
+        first_installation_timestamp: 1766722520426
+      }
+    ],
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponDeviceLocationInfoData(input) {
+  const request = buildWeaponDeviceLocationInfoRequest(input);
+  return {
+    fixed_paths: {
+      locationInfo: WEAPON_LOCATION_INFO_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath,
+      product: weaponProduct(input)
+    },
+    data: {
+      code: 0,
+      msg: "success",
+      has_permission: false,
+      location_result: {
+        user_info: {
+          device_id: input.device_id.trim(),
+          user_id: Number(input.user_id)
+        },
+        location_info: {
+          lat: 25.97410833,
+          lon: 108.39160523,
+          source: 9,
+          mode: 0,
+          timestamp: 1780037588000,
+          range: 0,
+          confidence_rate: 0
+        },
+        ad_code_location_info: {
+          province: { name: "贵州省", province_code: "520000" },
+          city: { name: "黔东南苗族侗族自治州", city_code: "522600" },
+          county: { name: "榕江县", county_code: "522632" }
+        }
+      }
+    },
+    generated_at: fixedMockTime()
+  };
+}
+
+function mockWeaponUserKlinkStatusData(input) {
+  const request = buildWeaponUserKlinkStatusRequest(input);
+  return {
+    fixed_paths: {
+      klinkStatus: WEAPON_KLINK_STATUS_PATH
+    },
+    request: {
+      method: request.method,
+      display_path: request.displayPath
+    },
+    data: [
+      {
+        uid: Number(input.user_id),
+        app_id: 26,
+        event: 2,
+        event_timestamp_ms: 1780718448547,
+        client_ip_str: "1.206.186.49",
+        net: "MOBILE",
+        device_id: "mock_device_id",
+        kpn: "KUAISHOU"
       }
     ],
     generated_at: fixedMockTime()

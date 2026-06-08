@@ -43,6 +43,19 @@ const ACTION_INPUTS = Object.freeze({
   weapon_inventory: {
     user_id: "2871834924"
   },
+  weapon_device_info: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF"
+  },
+  weapon_device_app_list: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF"
+  },
+  weapon_device_location_info: {
+    device_id: "1504354E-BE57-727A-A8BD-3A1AEF1D35DF",
+    user_id: "4559196013"
+  },
+  weapon_user_klink_status: {
+    user_id: "4559196013"
+  },
   login_logs_search: {
     user_id: "2871834924",
     from_timestamp: 1780000000000,
@@ -378,6 +391,10 @@ const ACTION_INPUTS = Object.freeze({
   }
 });
 
+const DENNIS_BATCH_CHUNKS = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "test/fixtures/dennis_batch_chunks.json"), "utf8")
+);
+
 const OLD_BUSINESS_FIELDS = Object.freeze([
   "normalized_observation",
   "source_card",
@@ -564,7 +581,7 @@ test("origin registry and fixed action allowlist remain explicit", () => {
     assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
     assert.equal(origin.enabled, true);
   }
-  assert.equal(Object.keys(ACTIONS).length, 70);
+  assert.equal(Object.keys(ACTIONS).length, 74);
   assert.deepEqual(Object.keys(ACTIONS), ACTION_ALLOWLIST);
 });
 
@@ -689,6 +706,26 @@ test("fixed request builders keep typed params on fixed paths", () => {
   assert.equal(rcpRequest.path, "/v2/rest/event/eventList");
   assert.equal(rcpRequest.body.eventV2.sourceIds, "mock_source_id");
 
+  const weaponDeviceInfoRequest = buildActionBody(ACTIONS.weapon_device_info, ACTION_INPUTS.weapon_device_info);
+  assert.equal(weaponDeviceInfoRequest.method, "GET");
+  assert.equal(weaponDeviceInfoRequest.path.startsWith("/apiv2/riskData?"), true);
+  assert.equal(weaponDeviceInfoRequest.path.includes("deviceIds=1504354E-BE57-727A-A8BD-3A1AEF1D35DF"), true);
+  assert.equal(decodeURIComponent(weaponDeviceInfoRequest.displayPath).includes("[typed_device_id]"), true);
+
+  const weaponDeviceAppListRequest = buildActionBody(ACTIONS.weapon_device_app_list, ACTION_INPUTS.weapon_device_app_list);
+  assert.equal(weaponDeviceAppListRequest.method, "GET");
+  assert.equal(weaponDeviceAppListRequest.path, "/api/dataReport/getDeviceAppList?deviceId=1504354E-BE57-727A-A8BD-3A1AEF1D35DF");
+
+  const weaponDeviceLocationInfoRequest = buildActionBody(ACTIONS.weapon_device_location_info, ACTION_INPUTS.weapon_device_location_info);
+  assert.equal(weaponDeviceLocationInfoRequest.method, "GET");
+  assert.equal(weaponDeviceLocationInfoRequest.path.startsWith("/api/dataReport/getLocationInfo?"), true);
+  assert.equal(weaponDeviceLocationInfoRequest.path.includes("deviceId=1504354E-BE57-727A-A8BD-3A1AEF1D35DF"), true);
+  assert.equal(weaponDeviceLocationInfoRequest.path.includes("userId=4559196013"), true);
+
+  const weaponUserKlinkStatusRequest = buildActionBody(ACTIONS.weapon_user_klink_status, ACTION_INPUTS.weapon_user_klink_status);
+  assert.equal(weaponUserKlinkStatusRequest.method, "GET");
+  assert.equal(weaponUserKlinkStatusRequest.path, "/api/dataReport/getKlinkStatusByUsers?userId=4559196013");
+
   const recoveredRequest = buildActionBody(ACTIONS.rcp_node_bind_policy_attribution, ACTION_INPUTS.rcp_node_bind_policy_attribution);
   assert.equal(recoveredRequest.method, "GET");
   assert.equal(recoveredRequest.path.startsWith("/v2/rest/pc/policy/nodeBindPolicyAttribution?"), true);
@@ -705,6 +742,16 @@ test("fixed request builders keep typed params on fixed paths", () => {
   const rcpTreeDecisionRequest = buildActionBody(ACTIONS.rcp_event_tree_or_decision, ACTION_INPUTS.rcp_event_tree_or_decision);
   assert.equal(rcpTreeDecisionRequest.method, "GET");
   assert.equal(rcpTreeDecisionRequest.path.startsWith("/v2/rest/event/rcpEventTreeOrDecision?"), true);
+
+  const rcpDetailRequest = buildActionBody(ACTIONS.rcp_event_detail, ACTION_INPUTS.rcp_event_detail);
+  assert.equal(rcpDetailRequest.method, "GET");
+  assert.equal(rcpDetailRequest.path.startsWith("/v2/rest/event/rcpEventDetail?"), true);
+  assert.equal(rcpDetailRequest.requestTimeoutMs, 30000);
+
+  const rcpFeatureRequest = buildActionBody(ACTIONS.rcp_event_feature_list, ACTION_INPUTS.rcp_event_feature_list);
+  assert.equal(rcpFeatureRequest.method, "GET");
+  assert.equal(rcpFeatureRequest.path.startsWith("/v2/rest/event/rcpEventFeatureList?"), true);
+  assert.equal(rcpFeatureRequest.requestTimeoutMs, null);
 
   const trackProductRequest = buildActionBody(ACTIONS.track_analysis_product_list, ACTION_INPUTS.track_analysis_product_list);
   assert.equal(trackProductRequest.method, "POST");
@@ -750,8 +797,20 @@ test("live response builder exposes small text upstream body", () => {
 
 test("context request actions do not use page-context fetch", async () => {
   const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
   const calledActions = [];
   const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains[domainKey].origin,
+      current_origin: config.domains[domainKey].origin,
+      origin: config.domains[domainKey].origin
+    }),
     actionDiagnostics: (action) => ({
       action_name: action.name,
       expected_origin: config.domains[action.domainKey].origin,
@@ -781,13 +840,327 @@ test("context request actions do not use page-context fetch", async () => {
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
   markAllOriginsReady(service, config);
 
-  for (const actionName of ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request")) {
+  const contextRequestActions = ACTION_ALLOWLIST.filter((name) =>
+    ACTIONS[name].fetchMode === "context_request"
+  );
+  for (const actionName of contextRequestActions) {
     const response = await service.executeAction(actionName, ACTION_INPUTS[actionName]);
     assert.equal(response.ok, true, actionName);
     assert.equal(response.upstream.body.data.action, actionName);
     assertTransportEnvelope(response, actionName);
   }
-  assert.deepEqual(calledActions, ACTION_ALLOWLIST.filter((name) => ACTIONS[name].fetchMode === "context_request"));
+  assert.deepEqual(calledActions, contextRequestActions);
+});
+
+test("archives context request builders include HAR-aligned referer and origin headers", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  const seen = [];
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains[domainKey].origin,
+      current_origin: config.domains[domainKey].origin,
+      origin: config.domains[domainKey].origin
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for archives context request");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      seen.push({
+        action: action.name,
+        path: actionRequest.path,
+        headers: actionRequest.headers
+      });
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markAllOriginsReady(service, config);
+
+  await service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search);
+  await service.executeAction("archives_gallery_photo_list", ACTION_INPUTS.archives_gallery_photo_list);
+
+  assert.deepEqual(
+    seen.map((entry) => ({
+      action: entry.action,
+      referer: entry.headers?.referer,
+      origin: entry.headers?.origin
+    })),
+    [
+      { action: "archives_photo_search", referer: "/frontend/archives/index.html", origin: "@same_origin" },
+      { action: "archives_gallery_photo_list", referer: "/frontend/archives/index.html", origin: "@same_origin" }
+    ]
+  );
+});
+
+test("rcp_event_detail forwards action-specific request timeout to context request", async () => {
+  const config = createLiveConfig();
+  let seenTimeoutMs = null;
+  const fakeBrowserClient = {
+    actionDiagnostics: () => ({
+      action_name: "rcp_event_detail",
+      expected_origin: config.domains.rcp.origin,
+      bound_page_origin: config.domains.rcp.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for rcp_event_detail");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      assert.equal(action.name, "rcp_event_detail");
+      seenTimeoutMs = actionRequest.requestTimeoutMs;
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "rcp");
+
+  const response = await service.executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail);
+  assert.equal(seenTimeoutMs, 30000);
+  assert.equal(response.ok, true);
+  assertTransportEnvelope(response, "rcp_event_detail");
+});
+
+test("context request actions recover once from network error by rebuilding browser context", async () => {
+  const config = createLiveConfig();
+  let requestAttempts = 0;
+  let closeCalled = 0;
+  let startCalled = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    start: async () => {
+      startCalled += 1;
+    },
+    close: async () => {
+      closeCalled += 1;
+    },
+    prewarmDomain: async (domainKey) => {
+      prewarmCalled += 1;
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.weapon.origin,
+        current_origin: config.domains.weapon.origin,
+        same_origin_actual: true,
+        latency_ms: 10,
+        error_type: null,
+        warmed: true
+      };
+    },
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for context_request actions");
+    },
+    runActionWithContextRequest: async (action) => {
+      requestAttempts += 1;
+      if (requestAttempts === 1) {
+        throw new Error("fetch failed");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name, recovered: true } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_device_info", ACTION_INPUTS.weapon_device_info);
+  assert.equal(requestAttempts, 2);
+  assert.equal(closeCalled, 1);
+  assert.equal(startCalled, 1);
+  assert.equal(prewarmCalled, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.context_request_recovery_attempted, true);
+  assert.equal(response.meta.context_request_recovery_status, "ready");
+  assert.equal(response.upstream.body.data.recovered, true);
+  assertTransportEnvelope(response, "weapon_device_info");
+});
+
+test("archives context request retries once when upstream business body signals auth-required stale page state", async () => {
+  const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
+  let requestAttempts = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    close: async () => {
+      throw new Error("archives business auth recovery should not close the browser context");
+    },
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.archives.origin,
+      current_origin: config.domains.archives.origin,
+      origin: config.domains.archives.origin
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for archives context request");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      requestAttempts += 1;
+      assert.equal(action.name, "archives_user_analysis");
+      assert.equal(action.fetchMode, "context_request");
+      assert.equal(actionRequest.headers.referer, "/frontend/archives/index.html");
+      if (requestAttempts === 1) {
+        const bodyText = JSON.stringify({ result: 468, message: "没有授权，请联系管理员授权" });
+        return {
+          ok: true,
+          status: 200,
+          contentType: "application/json;charset=UTF-8",
+          bodyText,
+          observedBytes: Buffer.byteLength(bodyText),
+          returnedBytes: Buffer.byteLength(bodyText),
+          bodyTruncated: false
+        };
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { rows: [{ userId: "5521564836", operationType: "loginStart" }] } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  const originalPrewarmDomain = service.prewarmDomain.bind(service);
+  service.prewarmDomain = async (...args) => {
+    prewarmCalled += 1;
+    return originalPrewarmDomain(...args);
+  };
+  markAllOriginsReady(service, config);
+
+  const response = await service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis);
+  assert.equal(requestAttempts, 2);
+  assert.equal(prewarmCalled, 2);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "upstream_business_auth_required");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.upstream.body.data.rows[0].operationType, "loginStart");
+});
+
+test("page follow-up actions recover once from fetch failure by rewarming page context", async () => {
+  const config = createLiveConfig();
+  let pageFetchAttempts = 0;
+  let prewarmCalled = 0;
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "weapon",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.weapon.origin,
+      current_origin: config.domains.weapon.origin,
+      origin: config.domains.weapon.origin
+    }),
+    actionDiagnostics: () => ({
+      action_name: "weapon_inventory",
+      expected_origin: config.domains.weapon.origin,
+      bound_page_origin: config.domains.weapon.origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      pageFetchAttempts += 1;
+      if (pageFetchAttempts === 1) {
+        throw new Error("Failed to fetch");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { recovered: true } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        returnedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    },
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for page-followup actions");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  const originalPrewarmDomain = service.prewarmDomain.bind(service);
+  service.prewarmDomain = async (...args) => {
+    prewarmCalled += 1;
+    return originalPrewarmDomain(...args);
+  };
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
+  assert.equal(pageFetchAttempts, 2);
+  assert.equal(prewarmCalled, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.page_context_retry_attempted, true);
+  assert.equal(response.meta.page_context_retry_reason, "page_followup_fetch_failed");
+  assert.equal(response.meta.page_context_retry_status, "ready");
+  assert.equal(response.upstream.body.data.recovered, true);
 });
 
 test("weapon_inventory uses page follow-up fetch and does not call context request", async () => {
@@ -830,6 +1203,68 @@ test("weapon_inventory uses page follow-up fetch and does not call context reque
   assert.equal(response.ok, true);
   assert.equal(response.upstream.body.data.action, "weapon_inventory");
   assertTransportEnvelope(response, "weapon_inventory");
+});
+
+test("page-followup action rewarms when bound page origin drifts before fetch", async () => {
+  const config = createLiveConfig();
+  let prewarmCalls = 0;
+  let diagnosticsReady = false;
+  const bodyText = JSON.stringify({ code: 0, data: { action: "weapon_inventory", rewarm: true } });
+  const fakeBrowserClient = {
+    prewarmDomain: async (domainKey) => {
+      prewarmCalls += 1;
+      diagnosticsReady = true;
+      return {
+        key: domainKey,
+        status: "ready",
+        page_ready: true,
+        final_origin: config.domains.weapon.origin,
+        current_origin: config.domains.weapon.origin,
+        same_origin_actual: true,
+        latency_ms: 10,
+        error_type: null,
+        warmed: true
+      };
+    },
+    actionDiagnostics: () => diagnosticsReady
+      ? {
+          action_name: "weapon_inventory",
+          expected_origin: config.domains.weapon.origin,
+          bound_page_origin: config.domains.weapon.origin,
+          origin_warmed: true,
+          page_ready: true,
+          origin_match: true
+        }
+      : {
+          action_name: "weapon_inventory",
+          expected_origin: config.domains.weapon.origin,
+          bound_page_origin: config.domains.login_logs.origin,
+          origin_warmed: true,
+          page_ready: false,
+          origin_match: false
+        },
+    runAction: async () => ({
+      ok: true,
+      status: 200,
+      contentType: "application/json;charset=UTF-8",
+      bodyText,
+      observedBytes: Buffer.byteLength(bodyText),
+      returnedBytes: Buffer.byteLength(bodyText),
+      bodyTruncated: false
+    }),
+    runActionWithContextRequest: async () => {
+      throw new Error("context request should not be used for page-followup actions");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeAction("weapon_inventory", ACTION_INPUTS.weapon_inventory);
+  assert.equal(prewarmCalls, 1);
+  assert.equal(response.ok, true);
+  assert.equal(response.meta.freshness_rewarm_attempted, true);
+  assert.equal(response.meta.freshness_rewarm_status, "ready");
+  assert.equal(response.upstream.body.data.rewarm, true);
 });
 
 test("login_logs_search page-session API timeout reports api fetch stage", async () => {
@@ -875,11 +1310,23 @@ test("login_logs_search page-session API timeout reports api fetch stage", async
   assertTransportEnvelope(response, "login_logs_search");
 });
 
-test("context request action returns API contract mismatch when the fixed API returns HTML shell", async () => {
+test("archives context request returns API contract mismatch when the fixed API returns HTML shell", async () => {
   const config = createLiveConfig();
+  fs.mkdirSync(config.profileDir, { recursive: true });
   const html = "<!doctype html><html><head><title>Archives</title></head><body>app shell</body></html>";
   let contextRequestCalled = false;
   const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      warmed: true,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.archives.origin,
+      current_origin: config.domains.archives.origin,
+      origin: config.domains.archives.origin
+    }),
     actionDiagnostics: () => ({
       action_name: "archives_user_profile",
       expected_origin: config.domains.archives.origin,
@@ -889,13 +1336,14 @@ test("context request action returns API contract mismatch when the fixed API re
       origin_match: true
     }),
     runAction: async () => {
-      throw new Error("page fetch should not be used for archives_user_profile");
+      throw new Error("page fetch should not be used for archives context request");
     },
     runActionWithContextRequest: async (action, actionRequest) => {
       contextRequestCalled = true;
       assert.equal(action.name, "archives_user_profile");
       assert.equal(actionRequest.method, "GET");
-      assert.equal(actionRequest.path.startsWith("/archives/user/home/info?"), true);
+      assert.equal(actionRequest.path, `/archives/user/home/info?keyword=${ACTION_INPUTS.archives_user_profile.user_id}`);
+      assert.equal(actionRequest.headers.referer, "/frontend/archives/index.html");
       return {
         ok: true,
         status: 200,
@@ -908,7 +1356,7 @@ test("context request action returns API contract mismatch when the fixed API re
     }
   };
   const service = new BrowserBackedApiService(config, fakeBrowserClient);
-  markOriginReady(service, config, "archives");
+  markAllOriginsReady(service, config);
 
   const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
   assert.equal(contextRequestCalled, true);
@@ -1339,6 +1787,33 @@ test("JSON fixed action response builder treats HTML page shell as API contract 
   assert.equal(response.upstream.response_body_kind, "html_page");
   assert.equal(Object.hasOwn(response.upstream, "body"), false);
   assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("archives business auth body maps to auth_failed with safe reason", () => {
+  const bodyText = JSON.stringify({
+    result: 468,
+    currentTime: 1780796054607,
+    message: "没有授权，请联系管理员授权"
+  });
+  const response = buildLiveActionResponse(ACTIONS.archives_user_analysis, ACTION_INPUTS.archives_user_analysis, {}, {
+    ok: true,
+    status: 200,
+    contentType: "application/json;charset=utf-8",
+    bodyText,
+    observedBytes: Buffer.byteLength(bodyText),
+    returnedBytes: Buffer.byteLength(bodyText),
+    bodyTruncated: false
+  }, { latencyMs: 8 });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "auth_failed");
+  assert.equal(response.platform_error, "auth_failed");
+  assert.equal(response.safe_reason, "upstream_business_auth_required");
+  assert.equal(response.upstream.business_error.code, 468);
+  assert.equal(response.upstream.business_error.message, "没有授权，请联系管理员授权");
+  assert.equal(response.body_present, true);
+  assert.equal(response.upstream.body_present, true);
+  assertNoCredentialMaterial(response);
 });
 
 test("response too large returns capped passthrough body without summary fallback", () => {
@@ -1960,9 +2435,11 @@ test("refresh daemon interval and manual-login event remain bounded", () => {
 test("worker:expose proxy only allows service health, action list, and allowlisted actions", () => {
   assert.equal(classifyProxyRequest("GET", "/health").allowed, true);
   assert.equal(classifyProxyRequest("GET", "/actions").allowed, true);
+  assert.equal(classifyProxyRequest("POST", "/actions/batch").allowed, true);
+  assert.equal(classifyProxyRequest("POST", "/actions/multi_source_plan").allowed, true);
+  assert.equal(classifyProxyRequest("GET", "/actions/batch").reason, "method_not_allowed");
   assert.equal(classifyProxyRequest("POST", "/actions/login_logs_search").allowed, true);
   assert.equal(classifyProxyRequest("POST", "/actions/not_real").reason, "action_not_allowlisted");
-  assert.equal(classifyProxyRequest("POST", "/actions/batch").reason, "action_not_allowlisted");
   assert.equal(classifyProxyRequest("GET", "/actions/login_logs_search").reason, "method_not_allowed");
   assert.equal(classifyProxyRequest("POST", "/proxy?url=https://example.invalid").reason, "path_not_allowed");
 });
@@ -1979,7 +2456,13 @@ test("worker:expose summary gives low-approval service_base_url without credenti
   assert.equal(summary.service_base_url, "http://10.0.0.2:9787");
   assert.equal(summary.action_count, ACTION_ALLOWLIST.length);
   assert.equal(summary.auth_state, "ready");
-  assert.deepEqual(summary.allowed_paths, ["/health", "/actions", "/actions/<allowlisted_action>"]);
+  assert.deepEqual(summary.allowed_paths, [
+    "/health",
+    "/actions",
+    "/actions/batch",
+    "/actions/multi_source_plan",
+    "/actions/<allowlisted_action>"
+  ]);
   assertNoCredentialMaterial(summary);
 });
 
@@ -2006,6 +2489,9 @@ test("batch executes independent parallel sources and returns transport matrix",
   assert.equal(response.ok, true);
   assert.equal(response.response_mode, "controlled_batch_passthrough");
   assert.equal(response.batch_status, "completed");
+  assert.equal(response.completed_count, 3);
+  assert.equal(response.failed_count, 0);
+  assert.equal(response.partial_count, 0);
   assert.deepEqual(response.classifications.completed.sort(), ["archives_profile", "login_logs", "track_ready"].sort());
   assert.ok(response.transport_status_matrix.login_logs);
   assert.equal(response.transport_status_matrix.login_logs.body_present, true);
@@ -2015,6 +2501,161 @@ test("batch executes independent parallel sources and returns transport matrix",
   assert.equal(response.missing_or_failed_sources.length, 0);
   assertNoOldBusinessFields(response);
   assertNoCredentialMaterial(response);
+});
+
+test("batch serializes page-followup fetches globally and archives context actions per domain lane", async () => {
+  const service = createService();
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  let activePageFollowup = 0;
+  let maxActivePageFollowup = 0;
+  service.executeAction = async (action) => {
+    if (action === "archives_user_analysis") {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeArchives -= 1;
+    }
+    if (action === "login_logs_search" || action === "weapon_inventory") {
+      activePageFollowup += 1;
+      maxActivePageFollowup = Math.max(maxActivePageFollowup, activePageFollowup);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activePageFollowup -= 1;
+    }
+    return {
+      ok: true,
+      source_status: "completed",
+      error_type: null,
+      platform_error: null,
+      body_present: true,
+      raw_body_handling: "visible",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body_present: true,
+        body_omitted: false,
+        body_truncated: false,
+        observed_bytes: 32,
+        returned_bytes: 32,
+        raw_body_handling: "visible",
+        body: { action }
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "shared_chain",
+        execution: "independent_parallel",
+        sources: [
+          { source_id: "archives_a", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis },
+          { source_id: "archives_b", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis },
+          { source_id: "login_a", action: "login_logs_search", params: ACTION_INPUTS.login_logs_search },
+          { source_id: "weapon_a", action: "weapon_inventory", params: ACTION_INPUTS.weapon_inventory }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "completed");
+  assert.equal(maxActiveArchives, 1);
+  assert.equal(maxActivePageFollowup, 1);
+});
+
+test("batch source results preserve safe_reason for downstream diagnosis", async () => {
+  const service = createService();
+  service.executeAction = async () => ({
+    ok: false,
+    source_status: "failed",
+    error_type: "auth_failed",
+    safe_reason: "upstream_business_auth_required",
+    platform_error: "auth_failed",
+    body_present: true,
+    upstream: {
+      status: 200,
+      content_type: "application/json",
+      body_present: true,
+      body_omitted: false,
+      body_truncated: false,
+      observed_bytes: 64,
+      returned_bytes: 64,
+      error_type: "auth_failed",
+      safe_reason: "upstream_business_auth_required",
+      raw_body_handling: "visible"
+    }
+  });
+  const response = await service.executeBatch({
+    sources: [
+      { source_id: "analysis", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis }
+    ]
+  });
+  assert.equal(response.source_results.analysis.safe_reason, "upstream_business_auth_required");
+  assert.equal(response.transport_status_matrix.analysis.safe_reason, "upstream_business_auth_required");
+});
+
+test("batch source inherits context request recovery for weapon device detail", async () => {
+  const config = createLiveConfig();
+  let requestAttempts = 0;
+  const fakeBrowserClient = {
+    start: async () => {},
+    close: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.weapon.origin,
+      current_origin: config.domains.weapon.origin,
+      same_origin_actual: true,
+      latency_ms: 10,
+      error_type: null,
+      warmed: true
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for context_request actions");
+    },
+    runActionWithContextRequest: async (action) => {
+      requestAttempts += 1;
+      if (requestAttempts === 1) {
+        throw new Error("fetch failed");
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const response = await service.executeBatch({
+    execution: "independent_parallel",
+    sources: [
+      {
+        source_id: "weapon_device_detail",
+        action: "weapon_device_info",
+        params: ACTION_INPUTS.weapon_device_info
+      }
+    ]
+  });
+  assert.equal(requestAttempts, 2);
+  assert.equal(response.batch_status, "completed");
+  assert.equal(response.completed_count, 1);
+  assert.equal(response.source_results.weapon_device_detail.ok, true);
+  assert.equal(response.source_results.weapon_device_detail.upstream.body.data.action, "weapon_device_info");
 });
 
 test("batch preserves capped upstream body snippets in source results", async () => {
@@ -2092,6 +2733,34 @@ test("batch dry run accepts large-response and auth-sensitive serial groups", as
   });
   assert.equal(response.batch_status, "planned");
   assert.deepEqual(response.classifications.planned.sort(), ["analysis", "features"].sort());
+});
+
+test("batch accepts Dennis real-shaped chunk payloads and returns source-level rows", async () => {
+  const service = createService();
+  const expectedChunkCounts = [9, 2, 1, 3];
+  const responses = [];
+
+  for (const [index, payload] of DENNIS_BATCH_CHUNKS.entries()) {
+    const response = await service.executeBatch(payload);
+    responses.push(response);
+
+    assert.equal(response.ok, true);
+    assert.equal(response.request_id, payload.request_id);
+    assert.equal(response.scheduler.source_count, expectedChunkCounts[index]);
+    assert.equal(response.batch_payload_shape.source_count, expectedChunkCounts[index]);
+    assert.equal(response.batch_payload_shape.group_count, payload.execution_groups.length);
+    assert.equal(response.batch_payload_shape.groups[0].sources[0].source_id, payload.execution_groups[0].sources[0].source_id);
+    assert.equal(response.batch_payload_shape.groups[0].sources[0].action, payload.execution_groups[0].sources[0].action);
+    assert.equal(Object.keys(response.source_results).length, expectedChunkCounts[index]);
+    assert.equal(Object.keys(response.transport_status_matrix).length, expectedChunkCounts[index]);
+    assert.equal(response.completed_count, expectedChunkCounts[index]);
+    assert.equal(response.failed_count, 0);
+    assertNoCredentialMaterial(response.batch_payload_shape);
+    assertNoCredentialMaterial(response);
+  }
+
+  assert.equal(responses.length, 4);
+  assert.equal(responses.reduce((count, response) => count + response.scheduler.source_count, 0), 15);
 });
 
 test("single source failure does not block completed batch sources", async () => {
@@ -2186,6 +2855,31 @@ test("batch source timeout is isolated from other sources", async () => {
   assert.equal(response.transport_status_matrix.profile.category, "completed");
 });
 
+test("batch deadline returns source-level timeout rows before caller timeout", async () => {
+  const service = createService();
+  const response = await service.executeBatch({
+    batch_timeout_ms: 1000,
+    execution_groups: [
+      {
+        group_id: "auth_sensitive_serial",
+        execution: "auth_sensitive_serial",
+        sources: [
+          { source_id: "profile", action: "archives_user_profile", params: ACTION_INPUTS.archives_user_profile },
+          { source_id: "analysis", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "failed");
+  assert.equal(response.timeout_count, 2);
+  assert.equal(response.failed_count, 2);
+  assert.equal(response.transport_status_matrix.profile.timeout_stage, "batch_deadline");
+  assert.equal(response.transport_status_matrix.analysis.timeout_stage, "batch_deadline");
+  assert.equal(response.missing_or_failed_sources.length, 2);
+  assertNoCredentialMaterial(response);
+});
+
 test("batch rejects forbidden inputs and legacy response mode per source", async () => {
   const service = createService();
   await assert.rejects(
@@ -2199,6 +2893,18 @@ test("batch rejects forbidden inputs and legacy response mode per source", async
       ]
     }),
     (error) => error.code === "forbidden_action_input"
+  );
+  await assert.rejects(
+    () => service.executeBatch({
+      sources: [
+        {
+          source_id: "unknown",
+          action: "not_allowlisted",
+          params: {}
+        }
+      ]
+    }),
+    (error) => error.code === "unknown_action"
   );
 
   const response = await service.executeBatch({

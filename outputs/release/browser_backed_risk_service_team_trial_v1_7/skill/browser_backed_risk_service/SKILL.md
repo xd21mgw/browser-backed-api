@@ -19,7 +19,7 @@ The service does not do business summaries, observations, source cards, source
 quality, evidence cards, no-data interpretation, risk judgment, DataAgent/Hive
 calls, permission bypass, or platform writes.
 
-Current callable `action_count=70`. All actions are passthrough-only at the
+Current callable `action_count=74`. All actions are passthrough-only at the
 service layer.
 
 This Skill is independent of any specific upper-layer agent.
@@ -44,7 +44,7 @@ POST {service_base_url}/actions/<action_name>
 ```
 
 Before action calls, verify `/health` and `/actions`; `action_count` should be
-70.
+74.
 
 ## Deployment Modes
 
@@ -117,6 +117,11 @@ Daily user experience should be low-friction:
   returns `login_logs_page_context_stale`, report that the login logs source is
   blocked by stale page context; do not call it `no_data` and do not retry
   indefinitely.
+- Archives actions are still browser-context request actions. The service
+  injects the fixed Archives page contract recovered from HAR
+  (`/frontend/archives/index.html` Referer plus same-origin Origin) before
+  calling fixed APIs such as `archives_user_profile`, `archives_user_analysis`,
+  `archives_photo_search`, and `archives_gallery_photo_list`.
 - `npm run worker:start` is the only daily recovery entry point. It may open the
   Mac profile flow when refresh/rewarm reports `manual_login_required`,
   `auth_required`, `two_factor_required`, or `captcha_required`; after the user
@@ -139,7 +144,7 @@ future focus area; until then, prefer Mac Local Worker for remote main Agents.
 
 Bridge/tunnel safety boundary:
 
-- Forward only `/health`, `/actions`, and `/actions/<allowlisted_action>`
+- Forward only `/health`, `/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and `/actions/<allowlisted_action>`
   unless a separately reviewed deployment explicitly enables more service
   routes.
 - Do not expose arbitrary URL fetch or arbitrary platform paths.
@@ -259,6 +264,7 @@ action:
 - `/browser-backed-risk-service 用户画像 <user_id>`
 - `/browser-backed-risk-service 登录历史 <user_id>`
 - `/browser-backed-risk-service 设备图谱 <user_id>`
+- `/browser-backed-risk-service 设备详情 <device_id>`
 - `/browser-backed-risk-service 作品查询 <user_id>`
 - `/browser-backed-risk-service 私信样本 <user_id>`
 - `/browser-backed-risk-service 资料变更 <user_id>`
@@ -277,7 +283,7 @@ judgment rule. `ACTION_REGISTRY.md` remains the exact interface contract.
 | Observation area | Representative actions | Default role | Anchor / params to prepare |
 | --- | --- | --- | --- |
 | 账号域 / 行为域 / 处置域 | `archives_user_profile`, `archives_user_analysis`, `archives_review_logs`, `archives_user_label`, `archives_past_four_items` | first hop / drilldown | `user_id`; time window for logs/analysis |
-| 设备域 / 团伙候选 | `weapon_inventory` | first hop | `user_id` or `device_id` |
+| 设备域 / 团伙候选 | `weapon_inventory`, `weapon_device_info`, `weapon_device_app_list`, `weapon_device_location_info`, `weapon_user_klink_status` | first hop / drilldown | `user_id` or `device_id`; `weapon_device_location_info` also needs `user_id` |
 | 网络/登录行为域 | `login_logs_search` | first hop | `user_id`; recent 7-day window; `max_records=300` |
 | 内容域 / 社交域 | `archives_photo_search`, `archives_gallery_photo_list`, `archives_photo_meta`, `archives_live_gallery`, `archives_collect_photo_list`, `archives_moment_list` | first hop / anchor drilldown | `user_id`; derive `photo_id` / `live_stream_id` before detail actions |
 | 社交域 / 关系扩散 | `archives_fans_list`, `archives_follow_list`, `archives_comment_search`, `archives_related_users`, `archives_private_message_search` | anchor drilldown | `user_id`; `direction` for private message; page cap |
@@ -504,7 +510,7 @@ Before running:
 - Confirm `service_base_url`.
 - In Remote Main Agent + Mac Local Worker Mode, confirm the Mac node is
   connected and `{service_base_url}/health` is reachable.
-- Call `{service_base_url}/actions` and confirm `action_count=70`.
+- Call `{service_base_url}/actions` and confirm `action_count=74`.
 
 Default low-risk read-only action group:
 
@@ -585,6 +591,7 @@ Recommended output:
    - `track_profile_observed`
    - `login_records_observed`
    - `device_graph_observed`
+   - `device_detail_observed`
    - `archives_profile_observed`
    - `private_message_sample_observed`
 4. Missing or blocked sources:
@@ -717,6 +724,10 @@ service/browser credential material.
 | `track_analysis_summary` | `track_analysis` |
 | `login_logs_search` | `login_logs` |
 | `weapon_inventory` | `weapon` |
+| `weapon_device_info` | `weapon` |
+| `weapon_device_app_list` | `weapon` |
+| `weapon_device_location_info` | `weapon` |
+| `weapon_user_klink_status` | `weapon` |
 | `rcp_snapshot` | `rcp` |
 | `archives_user_profile` | `archives` |
 | `archives_user_analysis` | `archives` |

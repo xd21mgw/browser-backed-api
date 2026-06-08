@@ -25,6 +25,16 @@ Version: `browser_backed_risk_service_team_trial_v1_7`
 - Expanded `action_count` from 37 to 70 by actionizing additional validated
   read-only Archives/RCP/Track interfaces and aligning them with registry,
   capability index, playbook, Skill, mock tests, and passthrough contracts.
+- Archives fixed actions remain browser-context request actions. The service now
+  injects the HAR-aligned Archives page contract (`/frontend/archives/index.html`
+  Referer plus same-origin Origin) for shared fixed APIs such as
+  `archives_user_profile`, `archives_user_analysis`, `archives_photo_search`,
+  `archives_gallery_photo_list`, `archives_related_users`, and
+  `archives_past_four_items`.
+- Live readonly validation confirms the Archives shared contract now returns
+  business JSON for `archives_photo_search`, `archives_gallery_photo_list`,
+  `archives_related_users`, and `archives_past_four_items` instead of short
+  auth-failed shells.
 - Kept pure passthrough service positioning.
 
 ## Unchanged Safety Boundary

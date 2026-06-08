@@ -239,6 +239,10 @@ data. Most business actions use the browser-context request API, so API calls
 do not depend on the currently loaded page's JavaScript context. `login_logs_search`
 is an explicit exception: the user-center workbench page can become idle/stale,
 so the service refreshes the login logs page session before the fixed API call.
+Archives actions still use browser-context request, but they depend on a fixed
+service-owned page contract (`/frontend/archives/index.html` Referer and
+same-origin Origin) recovered from HAR. That contract is built inside the
+service; callers still only provide typed params.
 If `login_logs_search` gets an API timeout or a workbench HTML shell, it refreshes
 that page session once and retries the same fixed action. A second HTML shell is
 reported as `login_logs_page_context_stale`; it is not `no_data`.

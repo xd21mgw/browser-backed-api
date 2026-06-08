@@ -20,7 +20,8 @@ Agents should call the service through a configured `service_base_url`.
 
 The bridge/tunnel is a deployment-layer requirement, not part of this service
 release. The verified low-approval Mac proxy forwards only `/health`,
-`/actions`, and `/actions/<allowlisted_action>` to the teammate's Mac local
+`/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and
+`/actions/<allowlisted_action>` to the teammate's Mac local
 worker; it must not expose arbitrary URL fetch, Chrome profile files, cookies,
 tokens, sessions, or request headers.
 
@@ -75,7 +76,7 @@ quality scoring, risk judgments, no-data interpretation, next-step
 recommendations, DataAgent/Hive calls, permission bypass, or automatic upstream
 write/disposal actions.
 
-Current `action_count=70`.
+Current `action_count=74`.
 
 Useful entry points:
 
@@ -129,6 +130,10 @@ to `passthrough`; legacy modes are rejected.
 | `track_analysis_summary` | `track_analysis` |
 | `login_logs_search` | `login_logs` |
 | `weapon_inventory` | `weapon` |
+| `weapon_device_info` | `weapon` |
+| `weapon_device_app_list` | `weapon` |
+| `weapon_device_location_info` | `weapon` |
+| `weapon_user_klink_status` | `weapon` |
 | `rcp_snapshot` | `rcp` |
 | `archives_user_profile` | `archives` |
 | `archives_user_analysis` | `archives` |
@@ -234,6 +239,10 @@ data. Most business actions use the browser-context request API, so API calls
 do not depend on the currently loaded page's JavaScript context. `login_logs_search`
 is an explicit exception: the user-center workbench page can become idle/stale,
 so the service refreshes the login logs page session before the fixed API call.
+Archives actions still use browser-context request, but they depend on a fixed
+service-owned page contract (`/frontend/archives/index.html` Referer and
+same-origin Origin) recovered from HAR. That contract is built inside the
+service; callers still only provide typed params.
 If `login_logs_search` gets an API timeout or a workbench HTML shell, it refreshes
 that page session once and retries the same fixed action. A second HTML shell is
 reported as `login_logs_page_context_stale`; it is not `no_data`.
@@ -313,7 +322,7 @@ Optional smoke:
 Expected self-test output:
 
 - `service_ready`
-- `action_count=70`
+- `action_count=74`
 - per-action envelope summary
 - per-action `live_status`
 - main-agent observation summary such as `track_profile_observed`,
@@ -343,7 +352,7 @@ read or output authentication material.
 `worker:expose` is the verified low-approval runtime helper for Remote Main
 Agent + Mac Local Worker Mode. It starts or reuses a constrained proxy on the
 Mac and prints a `service_base_url` such as `http://<mac_ip>:9787`. The proxy
-forwards only `/health`, `/actions`, and `/actions/<allowlisted_action>` to the
+forwards only `/health`, `/actions`, `POST /actions/batch`, `POST /actions/multi_source_plan`, and `/actions/<allowlisted_action>` to the
 local service. It does not expose arbitrary URL fetch, Chrome profile files,
 cookies, tokens, sessions, authorization values, request headers, localStorage,
 or Playwright storageState.
@@ -353,7 +362,7 @@ in [`REMOTE_MAIN_AGENT_SUCCESS_PATHS.md`](./REMOTE_MAIN_AGENT_SUCCESS_PATHS.md).
 
 ## Capability Playbook
 
-Users and main agents do not need to memorize all 70 action names. Use
+Users and main agents do not need to memorize all 74 action names. Use
 [`CAPABILITY_INDEX.yaml`](./CAPABILITY_INDEX.yaml) for capability-to-action
 mapping and [`ACTION_PLAYBOOK.md`](./ACTION_PLAYBOOK.md) for user-facing "what
 do I want to inspect" guidance.
@@ -363,6 +372,7 @@ Supported command intents include:
 - `/browser-backed-risk-service 用户画像 <user_id>`
 - `/browser-backed-risk-service 登录历史 <user_id>`
 - `/browser-backed-risk-service 设备图谱 <user_id>`
+- `/browser-backed-risk-service 设备详情 <device_id>`
 - `/browser-backed-risk-service 作品查询 <user_id>`
 - `/browser-backed-risk-service 私信样本 <user_id>`
 - `/browser-backed-risk-service 资料变更 <user_id>`

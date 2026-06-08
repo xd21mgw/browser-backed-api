@@ -12,6 +12,7 @@ const port = Number(process.env.PORT || 8787);
 const localBaseUrl = `http://127.0.0.1:${port}`;
 const exposePort = Number(process.env.BROWSER_BACKED_EXPOSE_PORT || 9787);
 const exposeHost = process.env.BROWSER_BACKED_EXPOSE_HOST || "0.0.0.0";
+const proxyMaxRequestBytes = Number(process.env.BROWSER_BACKED_WORKER_PROXY_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
 const proxyLocalBaseUrl = `http://127.0.0.1:${exposePort}`;
 const runtimeDir = process.env.BROWSER_BACKED_WORKER_RUNTIME_DIR ||
   path.join(os.homedir(), ".dennis-browser-backed");
@@ -92,6 +93,11 @@ export function classifyProxyRequest(method, rawUrl, actionNames = ACTION_ALLOWL
       ? { allowed: true, reason: null, upstreamPath: "/actions" }
       : { allowed: false, reason: "method_not_allowed", upstreamPath: null };
   }
+  if (pathname === "/actions/batch" || pathname === "/actions/multi_source_plan") {
+    return methodUpper === "POST"
+      ? { allowed: true, reason: null, upstreamPath: pathname }
+      : { allowed: false, reason: "method_not_allowed", upstreamPath: null };
+  }
 
   const match = pathname.match(/^\/actions\/([A-Za-z0-9_:-]+)$/);
   if (!match) {
@@ -113,7 +119,7 @@ export function buildExposeSummary({ proxyStatus, serviceBaseUrl, health, action
     service_base_url: serviceBaseUrl,
     action_count: health?.action_count ?? actions?.action_count ?? null,
     auth_state: health?.auth_state || null,
-    allowed_paths: ["/health", "/actions", "/actions/<allowlisted_action>"],
+    allowed_paths: ["/health", "/actions", "/actions/batch", "/actions/multi_source_plan", "/actions/<allowlisted_action>"],
     security_todo: [
       "Restrict access to trusted internal network or approved Mac node channel.",
       "Do not expose arbitrary URL fetch.",
@@ -661,7 +667,7 @@ async function runProxyServer() {
       sendJson(response, classification.reason === "method_not_allowed" ? 405 : 404, {
         ok: false,
         error_type: classification.reason,
-        allowed_paths: ["/health", "/actions", "/actions/<allowlisted_action>"],
+        allowed_paths: ["/health", "/actions", "/actions/batch", "/actions/multi_source_plan", "/actions/<allowlisted_action>"],
         arbitrary_url_fetch_enabled: false,
         credential_material_output: false
       });
@@ -670,7 +676,7 @@ async function runProxyServer() {
 
     let body = "";
     try {
-      body = await readProxyBody(request, 1024 * 1024);
+      body = await readProxyBody(request, proxyMaxRequestBytes);
       const upstream = await fetch(`${localBaseUrl}${classification.upstreamPath}`, {
         method: request.method,
         headers: request.method === "POST" ? { "content-type": "application/json" } : undefined,
@@ -681,9 +687,9 @@ async function runProxyServer() {
       response.setHeader("content-type", upstream.headers.get("content-type") || "application/json");
       response.end(text);
     } catch (error) {
-      sendJson(response, 502, {
+      sendJson(response, error.statusCode || 502, {
         ok: false,
-        error_type: "worker_proxy_failed",
+        error_type: error.code || "worker_proxy_failed",
         error_message_sanitized: sanitizeMessage(error),
         credential_material_output: false
       });
@@ -1243,16 +1249,27 @@ function readProxyBody(request, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let bytes = 0;
+    let tooLarge = false;
     request.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > maxBytes) {
-        reject(new Error("Proxy request body too large"));
-        request.destroy();
+        tooLarge = true;
         return;
       }
-      chunks.push(chunk);
+      if (!tooLarge) {
+        chunks.push(chunk);
+      }
     });
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("end", () => {
+      if (tooLarge) {
+        const error = new Error("Proxy request body too large");
+        error.statusCode = 413;
+        error.code = "request_too_large";
+        reject(error);
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     request.on("error", reject);
   });
 }
