@@ -58,6 +58,7 @@ export class BrowserBackedApiService {
       state_file_configured: authState.state_file_configured,
       last_refresh_at: authState.last_refresh_at,
       auth_state: authStateValue,
+      auth_status: authStateValue === "auth_required" ? "missing" : authStateValue,
       auth_state_expired: authStateValue === "expired" || authState.auth_state_expired,
       pending_manual_login: pendingManualLogin,
       next_step: pendingManualLogin ? "npm run worker:start" : authState.next_step,

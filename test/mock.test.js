@@ -581,6 +581,12 @@ test("origin registry and fixed action allowlist remain explicit", () => {
     assert.equal(origin.refreshTtlMs, DEFAULT_REFRESH_TTL_MS);
     assert.equal(origin.enabled, true);
   }
+  assert.equal(ORIGIN_REGISTRY.data_agent.name, "data_agent");
+  assert.equal(ORIGIN_REGISTRY.data_agent.defaultOrigin, "https://tc.corp.kuaishou.com");
+  assert.equal(ORIGIN_REGISTRY.data_agent.warmupPath, "/data-agent");
+  assert.equal(ORIGIN_REGISTRY.data_agent.optional, true);
+  assert.equal(ORIGIN_REGISTRY.data_agent.requiredForHealth, false);
+  assert.equal(ORIGIN_REGISTRY.data_agent.requiredForRefresh, false);
   assert.equal(Object.keys(ACTIONS).length, 74);
   assert.deepEqual(Object.keys(ACTIONS), ACTION_ALLOWLIST);
 });
@@ -2068,6 +2074,9 @@ test("health and refresh state expose auth readiness metadata only", () => {
   assert.equal(health.profile_dir_configured, true);
   assert.equal(health.state_file_configured, true);
   assert.equal(health.action_count, ACTION_ALLOWLIST.length);
+  assert.equal(typeof health.auth_status, "string");
+  assert.equal(Object.hasOwn(health.origin_status, "data_agent"), true);
+  assert.equal(typeof health.origin_status.data_agent.auth_status, "string");
 
   const state = updateOriginWarmState({}, config.domains.rcp, {
     status: "ready",
@@ -2129,6 +2138,7 @@ test("auth-state decisions handle missing profile, missing state, and refresh tt
   assert.equal(["auth_required", "unknown"].includes(authState.auth_state), true);
   assert.equal(typeof authState.auth_state_expired, "boolean");
   assert.equal(typeof authState.origin_ready_state_stale, "boolean");
+  assert.equal(["missing", "unknown"].includes(authState.origin_status.data_agent.auth_status), true);
 
   const stale = {
     origin_status: {
@@ -2145,6 +2155,13 @@ test("auth-state decisions handle missing profile, missing state, and refresh tt
         status: "ready",
         page_ready: true,
         refreshed_at: new Date().toISOString()
+      },
+      data_agent: {
+        status: "ready",
+        page_ready: true,
+        refreshed_at: new Date().toISOString(),
+        final_origin: config.domains.data_agent.origin,
+        current_origin: config.domains.data_agent.origin
       }
     }
   };
@@ -2154,13 +2171,22 @@ test("auth-state decisions handle missing profile, missing state, and refresh tt
   const expiredHealth = computeAuthState({
     profileDir: config.profileDir,
     stateFile: config.stateFile,
-    origins: [config.domains.rcp],
+    origins: [config.domains.rcp, config.domains.data_agent],
     refreshState: stale,
     nowMs: Date.now()
   });
   assert.equal(expiredHealth.origin_status.rcp.origin_ready_state_stale, true);
   assert.equal(expiredHealth.origin_status.rcp.origin_freshness_ttl_ms, DEFAULT_REFRESH_TTL_MS);
   assert.equal(Number.isInteger(expiredHealth.origin_status.rcp.origin_freshness_age_ms), true);
+
+  const freshHealth = computeAuthState({
+    profileDir: config.profileDir,
+    stateFile: config.stateFile,
+    origins: [config.domains.data_agent],
+    refreshState: fresh,
+    nowMs: Date.now()
+  });
+  assert.equal(freshHealth.origin_status.data_agent.auth_status, "ready");
 });
 
 test("refresh daemon event output does not include credential material", () => {

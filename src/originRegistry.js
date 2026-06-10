@@ -120,6 +120,20 @@ export const ORIGIN_REGISTRY = Object.freeze({
     requiredForHealth: true,
     requiredForRefresh: true,
     optional: false
+  }),
+  data_agent: freezeOrigin({
+    name: "data_agent",
+    label: "Data Agent",
+    envVar: "DATA_AGENT_ORIGIN",
+    warmupEnvVar: "DATA_AGENT_PREWARM_PATH",
+    defaultOrigin: "https://tc.corp.kuaishou.com",
+    warmupPath: "/data-agent",
+    actions: [],
+    refreshTtlMs: DEFAULT_REFRESH_TTL_MS,
+    enabled: true,
+    requiredForHealth: false,
+    requiredForRefresh: false,
+    optional: true
   })
 });
 
