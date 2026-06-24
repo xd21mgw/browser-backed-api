@@ -225,6 +225,9 @@ const RESPONSE_MODES = Object.freeze(["passthrough"]);
 const PASSTHROUGH_ONLY_RESPONSE_MODES = Object.freeze(["passthrough"]);
 const FETCH_MODE_CONTEXT_REQUEST = "context_request";
 const FETCH_MODE_PAGE_FOLLOWUP = "page_followup";
+const LOCK_SCOPE_NONE = "none";
+const LOCK_SCOPE_PER_ORIGIN = "per_origin";
+const LOCK_SCOPE_GLOBAL = "global";
 
 const TRACK_ANALYSIS_LATEST_DATE_PATH = "/dp/platform/app/analytics/v2/sequence/getLastestDateTime";
 const TRACK_ANALYSIS_USE_DURATION_PATH = "/dp/platform/app/analytics/v2/sequence/getUseDuration";
@@ -1784,6 +1787,9 @@ export function listActions(config) {
         upstream_body_suppressed: false,
         transport_status_only: false,
         reads_cookie_token_session_header_plaintext: false
+      },
+      concurrency: {
+        ...action.concurrency
       }
     };
   });
@@ -2017,7 +2023,8 @@ export function buildPassthroughActionResponse(action, input, fetchResult, meta 
       page_context_retry_attempted: Boolean(meta.page_context_retry_attempted),
       page_context_retry_reason: safeString(meta.page_context_retry_reason) || null,
       page_context_retry_status: safeString(meta.page_context_retry_status) || null,
-      safe_reason: safeReason || null
+      safe_reason: safeReason || null,
+      concurrency: concurrencyTrace(meta)
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: bodyPresent && !upstream.body_omitted })
   };
@@ -2099,7 +2106,8 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
       context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
       safe_reason: safeReason || null,
-      next_step: nextStep
+      next_step: nextStep,
+      concurrency: concurrencyTrace(meta)
     },
     safety: passthroughSafety({ upstreamBusinessBodyVisible: false })
   };
@@ -4007,11 +4015,67 @@ function responseModeContractText(responseModes, defaultResponseMode) {
 
 function freezeAction(action) {
   normalizeRelativePath(action.apiPath, `${action.name}.apiPath`);
-  return Object.freeze({
+  const normalized = {
     expectedContentType: "json",
     fetchMode: FETCH_MODE_CONTEXT_REQUEST,
     ...action
+  };
+  return Object.freeze({
+    ...normalized,
+    concurrency: normalizeActionConcurrency(normalized)
   });
+}
+
+function normalizeActionConcurrency(action) {
+  const pageBound = action.page_bound === true || action.pageBound === true || action.fetchMode === FETCH_MODE_PAGE_FOLLOWUP;
+  const lockScope = action.lock_scope || action.lockScope || inferredLockScope(action, pageBound);
+  const concurrencyGroup = action.concurrency_group || action.concurrencyGroup || inferredConcurrencyGroup(action, lockScope);
+  const maxConcurrency = Number.isInteger(action.max_concurrency)
+    ? action.max_concurrency
+    : Number.isInteger(action.maxConcurrency)
+      ? action.maxConcurrency
+      : lockScope === LOCK_SCOPE_NONE
+        ? null
+        : 1;
+
+  return Object.freeze({
+    concurrency_group: concurrencyGroup,
+    lock_scope: lockScope,
+    page_bound: pageBound,
+    max_concurrency: maxConcurrency
+  });
+}
+
+function inferredLockScope(action, pageBound) {
+  if (action.lock_scope === LOCK_SCOPE_GLOBAL || action.lockScope === LOCK_SCOPE_GLOBAL) {
+    return LOCK_SCOPE_GLOBAL;
+  }
+  if (pageBound || action.domainKey === "archives" || action.domainKey === "login_logs") {
+    return LOCK_SCOPE_PER_ORIGIN;
+  }
+  return LOCK_SCOPE_NONE;
+}
+
+function inferredConcurrencyGroup(action, lockScope) {
+  if (lockScope === LOCK_SCOPE_GLOBAL) {
+    return "global";
+  }
+  if (lockScope === LOCK_SCOPE_PER_ORIGIN) {
+    return `${action.domainKey}:origin`;
+  }
+  return `${action.domainKey}:context_request`;
+}
+
+function concurrencyTrace(meta = {}) {
+  return {
+    lock_scope: safeString(meta.concurrency_lock_scope) || null,
+    concurrency_group: safeString(meta.concurrency_group) || null,
+    wait_ms: safeNullableInteger(meta.concurrency_wait_ms),
+    queued_at: safeString(meta.concurrency_queued_at) || null,
+    started_at: safeString(meta.concurrency_started_at) || null,
+    finished_at: safeString(meta.concurrency_finished_at) || null,
+    action_duration_ms: safeNullableInteger(meta.concurrency_action_duration_ms)
+  };
 }
 
 function sanitizeInput(input) {

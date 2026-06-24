@@ -22,7 +22,7 @@ Version: `browser_backed_risk_service_team_trial_v1_7`
   - daily runtime through Mac `worker:expose`
 - The low-approval proxy forwards only `/health`, `/actions`, and
   `/actions/<allowlisted_action>`.
-- Expanded `action_count` from 37 to 70 by actionizing additional validated
+- Expanded `action_count` from 37 to 74 by actionizing additional validated
   read-only Archives/RCP/Track interfaces and aligning them with registry,
   capability index, playbook, Skill, mock tests, and passthrough contracts.
 - Archives fixed actions remain browser-context request actions. The service now

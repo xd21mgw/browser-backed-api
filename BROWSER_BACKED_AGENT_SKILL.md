@@ -249,7 +249,7 @@ Failure behavior:
 
 ### `/browser-backed-risk-service actions`
 
-- List the 70 allowlisted fixed actions.
+- List the 74 allowlisted fixed actions.
 - Show typed params from `ACTION_REGISTRY.md`.
 - Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` when the user asks by
   capability rather than exact action name.

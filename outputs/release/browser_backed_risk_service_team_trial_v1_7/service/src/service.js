@@ -26,6 +26,7 @@ export class BrowserBackedApiService {
     this.browserClient = browserClient || (config.mode === "live" ? new BrowserBackedClient(config) : null);
     this.warmState = new Map(Object.values(config.domains).map((domain) => [domain.key, defaultWarmState(domain, config)]));
     this.refreshState = loadRefreshState(config.stateFile);
+    this.concurrencyScheduler = new ActionConcurrencyScheduler(config.concurrency || {});
   }
 
   async init() {
@@ -58,6 +59,7 @@ export class BrowserBackedApiService {
       state_file_configured: authState.state_file_configured,
       last_refresh_at: authState.last_refresh_at,
       auth_state: authStateValue,
+      auth_status: authStateValue === "auth_required" ? "missing" : authStateValue,
       auth_state_expired: authStateValue === "expired" || authState.auth_state_expired,
       pending_manual_login: pendingManualLogin,
       next_step: pendingManualLogin ? "npm run worker:start" : authState.next_step,
@@ -76,6 +78,10 @@ export class BrowserBackedApiService {
   }
 
   async prewarm() {
+    return this.concurrencyScheduler.runGlobal("prewarm", () => this.prewarmUnlocked());
+  }
+
+  async prewarmUnlocked() {
     const results = [];
     for (const domain of enabledDomains(this.config)) {
       results.push(await this.prewarmDomain(domain.key));
@@ -197,13 +203,21 @@ export class BrowserBackedApiService {
     }
 
     validateActionInput(input);
+    const actionInput = cloneActionInput(input);
 
+    return this.concurrencyScheduler.runAction(action, (concurrencyTrace) => (
+      this.executeActionUnlocked(action, actionInput, concurrencyTrace)
+    ));
+  }
+
+  async executeActionUnlocked(action, input, concurrencyTrace = {}) {
     const startedAt = Date.now();
     if (this.config.mode === "live" && !isPlatformEnabled(this.config, action.domainKey)) {
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
         errorType: "platform_not_enabled",
-        platformError: "platform_not_enabled"
+        platformError: "platform_not_enabled",
+        ...completeConcurrencyTrace(concurrencyTrace, startedAt)
       });
     }
 
@@ -213,7 +227,8 @@ export class BrowserBackedApiService {
         latencyMs: Date.now() - startedAt,
         errorType: parameterError.errorType || "parameter_error",
         invalidParams: true,
-        parameterError
+        parameterError,
+        ...completeConcurrencyTrace(concurrencyTrace, startedAt)
       });
     }
 
@@ -221,7 +236,8 @@ export class BrowserBackedApiService {
       const originWarmed = Boolean(this.warmState.get(action.domainKey)?.warmed);
       return runMockAction(action, input, this.config, {
         latencyMs: Date.now() - startedAt,
-        originWarmed
+        originWarmed,
+        ...completeConcurrencyTrace(concurrencyTrace, startedAt)
       });
     }
 
@@ -232,7 +248,8 @@ export class BrowserBackedApiService {
         errorType: freshnessResult.errorType,
         platformError: freshnessResult.platformError,
         authRedirectDetected: Boolean(freshnessResult.meta.auth_redirect_detected),
-        ...freshnessResult.meta
+        ...freshnessResult.meta,
+        ...completeConcurrencyTrace(concurrencyTrace, startedAt)
       });
     }
 
@@ -240,6 +257,7 @@ export class BrowserBackedApiService {
     const actionRequest = buildActionBody(action, input);
     let actionDiagnostics = this.browserClient.actionDiagnostics(action, originWarmed);
     const lazyMeta = {
+      ...concurrencyTrace,
       ...freshnessResult.meta,
       lazyRewarmAttempted: false,
       lazyRewarmStatus: "not_attempted",
@@ -275,7 +293,8 @@ export class BrowserBackedApiService {
         latencyMs: Date.now() - startedAt,
         errorType,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
-        ...lazyMeta
+        ...lazyMeta,
+        ...completeConcurrencyTrace(lazyMeta, startedAt)
       });
     }
 
@@ -286,7 +305,8 @@ export class BrowserBackedApiService {
           const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
             latencyMs: Date.now() - startedAt,
             authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
-            ...lazyMeta
+            ...lazyMeta,
+            ...completeConcurrencyTrace(lazyMeta, startedAt)
           });
           if (shouldRetryAfterRecoverableResponse(action, response)) {
             if (action.domainKey === "archives") {
@@ -328,7 +348,8 @@ export class BrowserBackedApiService {
             safe_reason: failure.safeReason,
             platformError: failure.platformError,
             timeoutStage: timeoutStageForFetchError(errorType, "api_fetch_timeout"),
-            ...lazyMeta
+            ...lazyMeta,
+            ...completeConcurrencyTrace(lazyMeta, startedAt)
           });
         }
       }
@@ -337,7 +358,8 @@ export class BrowserBackedApiService {
       const response = buildLiveActionResponse(action, input, this.config, fetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: Boolean(actionDiagnostics.auth_redirect_detected),
-        ...lazyMeta
+        ...lazyMeta,
+        ...completeConcurrencyTrace(lazyMeta, startedAt)
       });
       if (shouldRetryAfterRecoverableResponse(action, response)) {
         return this.retryAfterPageSessionRefresh({
@@ -379,7 +401,8 @@ export class BrowserBackedApiService {
         safe_reason: failure.safeReason,
         platformError: failure.platformError,
         timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
-        ...lazyMeta
+        ...lazyMeta,
+        ...completeConcurrencyTrace(lazyMeta, startedAt)
       });
     }
   }
@@ -413,7 +436,8 @@ export class BrowserBackedApiService {
         authRedirectDetected: Boolean(rewarmResult.auth_redirect_detected),
         safe_reason: staleSafeReason,
         nextStep: "npm run worker:start",
-        ...retryMeta
+        ...retryMeta,
+        ...completeConcurrencyTrace(retryMeta, startedAt)
       });
     }
 
@@ -424,7 +448,8 @@ export class BrowserBackedApiService {
       return buildLiveActionResponse(action, input, this.config, retryFetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: false,
-        ...retryMeta
+        ...retryMeta,
+        ...completeConcurrencyTrace(retryMeta, startedAt)
       });
     } catch (error) {
       const errorType = classifyError(error);
@@ -433,7 +458,8 @@ export class BrowserBackedApiService {
         errorType,
         timeoutStage: timeoutStageForFetchError(errorType, defaultTimeoutStageForAction(action)),
         safe_reason: staleSafeReason,
-        ...retryMeta
+        ...retryMeta,
+        ...completeConcurrencyTrace(retryMeta, startedAt)
       });
     }
   }
@@ -474,7 +500,8 @@ export class BrowserBackedApiService {
           authRedirectDetected: Boolean(rewarmResult.auth_redirect_detected),
           safe_reason: "context_request_not_recovered",
           nextStep: "npm run worker:start",
-          ...retryMeta
+          ...retryMeta,
+          ...completeConcurrencyTrace(retryMeta, startedAt)
         });
       }
 
@@ -482,7 +509,8 @@ export class BrowserBackedApiService {
       return buildLiveActionResponse(action, input, this.config, retryFetchResult, {
         latencyMs: Date.now() - startedAt,
         authRedirectDetected: false,
-        ...retryMeta
+        ...retryMeta,
+        ...completeConcurrencyTrace(retryMeta, startedAt)
       });
     } catch (error) {
       const failure = classifyActionFetchFailure(error, action, this.browserClient.actionDiagnostics(action, false));
@@ -493,7 +521,8 @@ export class BrowserBackedApiService {
         safe_reason: failure.safeReason || "context_request_not_recovered",
         platformError: failure.platformError,
         timeoutStage: timeoutStageForFetchError(errorType, "api_fetch_timeout"),
-        ...retryMeta
+        ...retryMeta,
+        ...completeConcurrencyTrace(retryMeta, startedAt)
       });
     }
   }
@@ -826,6 +855,144 @@ export class BrowserBackedApiService {
   }
 }
 
+class ActionConcurrencyScheduler {
+  constructor(config = {}) {
+    this.maxActive = positiveInteger(config.actionGlobalMax, 4);
+    this.active = 0;
+    this.exclusiveActive = false;
+    this.scopedActive = new Set();
+    this.queue = [];
+  }
+
+  async runAction(action, runner) {
+    const queuedAtMs = Date.now();
+    const concurrency = normalizeConcurrencyMetadata(action);
+    const lockScope = concurrency.lock_scope;
+    const concurrencyGroup = concurrency.concurrency_group;
+    const release = lockScope === "global"
+      ? await this.acquireExclusive({ queuedAtMs })
+      : await this.acquireShared({ queuedAtMs, lockScope, concurrencyGroup });
+    const startedAtMs = Date.now();
+    const trace = {
+      concurrency_lock_scope: lockScope,
+      concurrency_group: concurrencyGroup,
+      concurrency_wait_ms: Math.max(0, startedAtMs - queuedAtMs),
+      concurrency_queued_at: new Date(queuedAtMs).toISOString(),
+      concurrency_started_at: new Date(startedAtMs).toISOString()
+    };
+
+    try {
+      return await runner(trace);
+    } finally {
+      release();
+    }
+  }
+
+  async runGlobal(label, runner) {
+    const queuedAtMs = Date.now();
+    const release = await this.acquireExclusive({ queuedAtMs, label });
+    try {
+      return await runner({
+        concurrency_lock_scope: "global",
+        concurrency_group: label || "global",
+        concurrency_wait_ms: Math.max(0, Date.now() - queuedAtMs),
+        concurrency_queued_at: new Date(queuedAtMs).toISOString(),
+        concurrency_started_at: new Date().toISOString()
+      });
+    } finally {
+      release();
+    }
+  }
+
+  acquireShared({ queuedAtMs, lockScope, concurrencyGroup }) {
+    return this.enqueue({
+      type: "shared",
+      queuedAtMs,
+      lockScope,
+      concurrencyGroup,
+      scoped: requiresScopedLock(lockScope)
+    });
+  }
+
+  acquireExclusive({ queuedAtMs, label }) {
+    return this.enqueue({
+      type: "exclusive",
+      queuedAtMs,
+      label
+    });
+  }
+
+  enqueue(request) {
+    return new Promise((resolve) => {
+      this.queue.push({
+        ...request,
+        resolve
+      });
+      this.drain();
+    });
+  }
+
+  drain() {
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (let index = 0; index < this.queue.length; index += 1) {
+        const request = this.queue[index];
+        if (!this.canRun(request, index)) {
+          continue;
+        }
+        this.queue.splice(index, 1);
+        this.startRequest(request);
+        progressed = true;
+        break;
+      }
+    }
+  }
+
+  canRun(request, index) {
+    if (this.exclusiveActive) {
+      return false;
+    }
+    const earlierExclusiveQueued = this.queue.slice(0, index).some((queued) => queued.type === "exclusive");
+    if (earlierExclusiveQueued) {
+      return false;
+    }
+    if (request.type === "exclusive") {
+      return this.active === 0;
+    }
+    if (this.active >= this.maxActive) {
+      return false;
+    }
+    if (request.scoped && this.scopedActive.has(request.concurrencyGroup)) {
+      return false;
+    }
+    return true;
+  }
+
+  startRequest(request) {
+    if (request.type === "exclusive") {
+      this.exclusiveActive = true;
+      request.resolve(() => {
+        this.exclusiveActive = false;
+        this.drain();
+      });
+      return;
+    }
+
+    this.active += 1;
+    if (request.scoped) {
+      this.scopedActive.add(request.concurrencyGroup);
+    }
+    request.resolve(() => {
+      if (request.scoped) {
+        this.scopedActive.delete(request.concurrencyGroup);
+      }
+      this.active = Math.max(0, this.active - 1);
+      this.drain();
+    });
+  }
+}
+
 const BATCH_EXECUTION_MODES = Object.freeze([
   "independent_parallel",
   "dependency_serial",
@@ -841,6 +1008,62 @@ const MAX_BATCH_DEADLINE_MS = 115_000;
 const MAX_BATCH_GROUPS = 12;
 const MAX_BATCH_SOURCES = 30;
 const SAFE_BATCH_ID_PATTERN = /^[A-Za-z0-9_:-]{1,96}$/;
+
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return fallback;
+  }
+  return Math.trunc(number);
+}
+
+function normalizeConcurrencyMetadata(action) {
+  const lockScope = action?.concurrency?.lock_scope || inferredActionLockScope(action);
+  return {
+    lock_scope: lockScope,
+    concurrency_group: action?.concurrency?.concurrency_group || inferredActionConcurrencyGroup(action, lockScope)
+  };
+}
+
+function inferredActionLockScope(action) {
+  if (action?.fetchMode === "page_followup" || action?.domainKey === "archives" || action?.domainKey === "login_logs") {
+    return "per_origin";
+  }
+  return "none";
+}
+
+function inferredActionConcurrencyGroup(action, lockScope) {
+  if (lockScope === "global") {
+    return "global";
+  }
+  if (lockScope && lockScope !== "none") {
+    return `${action?.domainKey || "unknown"}:${lockScope}`;
+  }
+  return `${action?.domainKey || "unknown"}:context_request`;
+}
+
+function requiresScopedLock(lockScope) {
+  return Boolean(lockScope && lockScope !== "none" && lockScope !== "global");
+}
+
+function completeConcurrencyTrace(trace = {}, startedAtMs = Date.now()) {
+  return {
+    concurrency_lock_scope: trace.concurrency_lock_scope || null,
+    concurrency_group: trace.concurrency_group || null,
+    concurrency_wait_ms: trace.concurrency_wait_ms ?? null,
+    concurrency_queued_at: trace.concurrency_queued_at || null,
+    concurrency_started_at: trace.concurrency_started_at || null,
+    concurrency_finished_at: new Date().toISOString(),
+    concurrency_action_duration_ms: Math.max(0, Date.now() - startedAtMs)
+  };
+}
+
+function cloneActionInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  return JSON.parse(JSON.stringify(input));
+}
 
 function buildBatchPlan(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {

@@ -140,7 +140,7 @@ Behavior:
 - Load `ACTION_REGISTRY.md`.
 - Use `CAPABILITY_INDEX.yaml` and `ACTION_PLAYBOOK.md` when the user asks by
   capability instead of exact action name.
-- List 70 allowlisted actions.
+- List 74 allowlisted actions.
 - Show typed params.
 - State that service output is a passthrough envelope with bounded upstream
   business body visibility.
@@ -179,7 +179,7 @@ Pre-check:
 2. For Remote Main Agent + Mac Local Worker Mode, confirm Mac node is connected.
 3. Call `{service_base_url}/health`.
 4. Call `{service_base_url}/actions`.
-5. Confirm `action_count=70`.
+5. Confirm `action_count=74`.
 
 Default action group:
 

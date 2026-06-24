@@ -449,6 +449,21 @@ function createLiveConfig(extraEnv = {}) {
   });
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(condition, timeoutMs = 500) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (condition()) {
+      return;
+    }
+    await delay(5);
+  }
+  assert.fail("Timed out waiting for condition");
+}
+
 function markOriginReady(service, config, domainKey) {
   const domain = config.domains[domainKey];
   const readyState = {
@@ -622,9 +637,449 @@ test("fixed action fetch modes default to context request with page-session exce
   assert.deepEqual(unknownActions, []);
 });
 
+test("action concurrency metadata defaults to conservative page and origin locks", () => {
+  assert.equal(ACTIONS.archives_user_profile.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.archives_private_message_search.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.archives_photo_meta.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.login_logs_search.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.login_logs_search.concurrency.page_bound, true);
+  assert.equal(ACTIONS.weapon_inventory.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.weapon_inventory.concurrency.page_bound, true);
+  assert.equal(ACTIONS.rcp_event_detail.concurrency.lock_scope, "none");
+  assert.equal(ACTIONS.track_analysis_check_data_ready.concurrency.lock_scope, "none");
+
+  const exposed = createService().actions().actions.find((action) => action.name === "archives_user_profile");
+  assert.equal(exposed.concurrency.lock_scope, "per_origin");
+  assert.equal(exposed.concurrency.concurrency_group, "archives:origin");
+});
+
 test("live body cap defaults to 5MB and remains env-overridable", () => {
   assert.equal(createLiveConfig().browser.maxLiveBodyBytes, 5 * 1024 * 1024);
   assert.equal(createLiveConfig({ MAX_LIVE_BODY_BYTES: "65536" }).browser.maxLiveBodyBytes, 65536);
+});
+
+test("AUTH-GLOBAL-LOCK-001 public prewarm waits for active actions", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "2" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  const originalPrewarmUnlocked = service.prewarmUnlocked.bind(service);
+  let actionStarted = false;
+  let releaseAction;
+  const actionGate = new Promise((resolve) => {
+    releaseAction = resolve;
+  });
+  let prewarmStarted = false;
+
+  service.executeActionUnlocked = async (...args) => {
+    actionStarted = true;
+    await actionGate;
+    return originalUnlocked(...args);
+  };
+  service.prewarmUnlocked = async () => {
+    prewarmStarted = true;
+    return originalPrewarmUnlocked();
+  };
+
+  const actionPromise = service.executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail);
+  await waitFor(() => actionStarted);
+  const prewarmPromise = service.prewarm();
+  await delay(20);
+  assert.equal(prewarmStarted, false);
+
+  releaseAction();
+  const [actionResponse, prewarmResponse] = await Promise.all([actionPromise, prewarmPromise]);
+  assert.equal(actionResponse.ok, true);
+  assert.equal(prewarmResponse.service_mode, "mock");
+  assert.equal(prewarmStarted, true);
+});
+
+test("ARCHIVES-PER-ORIGIN-SERIAL-001 Archives page-sensitive actions run one at a time", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.domainKey === "archives") {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await delay(20);
+      activeArchives -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
+    service.executeAction("archives_private_message_search", ACTION_INPUTS.archives_private_message_search)
+  ]);
+  assert.equal(maxActiveArchives, 1);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.lock_scope), ["per_origin", "per_origin"]);
+});
+
+test("LOGIN-LOGS-PER-ORIGIN-SERIAL-001 login_logs_search uses the per-origin page lock", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeLoginLogs = 0;
+  let maxActiveLoginLogs = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.domainKey === "login_logs") {
+      activeLoginLogs += 1;
+      maxActiveLoginLogs = Math.max(maxActiveLoginLogs, activeLoginLogs);
+      await delay(20);
+      activeLoginLogs -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search),
+    service.executeAction("login_logs_search", ACTION_INPUTS.login_logs_search)
+  ]);
+  assert.equal(maxActiveLoginLogs, 1);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.concurrency_group), ["login_logs:origin", "login_logs:origin"]);
+});
+
+test("CONTEXT-REQUEST-PARALLEL-001 safe context request actions can run concurrently", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeContextRequests = 0;
+  let maxActiveContextRequests = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (["rcp_event_detail", "track_analysis_check_data_ready"].includes(action.name)) {
+      activeContextRequests += 1;
+      maxActiveContextRequests = Math.max(maxActiveContextRequests, activeContextRequests);
+      await delay(20);
+      activeContextRequests -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail),
+    service.executeAction("track_analysis_check_data_ready", ACTION_INPUTS.track_analysis_check_data_ready)
+  ]);
+  assert.equal(maxActiveContextRequests, 2);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.lock_scope), ["none", "none"]);
+});
+
+test("CROSS-SOURCE-PARALLEL-001 context request sources are not blocked by Archives origin lock", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  const startedActions = [];
+  let releaseArchives;
+  const archivesGate = new Promise((resolve) => {
+    releaseArchives = resolve;
+  });
+
+  service.executeActionUnlocked = async (action, input, trace) => {
+    startedActions.push(action.name);
+    if (action.domainKey === "archives") {
+      await archivesGate;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const archivesPromise = service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+  await waitFor(() => startedActions.includes("archives_user_profile"));
+
+  const weaponPromise = service.executeAction("weapon_device_info", ACTION_INPUTS.weapon_device_info);
+  const rcpPromise = service.executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail);
+  await waitFor(() => startedActions.includes("weapon_device_info") && startedActions.includes("rcp_event_detail"));
+
+  releaseArchives();
+  await Promise.all([archivesPromise, weaponPromise, rcpPromise]);
+  assert.deepEqual(startedActions.sort(), ["archives_user_profile", "rcp_event_detail", "weapon_device_info"].sort());
+});
+
+test("CONCURRENCY-TRACE-001 action envelope metadata includes scheduler trace", async () => {
+  const response = await createService().executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+  const trace = response.meta.concurrency;
+  assert.equal(trace.lock_scope, "per_origin");
+  assert.equal(trace.concurrency_group, "archives:origin");
+  assert.equal(Number.isInteger(trace.wait_ms), true);
+  assert.equal(Number.isInteger(trace.action_duration_ms), true);
+  assert.equal(Number.isNaN(Date.parse(trace.queued_at)), false);
+  assert.equal(Number.isNaN(Date.parse(trace.started_at)), false);
+  assert.equal(Number.isNaN(Date.parse(trace.finished_at)), false);
+});
+
+test("NO-CREDENTIAL-LEAK-001 scheduler trace does not expose auth material", async () => {
+  const response = await createService().executeAction("rcp_event_detail", ACTION_INPUTS.rcp_event_detail);
+  assertNoCredentialMaterial(response.meta.concurrency);
+  assertNoCredentialMaterial(response);
+});
+
+test("CONCURRENT-SAME-ACTION-DIFFERENT-USERS-NO-MIX-001 same action keeps user binding", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const userA = "1000000001";
+  const userB = "1000000002";
+
+  const [responseA, responseB] = await Promise.all([
+    service.executeAction("archives_user_profile", { user_id: userA }),
+    service.executeAction("archives_user_profile", { user_id: userB })
+  ]);
+
+  assert.equal(responseA.action_name, "archives_user_profile");
+  assert.equal(responseB.action_name, "archives_user_profile");
+  assert.equal(responseA.meta.origin, "archives");
+  assert.equal(responseB.meta.origin, "archives");
+  assert.equal(responseA.upstream.body.response.data.userId, userA);
+  assert.equal(responseB.upstream.body.response.data.userId, userB);
+  assert.notEqual(responseA.request_id, responseB.request_id);
+});
+
+test("CONCURRENT-DIFFERENT-ACTIONS-SAME-USER-NO-MIX-001 different actions keep action binding", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const userId = "1000000003";
+
+  const [profile, analysis] = await Promise.all([
+    service.executeAction("archives_user_profile", { user_id: userId }),
+    service.executeAction("archives_user_analysis", {
+      ...ACTION_INPUTS.archives_user_analysis,
+      user_id: userId
+    })
+  ]);
+
+  assert.equal(profile.action_name, "archives_user_profile");
+  assert.equal(analysis.action_name, "archives_user_analysis");
+  assert.equal(profile.upstream.body.response.data.userId, userId);
+  assert.equal(analysis.upstream.body.response.data.dataList[0].userId, userId);
+  assert.notEqual(profile.upstream.body.fixed_path, analysis.upstream.body.fixed_path);
+});
+
+test("LOGIN-LOGS-DIFFERENT-USERS-SERIAL-NO-MIX-001 serial login_logs keeps request display paths isolated", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const inputA = { ...ACTION_INPUTS.login_logs_search, user_id: "1000000004" };
+  const inputB = { ...ACTION_INPUTS.login_logs_search, user_id: "1000000005" };
+
+  const [responseA, responseB] = await Promise.all([
+    service.executeAction("login_logs_search", inputA),
+    service.executeAction("login_logs_search", inputB)
+  ]);
+
+  assert.equal(responseA.meta.concurrency.concurrency_group, "login_logs:origin");
+  assert.equal(responseB.meta.concurrency.concurrency_group, "login_logs:origin");
+  assert.equal(responseA.upstream.body.request.display_path.includes("userId=%5Btyped_user_id%5D"), true);
+  assert.equal(responseB.upstream.body.request.display_path.includes("userId=%5Btyped_user_id%5D"), true);
+  assert.equal(JSON.stringify(responseA.upstream).includes("1000000005"), false);
+  assert.equal(JSON.stringify(responseB.upstream).includes("1000000004"), false);
+  assert.notEqual(responseA.request_id, responseB.request_id);
+});
+
+test("CROSS-SOURCE-PARALLEL-NO-MIX-001 parallel context requests keep source payloads isolated", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const deviceId = "DEVICE_NO_MIX_A";
+  const eventId = "event_no_mix_a";
+
+  const [weapon, rcp] = await Promise.all([
+    service.executeAction("weapon_device_info", { device_id: deviceId }),
+    service.executeAction("rcp_event_detail", {
+      ...ACTION_INPUTS.rcp_event_detail,
+      eventId
+    })
+  ]);
+
+  assert.equal(weapon.action_name, "weapon_device_info");
+  assert.equal(rcp.action_name, "rcp_event_detail");
+  assert.equal(weapon.meta.origin, "weapon");
+  assert.equal(rcp.meta.origin, "rcp");
+  assert.equal(weapon.upstream.body.data[0].deviceId, deviceId);
+  assert.equal(rcp.upstream.body.response.data.eventId, eventId);
+});
+
+test("BATCH-RESULT-CORRELATION-NO-MIX-001 batch source ids, actions, origins, and bodies stay correlated", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const batch = await service.executeBatch({
+    request_id: "no_mix_batch",
+    execution_groups: [
+      {
+        group_id: "parallel_no_mix",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "login_a",
+            action: "login_logs_search",
+            params: { ...ACTION_INPUTS.login_logs_search, user_id: "1000000006" }
+          },
+          {
+            source_id: "archives_b",
+            action: "archives_user_profile",
+            params: { user_id: "1000000007" }
+          },
+          {
+            source_id: "rcp_c",
+            action: "rcp_event_detail",
+            params: { ...ACTION_INPUTS.rcp_event_detail, eventId: "event_no_mix_batch" }
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(batch.request_id, "no_mix_batch");
+  assert.deepEqual(batch.execution_groups[0].source_ids, ["login_a", "archives_b", "rcp_c"]);
+  assert.equal(batch.source_results.login_a.action_name, "login_logs_search");
+  assert.equal(batch.source_results.login_a.origin, "login_logs");
+  assert.equal(batch.source_results.login_a.upstream.body.request.display_path.includes("userId=%5Btyped_user_id%5D"), true);
+  assert.equal(JSON.stringify(batch.source_results.login_a.upstream).includes("1000000007"), false);
+  assert.equal(batch.source_results.archives_b.action_name, "archives_user_profile");
+  assert.equal(batch.source_results.archives_b.origin, "archives");
+  assert.equal(batch.source_results.archives_b.upstream.body.response.data.userId, "1000000007");
+  assert.equal(batch.source_results.rcp_c.action_name, "rcp_event_detail");
+  assert.equal(batch.source_results.rcp_c.origin, "rcp");
+  assert.equal(batch.source_results.rcp_c.upstream.body.response.data.eventId, "event_no_mix_batch");
+  assert.equal(batch.transport_status_matrix.login_a.action, "login_logs_search");
+  assert.equal(batch.transport_status_matrix.archives_b.origin, "archives");
+  assert.equal(batch.transport_status_matrix.rcp_c.origin, "rcp");
+});
+
+test("REWARM-RETRY-CONTEXT-NO-MIX-001 context recovery preserves each action request identity", async () => {
+  const config = createLiveConfig();
+  const attemptsByDevice = new Map();
+  const fakeBrowserClient = {
+    start: async () => {},
+    close: async () => {},
+    prewarmDomain: async (domainKey) => ({
+      key: domainKey,
+      status: "ready",
+      page_ready: true,
+      final_origin: config.domains.weapon.origin,
+      current_origin: config.domains.weapon.origin,
+      same_origin_actual: true,
+      latency_ms: 10,
+      error_type: null,
+      warmed: true
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains[action.domainKey].origin,
+      bound_page_origin: config.domains[action.domainKey].origin,
+      origin_warmed: true,
+      page_ready: true,
+      origin_match: true
+    }),
+    runAction: async () => {
+      throw new Error("page fetch should not be used for context_request recovery");
+    },
+    runActionWithContextRequest: async (action, actionRequest) => {
+      const requestUrl = new URL(actionRequest.path, "https://weapon.example.test");
+      const deviceId = requestUrl.searchParams.get("deviceIds");
+      const attempts = attemptsByDevice.get(deviceId) || 0;
+      attemptsByDevice.set(deviceId, attempts + 1);
+      if (attempts === 0) {
+        throw new Error(`fetch failed for ${deviceId}`);
+      }
+      const bodyText = JSON.stringify({ code: 0, data: { action: action.name, deviceId, recovered: true } });
+      return {
+        ok: true,
+        status: 200,
+        contentType: "application/json;charset=UTF-8",
+        bodyText,
+        observedBytes: Buffer.byteLength(bodyText),
+        bodyTruncated: false
+      };
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+  markOriginReady(service, config, "weapon");
+
+  const [responseA, responseB] = await Promise.all([
+    service.executeAction("weapon_device_info", { device_id: "DEVICE_RECOVER_A" }),
+    service.executeAction("weapon_device_info", { device_id: "DEVICE_RECOVER_B" })
+  ]);
+
+  assert.equal(responseA.meta.context_request_recovery_attempted, true);
+  assert.equal(responseB.meta.context_request_recovery_attempted, true);
+  assert.equal(responseA.upstream.body.data.deviceId, "DEVICE_RECOVER_A");
+  assert.equal(responseB.upstream.body.data.deviceId, "DEVICE_RECOVER_B");
+  assert.equal(attemptsByDevice.get("DEVICE_RECOVER_A"), 2);
+  assert.equal(attemptsByDevice.get("DEVICE_RECOVER_B"), 2);
+});
+
+test("TIMEOUT-NO-STUCK-LOCK-001 timed-out batch source does not leave per-origin lock stuck", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.name === "archives_user_profile" && input.user_id === "1000000008") {
+      await delay(150);
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const batch = await service.executeBatch({
+    request_id: "timeout_no_stuck",
+    batch_timeout_ms: 2000,
+    execution_groups: [
+      {
+        group_id: "archives_serial_timeout",
+        execution: "independent_parallel",
+        sources: [
+          {
+            source_id: "slow_archives",
+            action: "archives_user_profile",
+            params: { user_id: "1000000008" },
+            timeout_ms: 10
+          },
+          {
+            source_id: "next_archives",
+            action: "archives_user_profile",
+            params: { user_id: "1000000009" },
+            timeout_ms: 500
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(batch.source_results.slow_archives.category, "timeout");
+  assert.equal(batch.source_results.slow_archives.timed_out, true);
+  assert.equal(batch.source_results.next_archives.category, "completed");
+  assert.equal(batch.source_results.next_archives.upstream.body.response.data.userId, "1000000009");
+});
+
+test("NO-SHARED-MUTABLE-PARAMS-001 queued actions snapshot params before later caller mutation", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let firstStarted = false;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.name === "archives_user_profile" && input.user_id === "1000000010") {
+      firstStarted = true;
+      await firstGate;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const first = service.executeAction("archives_user_profile", { user_id: "1000000010" });
+  await waitFor(() => firstStarted);
+  const sharedInput = { user_id: "1000000011" };
+  const second = service.executeAction("archives_user_profile", sharedInput);
+  sharedInput.user_id = "1000000012";
+
+  releaseFirst();
+  const [, secondResponse] = await Promise.all([first, second]);
+  assert.equal(secondResponse.upstream.body.response.data.userId, "1000000011");
+  assert.equal(secondResponse.upstream.body.response.data.userId === sharedInput.user_id, false);
+});
+
+test("CONCURRENCY-TRACE-CORRELATION-001 trace stays in envelope metadata and matches action origin", async () => {
+  const response = await createService().executeAction("login_logs_search", ACTION_INPUTS.login_logs_search);
+
+  assert.equal(response.action_name, "login_logs_search");
+  assert.equal(response.meta.origin, "login_logs");
+  assert.equal(response.meta.concurrency.lock_scope, "per_origin");
+  assert.equal(response.meta.concurrency.concurrency_group, "login_logs:origin");
+  assert.equal(JSON.stringify(response.upstream).includes("concurrency_group"), false);
+  assert.equal(JSON.stringify(response.upstream).includes("concurrency_wait_ms"), false);
+  assert.equal(typeof response.request_id, "string");
+});
+
+test("ACTION-COUNT-STABLE-001 concurrency metadata does not change the action count", () => {
+  assert.equal(Object.keys(ACTIONS).length, 74);
+  assert.equal(createService().health().action_count, 74);
 });
 
 test("mock actions return pure passthrough envelope with visible upstream body", async () => {

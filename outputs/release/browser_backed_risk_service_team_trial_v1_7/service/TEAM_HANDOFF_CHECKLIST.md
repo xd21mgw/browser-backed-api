@@ -8,7 +8,7 @@ local internal testing.
 - `git status --short` is clean.
 - `npm run check` passes.
 - `npm run test:mock` passes.
-- `ACTION_REGISTRY.md` shows callable `action_count=70`.
+- `ACTION_REGISTRY.md` shows callable `action_count=74`.
 - No `.env`, `node_modules`, Chrome profile directory, refresh state, HAR,
   screenshot, or temporary capture is committed.
 - `PASSTHROUGH_SERVICE_CONTRACT.md` is the service-layer contract for
@@ -151,7 +151,7 @@ Rules:
 - `/health` returns `ok=true`.
 - `service_mode=live`.
 - `auth_state=ready`, or the specific origin needed by the action is ready.
-- `action_count=70`.
+- `action_count=74`.
 - No credential material is output.
 - In Local Agent Mode, the service is listening on `127.0.0.1`.
 - In Remote Main Agent + Mac Local Worker Mode, the Agent uses a configured

@@ -39,6 +39,9 @@ export function loadConfig(env = process.env, options = {}) {
       requestTimeoutMs: parsePositiveInt(effectiveEnv.REQUEST_TIMEOUT_MS || "15000", "REQUEST_TIMEOUT_MS"),
       maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || String(DEFAULT_MAX_LIVE_BODY_BYTES), "MAX_LIVE_BODY_BYTES")
     },
+    concurrency: {
+      actionGlobalMax: parsePositiveInt(effectiveEnv.ACTION_GLOBAL_MAX_CONCURRENCY || "4", "ACTION_GLOBAL_MAX_CONCURRENCY")
+    },
     originRegistry,
     domains: buildDomainConfigs(originRegistry, effectiveEnv, enabledPlatformSet)
   };

@@ -1,7 +1,7 @@
 # Controlled Live Smoke Plan V1.7
 
 This plan closes the gap between HAR-derived contracts and current live
-platform behavior for the 70 allowlisted browser-backed fixed actions.
+platform behavior for the 74 allowlisted browser-backed fixed actions.
 
 HAR and inventory files are contract hints only. They are not live smoke
 parameters. For live validation, use recent time windows and derive dependent
