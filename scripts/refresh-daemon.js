@@ -1,5 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import http from "node:http";
+import https from "node:https";
 import { DEFAULT_REFRESH_TTL_MS } from "../src/originRegistry.js";
 import { runRefreshOnce, sanitizeRefreshSummary } from "./refresh-profile.js";
 
@@ -26,7 +28,8 @@ export function parseRefreshIntervalMs(env = process.env) {
 export function buildRefreshDaemonEvent(event, refreshSummary = {}) {
   const sanitized = sanitizeRefreshSummary({
     ...refreshSummary,
-    event
+    event,
+    auth_summary: refreshSummary.auth_summary || refreshSummary
   });
   const pendingManualLogin = isManualLoginRequiredSummary(refreshSummary) || isManualLoginRequiredSummary(sanitized);
   return {
@@ -36,9 +39,38 @@ export function buildRefreshDaemonEvent(event, refreshSummary = {}) {
   };
 }
 
+export function buildServicePrewarmRefreshSummary({ prewarmBody = null, healthBody = null } = {}) {
+  const results = Array.isArray(prewarmBody?.results) ? prewarmBody.results : [];
+  const authSummary = healthBody && typeof healthBody === "object"
+    ? healthBody
+    : {
+        auth_state: "unknown",
+        auth_state_expired: true,
+        origin_ready_state_stale: true,
+        pending_manual_login: false,
+        last_error_type: "service_prewarm_failed",
+        origin_status: {}
+      };
+  const refreshedOriginCount = results.filter((item) => item?.status === "ready").length;
+  return sanitizeRefreshSummary({
+    event: "service_prewarm_completed",
+    ok: Boolean(
+      healthBody?.ok === true &&
+      healthBody?.auth_state === "ready" &&
+      healthBody?.auth_state_expired !== true &&
+      healthBody?.origin_ready_state_stale !== true &&
+      healthBody?.pending_manual_login !== true
+    ),
+    service_mode: healthBody?.service_mode === "live" ? "live" : "mock",
+    refreshed_origin_count: refreshedOriginCount,
+    auth_summary: authSummary
+  });
+}
+
 export async function runRefreshDaemon({
   env = process.env,
   refreshOnce = runRefreshOnce,
+  servicePrewarm = defaultServicePrewarm,
   writeLine = (line) => console.log(line)
 } = {}) {
   const intervalMs = parseRefreshIntervalMs(env);
@@ -51,7 +83,10 @@ export async function runRefreshDaemon({
     }
     running = true;
     try {
-      const summary = await refreshOnce();
+      const serviceSummary = await servicePrewarm(env);
+      const summary = serviceSummary?.service_reachable === true
+        ? serviceSummary.summary
+        : await refreshOnce();
       writeLine(JSON.stringify(buildRefreshDaemonEvent("refresh_daemon_tick_completed", summary)));
     } catch {
       writeLine(JSON.stringify(buildRefreshDaemonEvent("refresh_daemon_tick_failed", {
@@ -84,6 +119,23 @@ export async function runRefreshDaemon({
   };
 }
 
+export async function defaultServicePrewarm(env = process.env) {
+  const port = Number(env.PORT || 8787);
+  const baseUrl = env.BROWSER_BACKED_SERVICE_BASE_URL || `http://127.0.0.1:${port}`;
+  const prewarm = await requestJson(`${baseUrl}/prewarm`, { method: "POST", timeoutMs: 120000 });
+  if (!prewarm.ok) {
+    return { service_reachable: false, summary: null };
+  }
+  const health = await requestJson(`${baseUrl}/health`, { method: "GET", timeoutMs: 5000 });
+  return {
+    service_reachable: true,
+    summary: buildServicePrewarmRefreshSummary({
+      prewarmBody: prewarm.body,
+      healthBody: health.body
+    })
+  };
+}
+
 export function isManualLoginRequiredSummary(summary) {
   const errorType = summary?.last_error_type;
   return summary?.pending_manual_login === true ||
@@ -102,6 +154,40 @@ export function isManualLoginRequiredSummary(summary) {
 
 function isDirectRun() {
   return process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
+function requestJson(url, { method = "GET", timeoutMs = 5000 } = {}) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return Promise.resolve({ ok: false, status: null, body: null });
+  }
+  const transport = parsedUrl.protocol === "https:" ? https : http;
+  return new Promise((resolve) => {
+    const request = transport.request(parsedUrl, { method }, (response) => {
+      let chunks = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        chunks += chunk;
+      });
+      response.on("end", () => {
+        try {
+          const body = JSON.parse(chunks);
+          resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, body });
+        } catch {
+          resolve({ ok: false, status: response.statusCode ?? null, body: null });
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error("request_timeout"));
+    });
+    request.on("error", () => {
+      resolve({ ok: false, status: null, body: null });
+    });
+    request.end();
+  });
 }
 
 if (isDirectRun()) {

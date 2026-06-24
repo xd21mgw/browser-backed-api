@@ -18,7 +18,12 @@ import {
 import { loadConfig } from "../src/config.js";
 import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../src/originRegistry.js";
 import { BrowserBackedApiService } from "../src/service.js";
-import { buildRefreshDaemonEvent, parseRefreshIntervalMs } from "../scripts/refresh-daemon.js";
+import {
+  buildRefreshDaemonEvent,
+  buildServicePrewarmRefreshSummary,
+  parseRefreshIntervalMs,
+  runRefreshDaemon
+} from "../scripts/refresh-daemon.js";
 import {
   buildProfileLockBlockedStartOutput,
   buildExposeSummary,
@@ -26,10 +31,16 @@ import {
   clearDedicatedStaleProfileLock,
   classifyProfileLockState,
   classifyProxyRequest,
+  classifyWorkerPid,
   extractUserDataDir,
+  needsInteractiveRecovery,
   needsManualLogin,
   planWorkerStart,
-  serviceHealthReady
+  serviceHealthReady,
+  serviceNeedsProcessRebuild,
+  serviceRebuildReason,
+  shouldStartNewService,
+  shouldStartRefreshDaemon
 } from "../scripts/mac-worker.js";
 
 const ACTION_INPUTS = Object.freeze({
@@ -2207,6 +2218,49 @@ test("worker:start plan reuses ready service without duplicate start", () => {
   }), ["return_ready"]);
 });
 
+test("worker pid classifier detects missing, stale, and live pid files", () => {
+  assert.deepEqual(classifyWorkerPid(null, () => false), {
+    status: "missing",
+    pid: null,
+    pid_exists: false
+  });
+  assert.deepEqual(classifyWorkerPid(12345, () => false), {
+    status: "stale",
+    pid: 12345,
+    pid_exists: false
+  });
+  assert.deepEqual(classifyWorkerPid(12345, () => true), {
+    status: "live",
+    pid: 12345,
+    pid_exists: true
+  });
+});
+
+test("worker:start spawn guard avoids duplicate service on reachable port", () => {
+  assert.equal(shouldStartNewService({
+    postRefreshHealthOk: true,
+    serviceAlreadyReachable: true
+  }), false);
+  assert.equal(shouldStartNewService({
+    postRefreshHealthOk: true,
+    serviceAlreadyReachable: false
+  }), false);
+  assert.equal(shouldStartNewService({
+    postRefreshHealthOk: false,
+    serviceAlreadyReachable: true
+  }), false);
+  assert.equal(shouldStartNewService({
+    postRefreshHealthOk: false,
+    serviceAlreadyReachable: false
+  }), true);
+});
+
+test("worker:start refresh daemon guard starts only when daemon pid is absent or stale", () => {
+  assert.equal(shouldStartRefreshDaemon(null, () => false), true);
+  assert.equal(shouldStartRefreshDaemon(12345, () => false), true);
+  assert.equal(shouldStartRefreshDaemon(12345, () => true), false);
+});
+
 test("worker service health readiness requires fresh auth and no pending manual login", () => {
   assert.equal(serviceHealthReady({
     ok: true,
@@ -2231,6 +2285,47 @@ test("worker service health readiness requires fresh auth and no pending manual 
   }), false);
 });
 
+test("worker:start rebuild guard detects closed browser context without treating manual auth as rebuild", () => {
+  const closedContextHealth = {
+    ok: true,
+    auth_state: "expired",
+    auth_state_expired: true,
+    origin_ready_state_stale: true,
+    origin_status: {
+      archives: {
+        status: "failed",
+        error_type: "navigation_timeout",
+        error_message: "page.goto: Target page, context or browser has been closed"
+      }
+    },
+    warmed_origins: [
+      {
+        key: "login_logs",
+        status: "failed",
+        error_message: "page.waitForTimeout: Target page, context or browser has been closed"
+      }
+    ]
+  };
+  assert.equal(serviceNeedsProcessRebuild(closedContextHealth), true);
+  assert.equal(serviceRebuildReason(closedContextHealth), "browser_context_closed");
+
+  const manualAuthHealth = {
+    ok: true,
+    auth_state: "auth_required",
+    auth_state_expired: true,
+    pending_manual_login: true,
+    origin_status: {
+      login_logs: {
+        status: "auth_required",
+        error_type: "two_factor_required",
+        current_origin: "https://sso.corp.kuaishou.com"
+      }
+    }
+  };
+  assert.equal(serviceNeedsProcessRebuild(manualAuthHealth), false);
+  assert.equal(serviceRebuildReason(manualAuthHealth), null);
+});
+
 test("worker:start plan refreshes before starting when service is not running", () => {
   assert.deepEqual(planWorkerStart({
     serviceReachable: false,
@@ -2252,6 +2347,53 @@ test("worker:start plan opens profile for manual auth then continues refresh/sta
     refreshSummary,
     postOpenRefreshSummary: { ok: true, auth_state: "ready" }
   }), ["refresh_once", "open_profile", "refresh_once_after_open_profile", "start_service"]);
+});
+
+test("worker:start plan opens profile when expired origins fail refresh without explicit 2FA code", () => {
+  const refreshSummary = {
+    ok: false,
+    auth_state: "expired",
+    auth_state_expired: true,
+    origin_ready_state_stale: true,
+    origin_status: {
+      login_logs: {
+        status: "failed",
+        error_type: "navigation_timeout"
+      },
+      archives: {
+        status: "optional_failed",
+        error_type: "navigation_timeout"
+      }
+    }
+  };
+  assert.equal(needsInteractiveRecovery(refreshSummary), true);
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: true,
+    authState: "expired",
+    refreshSummary,
+    postOpenRefreshSummary: { ok: true, auth_state: "ready" }
+  }), ["refresh_once", "stop_service_for_manual_login", "open_profile", "refresh_once_after_open_profile", "start_service"]);
+});
+
+test("worker:start plan does not open profile for isolated non-auth refresh failure", () => {
+  const refreshSummary = {
+    ok: false,
+    auth_state: "ready",
+    auth_state_expired: false,
+    origin_ready_state_stale: false,
+    origin_status: {
+      login_logs: {
+        status: "failed",
+        error_type: "api_fetch_timeout"
+      }
+    }
+  };
+  assert.equal(needsInteractiveRecovery(refreshSummary), false);
+  assert.deepEqual(planWorkerStart({
+    serviceReachable: false,
+    authState: null,
+    refreshSummary
+  }), ["refresh_once", "refresh_failed"]);
 });
 
 test("worker:start plan releases running service profile before manual auth", () => {
@@ -2455,6 +2597,65 @@ test("refresh daemon interval and manual-login event remain bounded", () => {
   });
   assert.equal(event.pending_manual_login, true);
   assert.equal(event.next_step, "Run npm run worker:start when a user is available to complete profile interaction.");
+  assertNoCredentialMaterial(event);
+});
+
+test("service prewarm refresh summary treats fresh service health as ready", () => {
+  const summary = buildServicePrewarmRefreshSummary({
+    prewarmBody: {
+      results: [
+        { key: "rcp", status: "ready" },
+        { key: "weapon", status: "ready" }
+      ]
+    },
+    healthBody: {
+      ok: true,
+      service_mode: "live",
+      auth_state: "ready",
+      auth_state_expired: false,
+      origin_ready_state_stale: false,
+      pending_manual_login: false,
+      origin_status: {}
+    }
+  });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.auth_state, "ready");
+  assert.equal(summary.refreshed_origin_count, 2);
+  assertNoCredentialMaterial(summary);
+});
+
+test("refresh daemon prefers service prewarm over external profile refresh", async () => {
+  const lines = [];
+  let externalRefreshCalled = false;
+  const daemon = await runRefreshDaemon({
+    env: { BROWSER_BACKED_REFRESH_INTERVAL_MS: "60000" },
+    servicePrewarm: async () => ({
+      service_reachable: true,
+      summary: buildServicePrewarmRefreshSummary({
+        prewarmBody: { results: [{ key: "rcp", status: "ready" }] },
+        healthBody: {
+          ok: true,
+          service_mode: "live",
+          auth_state: "ready",
+          auth_state_expired: false,
+          origin_ready_state_stale: false,
+          pending_manual_login: false,
+          origin_status: {}
+        }
+      })
+    }),
+    refreshOnce: async () => {
+      externalRefreshCalled = true;
+      return { ok: false };
+    },
+    writeLine: (line) => lines.push(line)
+  });
+  daemon.stop();
+  assert.equal(externalRefreshCalled, false);
+  assert.equal(lines.length, 1);
+  const event = JSON.parse(lines[0]);
+  assert.equal(event.ok, true);
+  assert.equal(event.auth_state, "ready");
   assertNoCredentialMaterial(event);
 });
 

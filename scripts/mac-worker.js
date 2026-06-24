@@ -2,10 +2,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ACTION_ALLOWLIST } from "../src/actions.js";
+import { buildServicePrewarmRefreshSummary } from "./refresh-daemon.js";
 
 const command = process.argv[2] || "status";
 const port = Number(process.env.PORT || 8787);
@@ -20,10 +22,14 @@ const pidFile = process.env.BROWSER_BACKED_WORKER_PID_FILE ||
   path.join(runtimeDir, "worker.pid");
 const proxyPidFile = process.env.BROWSER_BACKED_WORKER_PROXY_PID_FILE ||
   path.join(runtimeDir, "worker-proxy.pid");
+const refreshDaemonPidFile = process.env.BROWSER_BACKED_REFRESH_DAEMON_PID_FILE ||
+  path.join(runtimeDir, "refresh-daemon.pid");
 const logFile = process.env.BROWSER_BACKED_WORKER_LOG_FILE ||
   path.join(runtimeDir, "worker.log");
 const proxyLogFile = process.env.BROWSER_BACKED_WORKER_PROXY_LOG_FILE ||
   path.join(runtimeDir, "worker-proxy.log");
+const refreshDaemonLogFile = process.env.BROWSER_BACKED_REFRESH_DAEMON_LOG_FILE ||
+  path.join(runtimeDir, "refresh-daemon.log");
 const profileDir = process.env.BROWSER_BACKED_PROFILE_DIR ||
   path.join(os.homedir(), ".dennis-browser-backed", "profile");
 const dedicatedProfileDir = path.join(os.homedir(), ".dennis-browser-backed", "profile");
@@ -40,6 +46,8 @@ const MANUAL_LOGIN_ERROR_TYPES = Object.freeze([
   "landing_flow_blocked",
   "auth_flow_not_completed_in_bound_context"
 ]);
+
+const CLOSED_BROWSER_CONTEXT_PATTERN = /Target page, context or browser has been closed|browser has been closed|context has been closed|page has been closed/i;
 
 export async function runMacWorkerCommand(selectedCommand = command) {
   try {
@@ -138,7 +146,7 @@ export function planWorkerStart({ serviceReachable, authState, refreshSummary, p
     return ["profile_lock_blocked"];
   }
   const steps = autoClearStaleLock ? ["clear_stale_profile_lock", "refresh_once"] : ["refresh_once"];
-  if (refreshSummary && needsManualLogin(refreshSummary)) {
+  if (refreshSummary && needsInteractiveRecovery(refreshSummary)) {
     if (serviceReachable) {
       steps.push("stop_service_for_manual_login");
     }
@@ -331,6 +339,25 @@ export function needsManualLogin(summary) {
   });
 }
 
+export function needsInteractiveRecovery(summary) {
+  if (needsManualLogin(summary)) {
+    return true;
+  }
+  if (!summary || typeof summary !== "object") {
+    return false;
+  }
+  const authExpired = summary.auth_state === "expired" || summary.auth_state_expired === true;
+  const originStale = summary.origin_ready_state_stale === true;
+  const statuses = summary.origin_status && typeof summary.origin_status === "object"
+    ? Object.values(summary.origin_status)
+    : [];
+  const failedOriginRefresh = statuses.some((entry) => {
+    const status = entry?.status;
+    return status === "failed" || status === "optional_failed" || status === "auth_required";
+  });
+  return authExpired && originStale && failedOriginRefresh;
+}
+
 export function serviceHealthReady(summary) {
   if (!summary || typeof summary !== "object") {
     return false;
@@ -342,19 +369,99 @@ export function serviceHealthReady(summary) {
     summary.pending_manual_login !== true;
 }
 
+export function classifyWorkerPid(pid, pidExistsFn = processExists) {
+  if (!pid) {
+    return { status: "missing", pid: null, pid_exists: false };
+  }
+  const pidExists = pidExistsFn(pid);
+  return {
+    status: pidExists ? "live" : "stale",
+    pid,
+    pid_exists: pidExists
+  };
+}
+
+export function shouldStartNewService({ postRefreshHealthOk, serviceAlreadyReachable }) {
+  return postRefreshHealthOk !== true && serviceAlreadyReachable !== true;
+}
+
+export function shouldStartRefreshDaemon(pid, pidExistsFn = processExists) {
+  return classifyWorkerPid(pid, pidExistsFn).status !== "live";
+}
+
+export function serviceRebuildReason(summary) {
+  if (!summary || typeof summary !== "object") {
+    return null;
+  }
+  if (summary.browser_initialized === false || summary.context_initialized === false) {
+    return "browser_context_not_initialized";
+  }
+  const diagnosticText = [
+    summary.error_type,
+    summary.error_message,
+    ...Object.values(summary.origin_status || {}).flatMap((entry) => [
+      entry?.status,
+      entry?.error_type,
+      entry?.last_error_type,
+      entry?.error_message
+    ]),
+    ...(Array.isArray(summary.warmed_origins) ? summary.warmed_origins.flatMap((entry) => [
+      entry?.status,
+      entry?.error_type,
+      entry?.last_error_type,
+      entry?.error_message
+    ]) : [])
+  ].filter(Boolean).join("\n");
+  if (CLOSED_BROWSER_CONTEXT_PATTERN.test(diagnosticText)) {
+    return "browser_context_closed";
+  }
+  return null;
+}
+
+export function serviceNeedsProcessRebuild(summary) {
+  return serviceRebuildReason(summary) !== null;
+}
+
 async function startWorker() {
-  const existing = await fetchHealth();
+  const staleWorkerPid = cleanupStaleWorkerPid();
+  let existing = await fetchHealth();
   let profileLockRecovery = null;
+  let serviceProcessRecovery = null;
   if (existing.ok && serviceHealthReady(existing.body)) {
+    const refreshDaemon = ensureRefreshDaemon();
     printJson({
       ok: true,
       command: "worker:start",
       service_already_running: true,
+      stale_worker_pid_cleared: staleWorkerPid.cleared,
       auth_recovery_attempted: false,
       service_base_url: localBaseUrl,
+      refresh_daemon: refreshDaemon,
       health: summarizeHealth(existing.body)
     });
     return;
+  }
+
+  if (existing.ok && serviceNeedsProcessRebuild(existing.body)) {
+    serviceProcessRecovery = await stopReachableServiceForRecovery(serviceRebuildReason(existing.body));
+    if (!serviceProcessRecovery.ok) {
+      printJson({
+        ok: false,
+        command: "worker:start",
+        service_base_url: localBaseUrl,
+        service_ready: false,
+        blocking_issue: "service_rebuild_failed",
+        service_process_recovery: serviceProcessRecovery,
+        health: summarizeHealth(existing.body),
+        next_step: "Run npm run worker:stop, then npm run worker:start. If this persists, inspect the worker log.",
+        auto_kill_chrome: false,
+        profile_deleted: false,
+        credential_material_output: false
+      });
+      process.exitCode = 1;
+      return;
+    }
+    existing = { ok: false, body: null };
   }
 
   if (!existing.ok) {
@@ -391,11 +498,40 @@ async function startWorker() {
     }
   }
 
-  const firstRefresh = runRefreshOnceCommand();
-  if (needsManualLogin(firstRefresh.summary)) {
+  let firstRefresh = existing.ok ? await runServicePrewarmCommand() : runRefreshOnceCommand();
+  if (existing.ok) {
+    const postPrewarmHealth = await fetchHealth();
+    if (postPrewarmHealth.ok && serviceNeedsProcessRebuild(postPrewarmHealth.body)) {
+      serviceProcessRecovery = await stopReachableServiceForRecovery(serviceRebuildReason(postPrewarmHealth.body));
+      if (!serviceProcessRecovery.ok) {
+        printJson({
+          ok: false,
+          command: "worker:start",
+          service_base_url: localBaseUrl,
+          service_ready: false,
+          blocking_issue: "service_rebuild_failed_after_prewarm",
+          service_process_recovery: serviceProcessRecovery,
+          refresh_summary: sanitizeWorkerRefreshSummary(firstRefresh.summary),
+          health: summarizeHealth(postPrewarmHealth.body),
+          next_step: "Run npm run worker:stop, then npm run worker:start. If this persists, inspect the worker log.",
+          auto_kill_chrome: false,
+          profile_deleted: false,
+          credential_material_output: false
+        });
+        process.exitCode = 1;
+        return;
+      }
+      existing = { ok: false, body: null };
+      firstRefresh = runRefreshOnceCommand();
+    }
+  }
+  if (needsInteractiveRecovery(firstRefresh.summary)) {
     let manualLoginServiceRelease = null;
     if (existing.ok) {
       manualLoginServiceRelease = await stopManagedServiceForManualLogin();
+      if (!manualLoginServiceRelease.ok && manualLoginServiceRelease.reason === "missing_worker_pid_file") {
+        manualLoginServiceRelease = await stopReachableServiceForRecovery("service_stopped_for_profile_interaction");
+      }
       if (!manualLoginServiceRelease.ok) {
         printJson({
           ok: false,
@@ -443,7 +579,9 @@ async function startWorker() {
       openProfileAttempted: true,
       refreshSummary: secondRefresh.summary,
       profileLockRecovery,
-      manualLoginServiceRelease
+      serviceProcessRecovery,
+      manualLoginServiceRelease,
+      staleWorkerPid
     });
     return;
   }
@@ -457,6 +595,8 @@ async function startWorker() {
       open_profile_attempted: false,
       pending_manual_login: false,
       profile_lock_recovery: profileLockRecovery,
+      service_process_recovery: serviceProcessRecovery,
+      stale_worker_pid_cleared: staleWorkerPid.cleared,
       stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
       refresh_summary: sanitizeWorkerRefreshSummary(firstRefresh.summary),
       next_step: "Run npm run worker:doctor. If auth is required, run npm run worker:start again to enter open:profile.",
@@ -471,7 +611,9 @@ async function startWorker() {
     authRecoveryAttempted: true,
     openProfileAttempted: false,
     refreshSummary: firstRefresh.summary,
-    profileLockRecovery
+    profileLockRecovery,
+    serviceProcessRecovery,
+    staleWorkerPid
   });
 }
 
@@ -481,10 +623,13 @@ async function startOrReuseService({
   openProfileAttempted,
   refreshSummary,
   profileLockRecovery = null,
-  manualLoginServiceRelease = null
+  serviceProcessRecovery = null,
+  manualLoginServiceRelease = null,
+  staleWorkerPid = { cleared: false }
 }) {
   const postRefreshHealth = await fetchHealth();
   if (postRefreshHealth.ok && serviceHealthReady(postRefreshHealth.body)) {
+    const refreshDaemon = ensureRefreshDaemon();
     printJson({
       ok: true,
       command: "worker:start",
@@ -492,8 +637,11 @@ async function startOrReuseService({
       auth_recovery_attempted: Boolean(authRecoveryAttempted),
       open_profile_attempted: Boolean(openProfileAttempted),
       service_base_url: localBaseUrl,
+      refresh_daemon: refreshDaemon,
       profile_lock_recovery: profileLockRecovery,
+      service_process_recovery: serviceProcessRecovery,
       manual_login_service_release: manualLoginServiceRelease,
+      stale_worker_pid_cleared: Boolean(staleWorkerPid.cleared),
       stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
       auto_kill_chrome: false,
       profile_deleted: false,
@@ -502,6 +650,33 @@ async function startOrReuseService({
       next_step: "Service is ready. Call allowlisted actions through service_base_url.",
       credential_material_output: false
     });
+    return;
+  }
+
+  if (!shouldStartNewService({ postRefreshHealthOk: postRefreshHealth.ok, serviceAlreadyReachable })) {
+    printJson({
+      ok: false,
+      command: "worker:start",
+      service_already_running: Boolean(serviceAlreadyReachable || postRefreshHealth.ok),
+      service_started: false,
+      service_ready: false,
+      auth_recovery_attempted: Boolean(authRecoveryAttempted),
+      open_profile_attempted: Boolean(openProfileAttempted),
+      service_base_url: localBaseUrl,
+      profile_lock_recovery: profileLockRecovery,
+      service_process_recovery: serviceProcessRecovery,
+      manual_login_service_release: manualLoginServiceRelease,
+      stale_worker_pid_cleared: Boolean(staleWorkerPid.cleared),
+      stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
+      auto_kill_chrome: false,
+      profile_deleted: false,
+      refresh_summary: sanitizeWorkerRefreshSummary(refreshSummary),
+      health: postRefreshHealth.ok ? summarizeHealth(postRefreshHealth.body) : null,
+      blocking_issue: "service_running_but_not_ready",
+      next_step: "Run npm run worker:status. If manual login is required, run npm run worker:start after completing profile interaction.",
+      credential_material_output: false
+    });
+    process.exitCode = 1;
     return;
   }
 
@@ -517,6 +692,9 @@ async function startOrReuseService({
   fs.writeFileSync(pidFile, String(child.pid), { mode: 0o600 });
 
   const health = await waitForServiceReady(15000);
+  const refreshDaemon = health.ok && serviceHealthReady(health.body)
+    ? ensureRefreshDaemon()
+    : { running: false, started: false, pid: null };
   printJson({
     ok: Boolean(health.ok && serviceHealthReady(health.body)),
     command: "worker:start",
@@ -526,10 +704,13 @@ async function startOrReuseService({
     auth_recovery_attempted: Boolean(authRecoveryAttempted),
     open_profile_attempted: Boolean(openProfileAttempted),
     service_base_url: localBaseUrl,
+    refresh_daemon: refreshDaemon,
     pid_file: pidFile,
     log_file: logFile,
     profile_lock_recovery: profileLockRecovery,
+    service_process_recovery: serviceProcessRecovery,
     manual_login_service_release: manualLoginServiceRelease,
+    stale_worker_pid_cleared: Boolean(staleWorkerPid.cleared),
     stale_lock_auto_cleared: Boolean(profileLockRecovery?.stale_lock_auto_cleared),
     auto_kill_chrome: false,
     profile_deleted: false,
@@ -584,6 +765,102 @@ async function stopManagedServiceForManualLogin() {
     profile_deleted: false,
     credential_material_output: false
   };
+}
+
+async function stopReachableServiceForRecovery(reason) {
+  const stopped = [];
+  const failed = [];
+  const pidCandidates = [];
+  const pid = readPid();
+  if (pid) {
+    pidCandidates.push({ pid, source: "pid_file" });
+  }
+  for (const listener of listServiceListenerPids()) {
+    if (!pidCandidates.some((item) => item.pid === listener.pid)) {
+      pidCandidates.push({ ...listener, source: "port_listener" });
+    }
+  }
+
+  for (const candidate of pidCandidates) {
+    const commandLine = commandForPid(candidate.pid);
+    if (!isManagedServiceProcess(commandLine)) {
+      failed.push({
+        pid: candidate.pid,
+        source: candidate.source,
+        reason: "not_browser_backed_service_process",
+        command_summary: summarizeProcessCommand(commandLine)
+      });
+      continue;
+    }
+    try {
+      process.kill(candidate.pid, "SIGTERM");
+      stopped.push({
+        pid: candidate.pid,
+        source: candidate.source,
+        signal_sent: true,
+        command_summary: summarizeProcessCommand(commandLine)
+      });
+    } catch (error) {
+      failed.push({
+        pid: candidate.pid,
+        source: candidate.source,
+        reason: "signal_failed",
+        error_message_sanitized: sanitizeMessage(error),
+        command_summary: summarizeProcessCommand(commandLine)
+      });
+    }
+  }
+
+  const deadline = Date.now() + 8000;
+  let health = await fetchHealth();
+  while (health.ok && Date.now() < deadline) {
+    await sleep(500);
+    health = await fetchHealth();
+  }
+  if (!health.ok) {
+    removePidFile();
+  }
+
+  return {
+    ok: !health.ok,
+    reason,
+    stopped_processes: stopped,
+    skipped_processes: failed,
+    service_still_reachable: Boolean(health.ok),
+    auto_kill_chrome: false,
+    profile_deleted: false,
+    credential_material_output: false
+  };
+}
+
+function listServiceListenerPids() {
+  const result = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024
+  });
+  if (result.status !== 0) {
+    return [];
+  }
+  return String(result.stdout || "")
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 2)
+    .map((parts) => ({ pid: Number(parts[1]), command: parts[0] }))
+    .filter((item) => Number.isInteger(item.pid) && item.pid > 0);
+}
+
+function commandForPid(pid) {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024
+  });
+  return result.status === 0 ? String(result.stdout || "").trim() : "";
+}
+
+function isManagedServiceProcess(commandLine) {
+  const text = String(commandLine || "");
+  return /\bnode\b|\bnode[0-9.]*\b/.test(path.basename(text.split(/\s+/)[0] || "node")) && /(?:^|\s)src\/server\.js(?:\s|$)/.test(text);
 }
 
 async function printStatus() {
@@ -715,7 +992,19 @@ async function runProxyServer() {
 async function stopWorker() {
   const pid = readPid();
   const proxyPid = readProxyPid();
+  const refreshDaemonPid = readRefreshDaemonPid();
   let proxySignalSent = false;
+  let refreshDaemonSignalSent = false;
+  if (refreshDaemonPid) {
+    try {
+      process.kill(refreshDaemonPid, "SIGTERM");
+      refreshDaemonSignalSent = true;
+    } catch {}
+    await sleep(500);
+    if (!classifyWorkerPid(refreshDaemonPid).pid_exists) {
+      removeRefreshDaemonPidFile();
+    }
+  }
   if (proxyPid) {
     try {
       process.kill(proxyPid, "SIGTERM");
@@ -728,15 +1017,24 @@ async function stopWorker() {
     }
   }
 
-  if (!pid) {
+  const pidState = classifyWorkerPid(pid);
+  if (pidState.status === "stale") {
+    removePidFile();
+  }
+
+  if (!pid || pidState.status === "stale") {
     const health = await fetchHealth();
     const proxyHealth = await fetchProxyHealth();
     printJson({
       ok: !health.ok && !proxyHealth.ok,
       command: "worker:stop",
-      pid_file_found: false,
+      pid_file_found: Boolean(pid),
+      stale_worker_pid_cleared: pidState.status === "stale",
+      stale_worker_pid: pidState.status === "stale" ? pid : null,
       proxy_pid_file_found: Boolean(proxyPid),
       proxy_signal_sent: proxySignalSent,
+      refresh_daemon_pid_file_found: Boolean(refreshDaemonPid),
+      refresh_daemon_signal_sent: refreshDaemonSignalSent,
       service_still_reachable: Boolean(health.ok),
       proxy_still_reachable: Boolean(proxyHealth.ok),
       message: health.ok
@@ -767,6 +1065,8 @@ async function stopWorker() {
     proxy_pid: proxyPid,
     signal_sent: signalSent,
     proxy_signal_sent: proxySignalSent,
+    refresh_daemon_pid_file_found: Boolean(refreshDaemonPid),
+    refresh_daemon_signal_sent: refreshDaemonSignalSent,
     service_still_reachable: Boolean(health.ok),
     profile_deleted: false,
     state_deleted: false,
@@ -848,22 +1148,47 @@ async function fetchActions() {
   return fetchJson(`${localBaseUrl}/actions`, 3000);
 }
 
+async function fetchPrewarm() {
+  return fetchJson(`${localBaseUrl}/prewarm`, 120000, { method: "POST" });
+}
+
 async function fetchProxyHealth() {
   return fetchJson(`${proxyLocalBaseUrl}/health`, 3000);
 }
 
-async function fetchJson(url, timeoutMs) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+async function fetchJson(url, timeoutMs, { method = "GET" } = {}) {
+  let parsedUrl;
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    const body = await response.json();
-    return { ok: response.ok, status: response.status, body };
+    parsedUrl = new URL(url);
   } catch {
     return { ok: false, status: null, body: null };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const transport = parsedUrl.protocol === "https:" ? https : http;
+  return new Promise((resolve) => {
+    const request = transport.request(parsedUrl, { method }, (response) => {
+      let chunks = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        chunks += chunk;
+      });
+      response.on("end", () => {
+        try {
+          const body = JSON.parse(chunks);
+          resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, body });
+        } catch {
+          resolve({ ok: false, status: response.statusCode ?? null, body: null });
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error("request_timeout"));
+    });
+    request.on("error", () => {
+      resolve({ ok: false, status: null, body: null });
+    });
+    request.end();
+  });
 }
 
 async function waitForHealth(timeoutMs) {
@@ -970,6 +1295,20 @@ function runRefreshOnceCommand() {
   return {
     ok: result.status === 0 && summary?.ok === true,
     status: result.status,
+    summary: sanitizeWorkerRefreshSummary(summary)
+  };
+}
+
+async function runServicePrewarmCommand() {
+  const prewarm = await fetchPrewarm();
+  const health = await fetchHealth();
+  const summary = buildServicePrewarmRefreshSummary({
+    prewarmBody: prewarm.body,
+    healthBody: health.body
+  });
+  return {
+    ok: prewarm.ok && health.ok && summary?.ok === true,
+    status: prewarm.status,
     summary: sanitizeWorkerRefreshSummary(summary)
   };
 }
@@ -1200,8 +1539,22 @@ function readPid() {
   return readPidFile(pidFile);
 }
 
+function cleanupStaleWorkerPid() {
+  const pid = readPid();
+  const pidState = classifyWorkerPid(pid);
+  if (pidState.status === "stale") {
+    removePidFile();
+    return { cleared: true, pid };
+  }
+  return { cleared: false, pid: pidState.pid };
+}
+
 function readProxyPid() {
   return readPidFile(proxyPidFile);
+}
+
+function readRefreshDaemonPid() {
+  return readPidFile(refreshDaemonPidFile);
 }
 
 function readPidFile(filePath) {
@@ -1224,6 +1577,46 @@ function removeProxyPidFile() {
   try {
     fs.unlinkSync(proxyPidFile);
   } catch {}
+}
+
+function removeRefreshDaemonPidFile() {
+  try {
+    fs.unlinkSync(refreshDaemonPidFile);
+  } catch {}
+}
+
+function ensureRefreshDaemon() {
+  const pid = readRefreshDaemonPid();
+  const pidState = classifyWorkerPid(pid);
+  if (pidState.status === "live") {
+    return {
+      running: true,
+      started: false,
+      pid,
+      log_file: refreshDaemonLogFile
+    };
+  }
+  if (pidState.status === "stale") {
+    removeRefreshDaemonPidFile();
+  }
+
+  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  const logFd = fs.openSync(refreshDaemonLogFile, "a", 0o600);
+  const child = spawn(process.execPath, ["scripts/refresh-daemon.js"], {
+    cwd: process.cwd(),
+    detached: true,
+    env: { ...process.env, SERVICE_MODE: "live", PORT: String(port) },
+    stdio: ["ignore", logFd, logFd]
+  });
+  child.unref();
+  fs.writeFileSync(refreshDaemonPidFile, String(child.pid), { mode: 0o600 });
+  return {
+    running: true,
+    started: true,
+    pid: child.pid,
+    stale_pid_cleared: pidState.status === "stale",
+    log_file: refreshDaemonLogFile
+  };
 }
 
 function serviceBaseUrlForExpose() {

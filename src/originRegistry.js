@@ -75,7 +75,7 @@ export const ORIGIN_REGISTRY = Object.freeze({
     label: "Archives Center",
     envVar: "ARCHIVES_ORIGIN",
     warmupEnvVar: "ARCHIVES_PREWARM_PATH",
-    defaultOrigin: "https://admin.p.adm-corp.kuaishou.com",
+    defaultOrigin: "https://admin.p5.adm-corp.kuaishou.com",
     warmupPath: "/frontend/archives/index.html",
     actions: [
       "archives_user_analysis",

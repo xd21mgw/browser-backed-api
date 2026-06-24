@@ -4,7 +4,7 @@ import { ACTIONS } from "./actions.js";
 import { loadConfig } from "./config.js";
 import { BrowserBackedApiService, publicError } from "./service.js";
 
-const MAX_REQUEST_BYTES = 128 * 1024;
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 
 const config = loadConfig();
 const service = new BrowserBackedApiService(config);
@@ -72,18 +72,24 @@ function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooLarge = false;
 
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > MAX_REQUEST_BYTES) {
-        reject(httpError(413, "request_too_large", "Request body is too large"));
-        req.destroy();
+        tooLarge = true;
         return;
       }
-      chunks.push(chunk);
+      if (!tooLarge) {
+        chunks.push(chunk);
+      }
     });
 
     req.on("end", () => {
+      if (tooLarge) {
+        reject(httpError(413, "request_too_large", "Request body is too large"));
+        return;
+      }
       if (chunks.length === 0) {
         resolve({});
         return;

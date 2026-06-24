@@ -97,6 +97,7 @@ export function computeAuthState({
     last_refresh_at: state.last_refresh_at,
     auth_state: authState,
     auth_state_expired: authState === "expired",
+    auth_status: authState,
     pending_manual_login: authState === "auth_required" || originStatusHasManualLogin(originStatus),
     next_step: authState === "auth_required" || originStatusHasManualLogin(originStatus) ? "npm run worker:start" : null,
     origin_ready_state_stale: Object.values(originStatus).some((entry) => entry.origin_ready_state_stale === true),
@@ -202,6 +203,7 @@ export function sanitizeAuthStateOutput(value) {
     last_refresh_at: normalizeIsoOrNull(state.last_refresh_at),
     auth_state: normalizeAuthState(state.auth_state),
     auth_state_expired: Boolean(state.auth_state_expired),
+    auth_status: normalizeAuthStatus(state.auth_status || state.auth_state),
     pending_manual_login: Boolean(state.pending_manual_login),
     next_step: safeNextStep(state.next_step),
     origin_ready_state_stale: Boolean(state.origin_ready_state_stale),
@@ -327,6 +329,7 @@ function sanitizeOriginStatusEntry(value) {
     final_origin: normalizeOriginString(entry.final_origin),
     current_origin: normalizeOriginString(entry.current_origin || entry.final_origin),
     status: normalizeOriginStatus(entry.status),
+    auth_status: normalizeAuthStatus(entry.auth_status || authStatusFromOriginStatus(entry.status, entry.error_type || entry.last_error_type)),
     error_type: normalizeErrorType(entry.error_type || entry.last_error_type),
     refreshed_at: normalizeIsoOrNull(entry.refreshed_at || entry.last_refresh_at),
     optional,
@@ -370,6 +373,14 @@ function normalizeAuthState(value) {
   return "unknown";
 }
 
+function normalizeAuthStatus(value) {
+  const status = safeString(value);
+  if (["ready", "missing", "expired", "unknown", "auth_required"].includes(status)) {
+    return status === "auth_required" ? "missing" : status;
+  }
+  return "unknown";
+}
+
 function normalizeErrorType(value) {
   if (typeof value === "string" && FORBIDDEN_AUTH_MATERIAL_PATTERN.test(value)) {
     return "refresh_failed";
@@ -395,6 +406,22 @@ function statusFromErrorType(errorType, { optional = false } = {}) {
     return "expired";
   }
   return "failed";
+}
+
+function authStatusFromOriginStatus(status, errorType) {
+  if (status === "ready") {
+    return "ready";
+  }
+  if (status === "expired" || errorType === "expired") {
+    return "expired";
+  }
+  if (status === "auth_required" || isAuthRequiredErrorType(errorType)) {
+    return "missing";
+  }
+  if (status === "unknown") {
+    return "unknown";
+  }
+  return "missing";
 }
 
 function isAuthRequiredErrorType(errorType) {

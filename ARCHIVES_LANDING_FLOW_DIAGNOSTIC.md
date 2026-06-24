@@ -22,7 +22,7 @@ browser storage. It does not make risk judgments or no-data conclusions.
 | origin_key | `archives` |
 | label | `Archives Center` |
 | env var | `ARCHIVES_ORIGIN` |
-| default_origin | `https://admin.p.adm-corp.kuaishou.com` |
+| default_origin | `https://admin.p5.adm-corp.kuaishou.com` |
 | warmup path | `/frontend/archives/index.html` |
 | enabled | `true` |
 | requiredForHealth | `false` |
