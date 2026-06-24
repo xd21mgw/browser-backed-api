@@ -83,7 +83,7 @@ export class BrowserBackedClient {
     const authRedirectDetected = initialResult.error_type === "auth_redirect";
     const landingFlow = authRedirectDetected
       ? allowLandingFlow
-        ? await this.runLandingFlow(page, domain)
+        ? await this.runLandingFlow(page, domain, target)
         : manualLandingFlow(page, "manual_login_required")
       : allowLandingFlow
         ? await this.runSameOriginLandingFlow(page, domain, initialResult)
@@ -92,17 +92,17 @@ export class BrowserBackedClient {
     const finalOrigin = landingFlow.finalOrigin || initialResult.final_origin;
     const navigationStatus = landingFlow.navigationStatus ?? initialResult.navigation_status;
     const sameOriginActual = Boolean(finalOrigin && finalOrigin === domain.origin);
+    const classifiedErrorType = classifyNavigation({
+      error: navigationError,
+      finalUrl,
+      finalOrigin,
+      expectedOrigin: domain.origin,
+      navigationStatus
+    });
     const errorType = landingFlow.errorType ||
       (sameOriginActual
         ? null
-        :
-        classifyNavigation({
-          error: navigationError,
-          finalUrl,
-          finalOrigin,
-          expectedOrigin: domain.origin,
-          navigationStatus
-        }) ||
+        : archivesOriginMismatchErrorType(domain, classifiedErrorType) ||
         "page_load_error");
     const pageReady = Boolean(sameOriginActual && !errorType);
     this.pageReady.set(domain.key, pageReady);
@@ -139,7 +139,7 @@ export class BrowserBackedClient {
     };
   }
 
-  async runLandingFlow(page, domain) {
+  async runLandingFlow(page, domain, target) {
     const waitMs = Math.min(this.config.browser.requestTimeoutMs, LANDING_WAIT_MS);
     const result = {
       attempted: true,
@@ -164,6 +164,12 @@ export class BrowserBackedClient {
       result.observation = observation.summary;
       result.rootCause = observation.rootCause === "not_landing" ? null : observation.rootCause;
       if (isManualLandingRootCause(observation.rootCause)) {
+        if (shouldAttemptArchivesBusinessOriginRecovery(domain, observation)) {
+          const recovery = await tryArchivesBusinessOriginRecovery(page, domain, target, waitMs);
+          if (recovery) {
+            return recovery;
+          }
+        }
         applyManualLandingResult(result, page, observation);
         return result;
       }
@@ -195,13 +201,18 @@ export class BrowserBackedClient {
       }
     }
 
+    const recovery = await tryArchivesBusinessOriginRecovery(page, domain, target, waitMs);
+    if (recovery) {
+      return recovery;
+    }
+
     const manualRequired = Boolean(domain.landingFlow?.sameOriginActivation && result.allowedClicksExecuted === 0);
     result.status = manualRequired
       ? "manual_login_required"
       : result.allowedClicksExecuted >= MAX_LANDING_CLICKS
         ? "max_clicks_exceeded"
         : "landing_flow_blocked";
-    result.errorType = manualRequired ? "manual_login_required" : "landing_flow_blocked";
+    result.errorType = manualRequired ? "manual_login_required" : archivesOriginMismatchErrorType(domain, "landing_flow_blocked");
     result.errorMessage = manualRequired
       ? "Manual profile activation is required for this landing flow"
       : "Auth landing flow did not return to configured origin";
@@ -1130,6 +1141,69 @@ function statusFromPrewarm({ pageReady, errorType }) {
     return "auth_failed";
   }
   return "error";
+}
+
+function archivesOriginMismatchErrorType(domain, fallback = "origin_mismatch") {
+  if (domain?.key === "archives" && ["origin_mismatch", "landing_flow_blocked"].includes(fallback)) {
+    return "archives_origin_mismatch";
+  }
+  return fallback;
+}
+
+function shouldAttemptArchivesBusinessOriginRecovery(domain, observation) {
+  if (domain?.key !== "archives" || observation?.rootCause !== "manual_login_required") {
+    return false;
+  }
+  const summary = observation.summary || {};
+  if (!isAuthRedirectTarget({ origin: summary.current_origin, url: summary.current_origin })) {
+    return false;
+  }
+  return !summary.username_input_present &&
+    !summary.password_input_present &&
+    !summary.two_factor_signal &&
+    !summary.captcha_signal &&
+    !summary.permission_blocked_signal;
+}
+
+async function tryArchivesBusinessOriginRecovery(page, domain, target, timeout) {
+  if (domain?.key !== "archives" || !target) {
+    return null;
+  }
+  const currentOrigin = originFromUrl(safePageUrl(page));
+  if (!isAuthRedirectTarget({ origin: currentOrigin, url: safePageUrl(page) || currentOrigin })) {
+    return null;
+  }
+
+  let response = null;
+  let navigationError = null;
+  try {
+    response = await page.goto(target, {
+      waitUntil: "domcontentloaded",
+      timeout
+    });
+    await waitForLandingSettle(page, timeout);
+  } catch (error) {
+    navigationError = error;
+  }
+
+  const finalUrl = safePageUrl(page);
+  const finalOrigin = originFromUrl(finalUrl);
+  const navigationStatus = navigationError ? "error" : response?.status?.() ?? null;
+  if (finalOrigin === domain.origin) {
+    return {
+      attempted: true,
+      allowedClicksExecuted: 0,
+      status: "business_origin_recovered",
+      finalUrl,
+      finalOrigin,
+      navigationStatus,
+      errorType: null,
+      errorMessage: null,
+      rootCause: "account_origin_reentered_business_origin",
+      observation: null
+    };
+  }
+  return null;
 }
 
 async function waitForConfiguredOrigin(page, configuredOrigin, timeout) {

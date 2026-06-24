@@ -16,8 +16,10 @@ import {
   updateOriginWarmState
 } from "../src/authState.js";
 import { loadConfig } from "../src/config.js";
+import { BrowserBackedClient } from "../src/browser.js";
 import { CORE_ORIGIN_KEYS, DEFAULT_REFRESH_TTL_MS, ORIGIN_REGISTRY } from "../src/originRegistry.js";
 import { BrowserBackedApiService } from "../src/service.js";
+import { isAuthRedirectTarget } from "../src/diagnostics.js";
 import {
   buildRefreshDaemonEvent,
   buildServicePrewarmRefreshSummary,
@@ -1386,6 +1388,250 @@ test("archives context request builders include HAR-aligned referer and origin h
       { action: "archives_gallery_photo_list", referer: "/frontend/archives/index.html", origin: "@same_origin" }
     ]
   );
+});
+
+test("ARCHIVES-P5-ACCOUNT-ORIGIN-NOT-READY-001 account.p5 is auth origin, not Archives business ready", () => {
+  const config = createLiveConfig({
+    ARCHIVES_ORIGIN: "https://admin.p5.adm-corp.kuaishou.com"
+  });
+  const accountOrigin = "https://account.p5.adm-corp.kuaishou.com";
+  assert.equal(isAuthRedirectTarget({ origin: accountOrigin, url: `${accountOrigin}/` }), true);
+
+  const refreshState = updateOriginWarmState({}, config.domains.archives, {
+    key: "archives",
+    status: "error",
+    page_ready: false,
+    final_origin: accountOrigin,
+    current_origin: accountOrigin,
+    same_origin_actual: false,
+    error_type: "archives_origin_mismatch"
+  });
+  const authState = computeAuthState({
+    profileDir: config.profileDir,
+    stateFile: config.stateFile,
+    origins: Object.values(config.domains),
+    refreshState
+  });
+
+  assert.equal(authState.origin_status.archives.status, "optional_failed");
+  assert.equal(authState.origin_status.archives.page_ready, false);
+  assert.equal(authState.origin_status.archives.current_origin, accountOrigin);
+  assert.equal(authState.origin_status.archives.error_type, "archives_origin_mismatch");
+  assert.equal(authState.origin_status.archives.origin_ready_state_stale, true);
+});
+
+test("ARCHIVES-P5-REWARM-TO-ADMIN-001 Archives account.p5 recovery re-enters admin.p5", async () => {
+  const config = createLiveConfig({
+    ARCHIVES_ORIGIN: "https://admin.p5.adm-corp.kuaishou.com"
+  });
+  const target = `${config.domains.archives.origin}/frontend/archives/index.html`;
+  const accountUrl = "https://account.p5.adm-corp.kuaishou.com/?continue=archives";
+  const gotoUrls = [];
+  let currentUrl = "about:blank";
+  const page = {
+    url: () => currentUrl,
+    goto: async (url) => {
+      gotoUrls.push(url);
+      currentUrl = gotoUrls.length === 1 ? accountUrl : target;
+      return { status: () => 200 };
+    },
+    waitForURL: async () => {
+      throw new Error("no auto return before explicit recovery");
+    },
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    evaluate: async (_fn, args) => {
+      if (args.mode === "click_preview") {
+        return { clickable: false };
+      }
+      if (args.mode === "click") {
+        return { clicked: false };
+      }
+      return {
+        titlePresent: true,
+        allowedButtonLabels: [],
+        allowedControlKinds: [],
+        allowlistedClickableControlPresent: false,
+        usernameInputPresent: false,
+        usernamePrefilled: false,
+        accountDisplayPresent: true,
+        passwordInputPresent: false,
+        twoFactorSignal: false,
+        captchaSignal: false,
+        qrSignal: false,
+        permissionBlockedSignal: false,
+        landingSignal: true
+      };
+    }
+  };
+  const browserClient = new BrowserBackedClient(config);
+  browserClient.start = async () => {
+    browserClient.context = { newPage: async () => page };
+    browserClient.browserInitialized = true;
+  };
+
+  const result = await browserClient.prewarmDomain("archives", { allowLandingFlow: true });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.page_ready, true);
+  assert.equal(result.final_origin, config.domains.archives.origin);
+  assert.equal(result.current_origin, undefined);
+  assert.equal(result.landing_flow_status, "business_origin_recovered");
+  assert.deepEqual(gotoUrls, [target, target]);
+});
+
+test("ARCHIVES-ACTION-REQUIRES-BUSINESS-ORIGIN-001 archives action blocks account.p5 before fetch", async () => {
+  const config = createLiveConfig({
+    ARCHIVES_ORIGIN: "https://admin.p5.adm-corp.kuaishou.com"
+  });
+  const accountOrigin = "https://account.p5.adm-corp.kuaishou.com";
+  let contextRequestCalled = false;
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      status: "error",
+      page_ready: false,
+      final_origin: accountOrigin,
+      current_origin: accountOrigin,
+      same_origin_actual: false,
+      error_type: "archives_origin_mismatch"
+    }),
+    actionDiagnostics: (action) => ({
+      action_name: action.name,
+      expected_origin: config.domains.archives.origin,
+      bound_page_origin: accountOrigin,
+      origin_warmed: false,
+      page_ready: false,
+      origin_match: false,
+      auth_redirect_detected: true
+    }),
+    runActionWithContextRequest: async () => {
+      contextRequestCalled = true;
+      throw new Error("archives action must not run on account origin");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+
+  const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+
+  assert.equal(contextRequestCalled, false);
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "archives_origin_mismatch");
+  assert.equal(response.current_origin, accountOrigin);
+  assert.equal(response.expected_origin, config.domains.archives.origin);
+  assert.equal(response.meta.current_origin, accountOrigin);
+  assert.equal(response.meta.expected_origin, config.domains.archives.origin);
+  assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("ARCHIVES-ORIGIN-MISMATCH-ERROR-TYPED-001 failed Archives recovery keeps typed error", async () => {
+  const config = createLiveConfig({
+    ARCHIVES_ORIGIN: "https://admin.p5.adm-corp.kuaishou.com"
+  });
+  const accountOrigin = "https://account.p5.adm-corp.kuaishou.com";
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      status: "error",
+      page_ready: false,
+      final_origin: accountOrigin,
+      current_origin: accountOrigin,
+      same_origin_actual: false,
+      error_type: "archives_origin_mismatch"
+    }),
+    actionDiagnostics: () => ({
+      action_name: "archives_user_profile",
+      expected_origin: config.domains.archives.origin,
+      bound_page_origin: accountOrigin,
+      origin_warmed: false,
+      page_ready: false,
+      origin_match: false,
+      auth_redirect_detected: true
+    }),
+    runActionWithContextRequest: async () => {
+      throw new Error("should not fetch when Archives origin recovery fails");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+
+  const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error_type, "archives_origin_mismatch");
+  assert.equal(response.safe_reason, "archives_origin_mismatch");
+  assert.equal(response.upstream.error_type, "archives_origin_mismatch");
+  assert.equal(response.upstream.safe_reason, "archives_origin_mismatch");
+  assert.equal(response.body_present, false);
+  assert.equal(response.next_step, "npm run worker:start");
+  assertTransportEnvelope(response, "archives_user_profile");
+});
+
+test("ARCHIVES-PER-ORIGIN-SERIAL-STILL-001 Archives recovery keeps per-origin serialization", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.domainKey === "archives") {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await delay(20);
+      activeArchives -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  await Promise.all([
+    service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
+    service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis)
+  ]);
+
+  assert.equal(maxActiveArchives, 1);
+  assert.equal(ACTIONS.archives_user_profile.concurrency.lock_scope, "per_origin");
+  assert.equal(ACTIONS.archives_user_analysis.concurrency.lock_scope, "per_origin");
+});
+
+test("NO-CREDENTIAL-LEAK-ARCHIVES-RECOVERY-001 Archives recovery metadata has no credential material", async () => {
+  const config = createLiveConfig({
+    ARCHIVES_ORIGIN: "https://admin.p5.adm-corp.kuaishou.com"
+  });
+  const accountOrigin = "https://account.p5.adm-corp.kuaishou.com";
+  const fakeBrowserClient = {
+    status: () => ({ browser_initialized: true, context_initialized: true }),
+    start: async () => {},
+    prewarmDomain: async () => ({
+      key: "archives",
+      status: "error",
+      page_ready: false,
+      final_origin: accountOrigin,
+      current_origin: accountOrigin,
+      same_origin_actual: false,
+      error_type: "archives_origin_mismatch"
+    }),
+    actionDiagnostics: () => ({
+      action_name: "archives_user_profile",
+      expected_origin: config.domains.archives.origin,
+      bound_page_origin: accountOrigin,
+      origin_warmed: false,
+      page_ready: false,
+      origin_match: false,
+      auth_redirect_detected: true
+    }),
+    runActionWithContextRequest: async () => {
+      throw new Error("should not fetch when Archives origin recovery fails");
+    }
+  };
+  const service = new BrowserBackedApiService(config, fakeBrowserClient);
+
+  const response = await service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+
+  assertNoCredentialMaterial(response);
+  assert.equal(response.safety.credential_material_output, false);
+  assert.equal(JSON.stringify(response).includes("storageState"), false);
 });
 
 test("rcp_event_detail forwards action-specific request timeout to context request", async () => {

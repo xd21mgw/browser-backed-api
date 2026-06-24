@@ -2,7 +2,8 @@ const SENSITIVE_NAME_PATTERN = /(authorization|cookie|token|secret|session|passw
 const SENSITIVE_NAME_GLOBAL_PATTERN = /(authorization|cookie|token|secret|session|password|credential|csrf|jwt|header)/gi;
 const FIXED_AUTH_REDIRECT_ORIGINS = new Set([
   "https://sso.corp.kuaishou.com",
-  "https://account.p.adm-corp.kuaishou.com"
+  "https://account.p.adm-corp.kuaishou.com",
+  "https://account.p5.adm-corp.kuaishou.com"
 ]);
 
 export function sanitizeUrl(rawUrl) {
@@ -171,7 +172,7 @@ function safeDecode(value) {
 }
 
 function looksAuthRedirect(url) {
-  return /(sso|oauth|cas|idp|passport|auth)/i.test(url);
+  return /(sso|oauth|cas|idp|passport|auth|account\.p5?\.adm-corp\.kuaishou\.com)/i.test(url);
 }
 
 function looksLoginPage(url) {

@@ -8,6 +8,7 @@ const SAFE_ERROR_TYPES = Object.freeze(new Set([
   "auth_required",
   "auth_redirect",
   "auth_flow_not_completed_in_bound_context",
+  "archives_origin_mismatch",
   "auth_state_expired_or_api_session_not_ready",
   "captcha_required",
   "expired",

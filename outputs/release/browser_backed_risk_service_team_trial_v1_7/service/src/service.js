@@ -731,7 +731,7 @@ export class BrowserBackedApiService {
       platformError: errorType,
       meta: {
         ...afterMeta,
-        safe_reason: "origin_ready_state_stale",
+        safe_reason: errorType === "archives_origin_mismatch" ? "archives_origin_mismatch" : "origin_ready_state_stale",
         nextStep: "npm run worker:start"
       }
     };
@@ -760,6 +760,9 @@ export class BrowserBackedApiService {
       origin_freshness_ttl_ms: freshness.origin_freshness_ttl_ms,
       pending_manual_login: authState.pending_manual_login,
       nextStep: authState.pending_manual_login ? "npm run worker:start" : null,
+      current_origin: this.warmState.get(domainKey)?.current_origin || this.warmState.get(domainKey)?.final_origin || null,
+      final_origin: this.warmState.get(domainKey)?.final_origin || null,
+      expected_origin: domain?.origin || null,
       ...extra
     };
   }
@@ -1841,6 +1844,9 @@ function pageSessionRetryReason(response) {
 
 function rewarmFailureErrorType(rewarmResult) {
   const errorType = rewarmResult?.error_type || rewarmResult?.last_error_type || rewarmResult?.status;
+  if (errorType === "archives_origin_mismatch") {
+    return "archives_origin_mismatch";
+  }
   if ([
     "manual_login_required",
     "auth_required",

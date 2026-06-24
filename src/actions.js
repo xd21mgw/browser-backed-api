@@ -2039,6 +2039,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
   const timeoutStage = typeof meta.timeoutStage === "string" && meta.timeoutStage ? meta.timeoutStage : null;
   const safeReason = meta.safe_reason || null;
   const nextStep = meta.nextStep || null;
+  const currentOrigin = safeOriginString(meta.current_origin);
+  const finalOrigin = safeOriginString(meta.final_origin);
+  const expectedOrigin = safeOriginString(meta.expected_origin);
   return {
     ok: false,
     action: action.name,
@@ -2063,6 +2066,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
     raw_body_handling: "omitted",
     ...(safeReason ? { safe_reason: safeReason } : {}),
     ...(nextStep ? { next_step: nextStep } : {}),
+    ...(currentOrigin ? { current_origin: currentOrigin } : {}),
+    ...(finalOrigin ? { final_origin: finalOrigin } : {}),
+    ...(expectedOrigin ? { expected_origin: expectedOrigin } : {}),
     auth_state_expired: Boolean(meta.auth_state_expired),
     origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
     upstream: {
@@ -2078,6 +2084,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       error_type: errorType,
       ...(safeReason ? { safe_reason: safeReason } : {}),
       ...(nextStep ? { next_step: nextStep } : {}),
+      ...(currentOrigin ? { current_origin: currentOrigin } : {}),
+      ...(finalOrigin ? { final_origin: finalOrigin } : {}),
+      ...(expectedOrigin ? { expected_origin: expectedOrigin } : {}),
       auth_state_expired: Boolean(meta.auth_state_expired),
       origin_ready_state_stale: Boolean(meta.origin_ready_state_stale),
       ...(timeoutStage ? { timeout_stage: timeoutStage } : {})
@@ -2105,6 +2114,9 @@ export function buildPassthroughFailureResponse(action, input, meta = {}) {
       context_request_recovery_attempted: Boolean(meta.context_request_recovery_attempted),
       context_request_recovery_reason: safeString(meta.context_request_recovery_reason) || null,
       context_request_recovery_status: safeString(meta.context_request_recovery_status) || null,
+      current_origin: currentOrigin,
+      final_origin: finalOrigin,
+      expected_origin: expectedOrigin,
       safe_reason: safeReason || null,
       next_step: nextStep,
       concurrency: concurrencyTrace(meta)
@@ -4301,6 +4313,18 @@ function safeNullableInteger(value) {
 
 function safeString(value) {
   return typeof value === "string" ? value.trim().slice(0, 128) : "";
+}
+
+function safeOriginString(value) {
+  const text = safeString(value);
+  if (!text) {
+    return null;
+  }
+  try {
+    return new URL(text).origin;
+  } catch {
+    return null;
+  }
 }
 
 function isJsonContentType(contentType) {
