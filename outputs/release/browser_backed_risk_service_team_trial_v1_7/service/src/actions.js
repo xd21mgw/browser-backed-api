@@ -684,7 +684,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateDecimalUserIdAction("archives_negative_report"),
     buildRequest: buildArchivesUserIdPostRequest(ARCHIVES_NEGATIVE_REPORT_PATH),
-    mockData: mockArchivesNegativeReportData
+    mockData: mockArchivesNegativeReportData,
+    archivesContextParallelCandidate: true
   }),
   archives_negative_uninterested: freezeAction({
     name: "archives_negative_uninterested",
@@ -772,7 +773,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPunishStatusInput,
     buildRequest: buildArchivesPunishStatusRequest,
-    mockData: mockArchivesPunishStatusData
+    mockData: mockArchivesPunishStatusData,
+    archivesContextParallelCandidate: true
   }),
   archives_review_logs: freezeAction({
     name: "archives_review_logs",
@@ -793,7 +795,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesTimedUserPageInput("archives_review_logs", 30),
     buildRequest: buildArchivesTimedUserPageRequest(ARCHIVES_REVIEW_LOGS_PATH, 30),
-    mockData: mockArchivesReviewLogsData
+    mockData: mockArchivesReviewLogsData,
+    archivesContextParallelCandidate: true
   }),
   archives_user_analyze_summary: freezeAction({
     name: "archives_user_analyze_summary",
@@ -930,7 +933,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesCommentSearchInput,
     buildRequest: buildArchivesCommentSearchRequest,
-    mockData: mockArchivesCommentSearchData
+    mockData: mockArchivesCommentSearchData,
+    archivesContextParallelCandidate: true
   }),
   archives_livestream_home_info: freezeAction({
     name: "archives_livestream_home_info",
@@ -1042,7 +1046,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesUserReportSearchInput,
     buildRequest: buildArchivesUserReportSearchRequest,
-    mockData: mockArchivesUserReportSearchData
+    mockData: mockArchivesUserReportSearchData,
+    archivesContextParallelCandidate: true
   }),
   archives_moment_list: freezeAction({
     name: "archives_moment_list",
@@ -1098,7 +1103,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPrivateMessageSearchInput,
     buildRequest: buildArchivesPrivateMessageSearchRequest,
-    mockData: mockArchivesPrivateMessageSearchData
+    mockData: mockArchivesPrivateMessageSearchData,
+    archivesContextParallelCandidate: true
   }),
   archives_past_four_items: freezeAction({
     name: "archives_past_four_items",

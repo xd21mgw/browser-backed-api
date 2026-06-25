@@ -768,7 +768,7 @@ test("ARCHIVES-CROSS-ACTION-PARALLEL-FLAG-001 flag allows different candidate ac
   const service = createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
   let activeCandidates = 0;
@@ -798,11 +798,40 @@ test("ARCHIVES-CROSS-ACTION-PARALLEL-FLAG-001 flag allows different candidate ac
   assert.notEqual(responses[0].meta.concurrency.action_serial_key, responses[1].meta.concurrency.action_serial_key);
 });
 
+test("ARCHIVES-EXPANDED-WHITELIST-PARALLEL-FLAG-001 flag allows expanded Archives context actions into context pool", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
+  });
+
+  const responses = await Promise.all([
+    service.executeAction("archives_private_message_search", ACTION_INPUTS.archives_private_message_search),
+    service.executeAction("archives_comment_search", ACTION_INPUTS.archives_comment_search),
+    service.executeAction("archives_user_report_search", ACTION_INPUTS.archives_user_report_search),
+    service.executeAction("archives_negative_report", ACTION_INPUTS.archives_negative_report),
+    service.executeAction("archives_review_logs", ACTION_INPUTS.archives_review_logs),
+    service.executeAction("archives_punish_status", ACTION_INPUTS.archives_punish_status)
+  ]);
+
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.lock_scope), [
+    "limited_parallel",
+    "limited_parallel",
+    "limited_parallel",
+    "limited_parallel",
+    "limited_parallel",
+    "limited_parallel"
+  ]);
+  assert.deepEqual(new Set(responses.map((response) => response.meta.concurrency.concurrency_group)), new Set(["archives:context_parallel"]));
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.archives_parallel_enabled), [true, true, true, true, true, true]);
+  assert.equal(new Set(responses.map((response) => response.meta.concurrency.action_serial_key)).size, 6);
+});
+
 test("ARCHIVES-SAME-ACTION-STILL-SERIAL-001 flag keeps same Archives action serialized", async () => {
   const service = createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
   let activeProfiles = 0;
@@ -828,17 +857,21 @@ test("ARCHIVES-SAME-ACTION-STILL-SERIAL-001 flag keeps same Archives action seri
   assert.equal(responses[1].meta.concurrency.action_serial_key, "archives:action:archives_user_profile");
 });
 
-test("ARCHIVES-UNTESTED-FOLLOWUP-STILL-SERIAL-001 unlisted Archives followups stay per-origin serial", async () => {
+test("ARCHIVES-UNTESTED-LIVESTREAM-STILL-SERIAL-001 unlisted Archives livestream actions stay per-origin serial", async () => {
   const service = createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
   let activeUntested = 0;
   let maxActiveUntested = 0;
   service.executeActionUnlocked = async (action, input, trace) => {
-    if (["archives_private_message_search", "archives_comment_search", "archives_user_report_search"].includes(action.name)) {
+    if ([
+      "archives_livestream_home_info",
+      "archives_livestream_home_meta",
+      "archives_livestream_comment_statistics"
+    ].includes(action.name)) {
       activeUntested += 1;
       maxActiveUntested = Math.max(maxActiveUntested, activeUntested);
       await delay(20);
@@ -848,9 +881,9 @@ test("ARCHIVES-UNTESTED-FOLLOWUP-STILL-SERIAL-001 unlisted Archives followups st
   };
 
   const responses = await Promise.all([
-    service.executeAction("archives_private_message_search", ACTION_INPUTS.archives_private_message_search),
-    service.executeAction("archives_comment_search", ACTION_INPUTS.archives_comment_search),
-    service.executeAction("archives_user_report_search", ACTION_INPUTS.archives_user_report_search)
+    service.executeAction("archives_livestream_home_info", ACTION_INPUTS.archives_livestream_home_info),
+    service.executeAction("archives_livestream_home_meta", ACTION_INPUTS.archives_livestream_home_meta),
+    service.executeAction("archives_livestream_comment_statistics", ACTION_INPUTS.archives_livestream_comment_statistics)
   ]);
 
   assert.equal(maxActiveUntested, 1);
@@ -865,7 +898,7 @@ test("ARCHIVES-REWARM-STILL-SERIAL-001 rewarm remains exclusive while Archives p
   const service = createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
   const originalPrewarmUnlocked = service.prewarmUnlocked.bind(service);
@@ -899,17 +932,17 @@ test("ARCHIVES-REWARM-STILL-SERIAL-001 rewarm remains exclusive while Archives p
   assert.equal(prewarmStarted, true);
 });
 
-test("ARCHIVES-PARALLEL-MAX-2-001 flag limits Archives candidate pool to two actions", async () => {
+test("ARCHIVES-PARALLEL-MAX-3-001 flag limits Archives candidate pool to three actions", async () => {
   const service = createService({
-    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ACTION_GLOBAL_MAX_CONCURRENCY: "6",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
   let activeCandidates = 0;
   let maxActiveCandidates = 0;
   service.executeActionUnlocked = async (action, input, trace) => {
-    if (["archives_user_profile", "archives_user_analysis", "archives_photo_search"].includes(action.name)) {
+    if (["archives_user_profile", "archives_user_analysis", "archives_photo_search", "archives_private_message_search"].includes(action.name)) {
       activeCandidates += 1;
       maxActiveCandidates = Math.max(maxActiveCandidates, activeCandidates);
       await delay(20);
@@ -921,17 +954,18 @@ test("ARCHIVES-PARALLEL-MAX-2-001 flag limits Archives candidate pool to two act
   await Promise.all([
     service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
     service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis),
-    service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search)
+    service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search),
+    service.executeAction("archives_private_message_search", ACTION_INPUTS.archives_private_message_search)
   ]);
 
-  assert.equal(maxActiveCandidates, 2);
+  assert.equal(maxActiveCandidates, 3);
 });
 
 test("ARCHIVES-PARALLEL-NO-MIX-001 candidate actions keep user/action/request identity under flag", async () => {
   const service = createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   const [profile, analysis, photoSearch] = await Promise.all([
     service.executeAction("archives_user_profile", { user_id: "1000000301" }),
@@ -959,7 +993,7 @@ test("ARCHIVES-PARALLEL-NO-CREDENTIAL-LEAK-001 flag trace exposes no credential 
   const response = await createService({
     ACTION_GLOBAL_MAX_CONCURRENCY: "4",
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   }).executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
 
   assert.equal(response.meta.concurrency.archives_parallel_enabled, true);
@@ -3727,7 +3761,7 @@ test("batch serializes page-followup fetches globally and archives context actio
 test("batch allows Archives candidate cross-action lanes only when parallel flag is enabled", async () => {
   const service = createService({
     ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
-    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "3"
   });
   let activeArchives = 0;
   let maxActiveArchives = 0;

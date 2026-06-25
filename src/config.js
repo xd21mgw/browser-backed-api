@@ -42,7 +42,7 @@ export function loadConfig(env = process.env, options = {}) {
     concurrency: {
       actionGlobalMax: parsePositiveInt(effectiveEnv.ACTION_GLOBAL_MAX_CONCURRENCY || "4", "ACTION_GLOBAL_MAX_CONCURRENCY"),
       archivesContextParallelEnabled: parseBoolean(effectiveEnv.ARCHIVES_CONTEXT_PARALLEL_ENABLED, false),
-      archivesContextMaxConcurrency: parsePositiveInt(effectiveEnv.ARCHIVES_CONTEXT_MAX_CONCURRENCY || "2", "ARCHIVES_CONTEXT_MAX_CONCURRENCY")
+      archivesContextMaxConcurrency: parsePositiveInt(effectiveEnv.ARCHIVES_CONTEXT_MAX_CONCURRENCY || "3", "ARCHIVES_CONTEXT_MAX_CONCURRENCY")
     },
     originRegistry,
     domains: buildDomainConfigs(originRegistry, effectiveEnv, enabledPlatformSet)
