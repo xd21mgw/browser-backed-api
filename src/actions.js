@@ -523,7 +523,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesUserAnalysisInput,
     buildRequest: buildArchivesUserAnalysisRequest,
-    mockData: mockArchivesUserAnalysisData
+    mockData: mockArchivesUserAnalysisData,
+    archivesContextParallelCandidate: true
   }),
   archives_user_profile: freezeAction({
     name: "archives_user_profile",
@@ -537,7 +538,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesUserProfileInput,
     buildRequest: buildArchivesUserProfileRequest,
-    mockData: mockArchivesUserProfileData
+    mockData: mockArchivesUserProfileData,
+    archivesContextParallelCandidate: true
   }),
   archives_photo_search: freezeAction({
     name: "archives_photo_search",
@@ -557,7 +559,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPhotoSearchInput,
     buildRequest: buildArchivesPhotoSearchRequest,
-    mockData: mockArchivesPhotoSearchData
+    mockData: mockArchivesPhotoSearchData,
+    archivesContextParallelCandidate: true
   }),
   archives_photo_profile: freezeAction({
     name: "archives_photo_profile",
@@ -574,7 +577,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPhotoIdInput("archives_photo_profile"),
     buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_PROFILE_PATH),
-    mockData: mockArchivesPhotoProfileData
+    mockData: mockArchivesPhotoProfileData,
+    archivesContextParallelCandidate: true
   }),
   archives_photo_meta: freezeAction({
     name: "archives_photo_meta",
@@ -591,7 +595,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesPhotoIdInput("archives_photo_meta"),
     buildRequest: buildArchivesPhotoIdRequest(ARCHIVES_PHOTO_META_PATH),
-    mockData: mockArchivesPhotoMetaData
+    mockData: mockArchivesPhotoMetaData,
+    archivesContextParallelCandidate: true
   }),
   archives_photo_report_aggregate: freezeAction({
     name: "archives_photo_report_aggregate",
@@ -644,7 +649,8 @@ export const ACTIONS = Object.freeze({
     },
     validateParams: validateArchivesGalleryPhotoListInput,
     buildRequest: buildArchivesGalleryPhotoListRequest,
-    mockData: mockArchivesGalleryPhotoListData
+    mockData: mockArchivesGalleryPhotoListData,
+    archivesContextParallelCandidate: true
   }),
   archives_photo_gallery_top: freezeAction({
     name: "archives_photo_gallery_top",
@@ -4054,7 +4060,9 @@ function normalizeActionConcurrency(action) {
     concurrency_group: concurrencyGroup,
     lock_scope: lockScope,
     page_bound: pageBound,
-    max_concurrency: maxConcurrency
+    max_concurrency: maxConcurrency,
+    archives_context_parallel_candidate: action.archivesContextParallelCandidate === true ||
+      action.archives_context_parallel_candidate === true
   });
 }
 
@@ -4086,7 +4094,10 @@ function concurrencyTrace(meta = {}) {
     queued_at: safeString(meta.concurrency_queued_at) || null,
     started_at: safeString(meta.concurrency_started_at) || null,
     finished_at: safeString(meta.concurrency_finished_at) || null,
-    action_duration_ms: safeNullableInteger(meta.concurrency_action_duration_ms)
+    action_duration_ms: safeNullableInteger(meta.concurrency_action_duration_ms),
+    archives_parallel_enabled: meta.concurrency_archives_parallel_enabled === true,
+    same_action_mutex: meta.concurrency_same_action_mutex === true,
+    action_serial_key: safeString(meta.concurrency_action_serial_key) || null
   };
 }
 

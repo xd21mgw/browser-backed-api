@@ -734,6 +734,239 @@ test("ARCHIVES-PER-ORIGIN-SERIAL-001 Archives page-sensitive actions run one at 
   assert.deepEqual(responses.map((response) => response.meta.concurrency.lock_scope), ["per_origin", "per_origin"]);
 });
 
+test("ARCHIVES-PARALLEL-FLAG-DEFAULT-SERIAL-001 default keeps Archives per-origin serial", async () => {
+  const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.domainKey === "archives") {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await delay(20);
+      activeArchives -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
+    service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis),
+    service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search)
+  ]);
+
+  assert.equal(maxActiveArchives, 1);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.concurrency_group), [
+    "archives:origin",
+    "archives:origin",
+    "archives:origin"
+  ]);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.archives_parallel_enabled), [false, false, false]);
+});
+
+test("ARCHIVES-CROSS-ACTION-PARALLEL-FLAG-001 flag allows different candidate actions into context pool", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeCandidates = 0;
+  let maxActiveCandidates = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (["archives_user_profile", "archives_user_analysis"].includes(action.name)) {
+      activeCandidates += 1;
+      maxActiveCandidates = Math.max(maxActiveCandidates, activeCandidates);
+      await delay(20);
+      activeCandidates -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
+    service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis)
+  ]);
+
+  assert.equal(maxActiveCandidates, 2);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.lock_scope), ["limited_parallel", "limited_parallel"]);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.concurrency_group), [
+    "archives:context_parallel",
+    "archives:context_parallel"
+  ]);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.archives_parallel_enabled), [true, true]);
+  assert.notEqual(responses[0].meta.concurrency.action_serial_key, responses[1].meta.concurrency.action_serial_key);
+});
+
+test("ARCHIVES-SAME-ACTION-STILL-SERIAL-001 flag keeps same Archives action serialized", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeProfiles = 0;
+  let maxActiveProfiles = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.name === "archives_user_profile") {
+      activeProfiles += 1;
+      maxActiveProfiles = Math.max(maxActiveProfiles, activeProfiles);
+      await delay(20);
+      activeProfiles -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("archives_user_profile", { user_id: "1000000201" }),
+    service.executeAction("archives_user_profile", { user_id: "1000000202" })
+  ]);
+
+  assert.equal(maxActiveProfiles, 1);
+  assert.equal(responses[0].meta.concurrency.same_action_mutex, true);
+  assert.equal(responses[0].meta.concurrency.action_serial_key, "archives:action:archives_user_profile");
+  assert.equal(responses[1].meta.concurrency.action_serial_key, "archives:action:archives_user_profile");
+});
+
+test("ARCHIVES-UNTESTED-FOLLOWUP-STILL-SERIAL-001 unlisted Archives followups stay per-origin serial", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeUntested = 0;
+  let maxActiveUntested = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (["archives_private_message_search", "archives_comment_search", "archives_user_report_search"].includes(action.name)) {
+      activeUntested += 1;
+      maxActiveUntested = Math.max(maxActiveUntested, activeUntested);
+      await delay(20);
+      activeUntested -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  const responses = await Promise.all([
+    service.executeAction("archives_private_message_search", ACTION_INPUTS.archives_private_message_search),
+    service.executeAction("archives_comment_search", ACTION_INPUTS.archives_comment_search),
+    service.executeAction("archives_user_report_search", ACTION_INPUTS.archives_user_report_search)
+  ]);
+
+  assert.equal(maxActiveUntested, 1);
+  assert.deepEqual(responses.map((response) => response.meta.concurrency.concurrency_group), [
+    "archives:origin",
+    "archives:origin",
+    "archives:origin"
+  ]);
+});
+
+test("ARCHIVES-REWARM-STILL-SERIAL-001 rewarm remains exclusive while Archives parallel flag is enabled", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  const originalPrewarmUnlocked = service.prewarmUnlocked.bind(service);
+  let actionStarted = false;
+  let releaseAction;
+  const actionGate = new Promise((resolve) => {
+    releaseAction = resolve;
+  });
+  let prewarmStarted = false;
+
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (action.name === "archives_user_profile") {
+      actionStarted = true;
+      await actionGate;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+  service.prewarmUnlocked = async () => {
+    prewarmStarted = true;
+    return originalPrewarmUnlocked();
+  };
+
+  const actionPromise = service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+  await waitFor(() => actionStarted);
+  const prewarmPromise = service.prewarm();
+  await delay(20);
+  assert.equal(prewarmStarted, false);
+
+  releaseAction();
+  await Promise.all([actionPromise, prewarmPromise]);
+  assert.equal(prewarmStarted, true);
+});
+
+test("ARCHIVES-PARALLEL-MAX-2-001 flag limits Archives candidate pool to two actions", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const originalUnlocked = service.executeActionUnlocked.bind(service);
+  let activeCandidates = 0;
+  let maxActiveCandidates = 0;
+  service.executeActionUnlocked = async (action, input, trace) => {
+    if (["archives_user_profile", "archives_user_analysis", "archives_photo_search"].includes(action.name)) {
+      activeCandidates += 1;
+      maxActiveCandidates = Math.max(maxActiveCandidates, activeCandidates);
+      await delay(20);
+      activeCandidates -= 1;
+    }
+    return originalUnlocked(action, input, trace);
+  };
+
+  await Promise.all([
+    service.executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile),
+    service.executeAction("archives_user_analysis", ACTION_INPUTS.archives_user_analysis),
+    service.executeAction("archives_photo_search", ACTION_INPUTS.archives_photo_search)
+  ]);
+
+  assert.equal(maxActiveCandidates, 2);
+});
+
+test("ARCHIVES-PARALLEL-NO-MIX-001 candidate actions keep user/action/request identity under flag", async () => {
+  const service = createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  const [profile, analysis, photoSearch] = await Promise.all([
+    service.executeAction("archives_user_profile", { user_id: "1000000301" }),
+    service.executeAction("archives_user_analysis", {
+      ...ACTION_INPUTS.archives_user_analysis,
+      user_id: "1000000302"
+    }),
+    service.executeAction("archives_photo_search", {
+      ...ACTION_INPUTS.archives_photo_search,
+      user_id: "1000000303"
+    })
+  ]);
+
+  assert.equal(profile.action_name, "archives_user_profile");
+  assert.equal(analysis.action_name, "archives_user_analysis");
+  assert.equal(photoSearch.action_name, "archives_photo_search");
+  assert.equal(profile.upstream.body.response.data.userId, "1000000301");
+  assert.equal(analysis.upstream.body.response.data.dataList[0].userId, "1000000302");
+  assert.equal(JSON.stringify(profile.upstream).includes("1000000302"), false);
+  assert.equal(JSON.stringify(analysis.upstream).includes("1000000301"), false);
+  assert.equal(new Set([profile.request_id, analysis.request_id, photoSearch.request_id]).size, 3);
+});
+
+test("ARCHIVES-PARALLEL-NO-CREDENTIAL-LEAK-001 flag trace exposes no credential material", async () => {
+  const response = await createService({
+    ACTION_GLOBAL_MAX_CONCURRENCY: "4",
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  }).executeAction("archives_user_profile", ACTION_INPUTS.archives_user_profile);
+
+  assert.equal(response.meta.concurrency.archives_parallel_enabled, true);
+  assertNoCredentialMaterial(response.meta.concurrency);
+  assertNoCredentialMaterial(response);
+});
+
 test("LOGIN-LOGS-PER-ORIGIN-SERIAL-001 login_logs_search uses the per-origin page lock", async () => {
   const service = createService({ ACTION_GLOBAL_MAX_CONCURRENCY: "4" });
   const originalUnlocked = service.executeActionUnlocked.bind(service);
@@ -3489,6 +3722,59 @@ test("batch serializes page-followup fetches globally and archives context actio
   assert.equal(response.batch_status, "completed");
   assert.equal(maxActiveArchives, 1);
   assert.equal(maxActivePageFollowup, 1);
+});
+
+test("batch allows Archives candidate cross-action lanes only when parallel flag is enabled", async () => {
+  const service = createService({
+    ARCHIVES_CONTEXT_PARALLEL_ENABLED: "true",
+    ARCHIVES_CONTEXT_MAX_CONCURRENCY: "2"
+  });
+  let activeArchives = 0;
+  let maxActiveArchives = 0;
+  service.executeAction = async (action) => {
+    if (["archives_user_profile", "archives_user_analysis", "archives_photo_search"].includes(action)) {
+      activeArchives += 1;
+      maxActiveArchives = Math.max(maxActiveArchives, activeArchives);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeArchives -= 1;
+    }
+    return {
+      ok: true,
+      source_status: "completed",
+      error_type: null,
+      platform_error: null,
+      body_present: true,
+      raw_body_handling: "visible",
+      upstream: {
+        status: 200,
+        content_type: "application/json",
+        body_present: true,
+        body_omitted: false,
+        body_truncated: false,
+        observed_bytes: 32,
+        returned_bytes: 32,
+        raw_body_handling: "visible",
+        body: { action }
+      }
+    };
+  };
+
+  const response = await service.executeBatch({
+    execution_groups: [
+      {
+        group_id: "archives_candidates",
+        execution: "independent_parallel",
+        sources: [
+          { source_id: "archives_profile", action: "archives_user_profile", params: ACTION_INPUTS.archives_user_profile },
+          { source_id: "archives_analysis", action: "archives_user_analysis", params: ACTION_INPUTS.archives_user_analysis },
+          { source_id: "archives_photo", action: "archives_photo_search", params: ACTION_INPUTS.archives_photo_search }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(response.batch_status, "completed");
+  assert.equal(maxActiveArchives > 1, true);
 });
 
 test("batch source results preserve safe_reason for downstream diagnosis", async () => {

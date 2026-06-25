@@ -27,6 +27,7 @@ export class BrowserBackedApiService {
     this.warmState = new Map(Object.values(config.domains).map((domain) => [domain.key, defaultWarmState(domain, config)]));
     this.refreshState = loadRefreshState(config.stateFile);
     this.concurrencyScheduler = new ActionConcurrencyScheduler(config.concurrency || {});
+    this.archivesRewarmLock = Promise.resolve();
   }
 
   async init() {
@@ -241,7 +242,7 @@ export class BrowserBackedApiService {
       });
     }
 
-    const freshnessResult = await this.ensureOriginFresh(action);
+    const freshnessResult = await this.runArchivesRewarmSerial(action, () => this.ensureOriginFresh(action));
     if (!freshnessResult.ok) {
       return buildPassthroughFailureResponse(action, input, {
         latencyMs: Date.now() - startedAt,
@@ -274,7 +275,9 @@ export class BrowserBackedApiService {
       lazyMeta.lazyRewarmReason = forceActionRewarm
         ? "action_requires_fresh_page_session"
         : "page_not_ready_or_origin_mismatch";
-      const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+      const rewarmResult = await this.runArchivesRewarmSerial(action, () => (
+        this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action))
+      ));
       lazyMeta.lazyRewarmStatus = rewarmResult.warmed ? "ready" : rewarmResult.error_type || rewarmResult.status || "failed";
       originWarmed = Boolean(rewarmResult.warmed);
       Object.assign(lazyMeta, this.freshnessMeta(action.domainKey, {
@@ -415,7 +418,9 @@ export class BrowserBackedApiService {
       page_context_retry_reason: staleSafeReason,
       page_context_retry_status: "not_attempted"
     };
-    const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+    const rewarmResult = await this.runArchivesRewarmSerial(action, () => (
+      this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action))
+    ));
     retryMeta.page_context_retry_status = rewarmResult.warmed
       ? "ready"
       : rewarmResult.error_type || rewarmResult.status || "failed";
@@ -479,7 +484,9 @@ export class BrowserBackedApiService {
       if (typeof this.browserClient?.start === "function") {
         await this.browserClient.start();
       }
-      const rewarmResult = await this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action));
+      const rewarmResult = await this.runArchivesRewarmSerial(action, () => (
+        this.prewarmDomain(action.domainKey, actionStagePrewarmOptions(action))
+      ));
       retryMeta.context_request_recovery_status = rewarmResult.warmed
         ? "ready"
         : rewarmResult.error_type || rewarmResult.status || "failed";
@@ -552,7 +559,7 @@ export class BrowserBackedApiService {
       }
       const groupStartedAt = Date.now();
       const sources = isParallelExecution(group.execution)
-        ? await executeConflictAwareParallel(group.sources, (source) => this.executeBatchSource(source, plan))
+        ? await executeConflictAwareParallel(group.sources, (source) => this.executeBatchSource(source, plan), this.config)
         : await executeSerial(group.sources, (source) => this.executeBatchSource(source, plan));
 
       for (const sourceResult of sources) {
@@ -856,32 +863,57 @@ export class BrowserBackedApiService {
     }
     this.refreshState = saveRefreshState(this.refreshState, this.config.stateFile);
   }
+
+  async runArchivesRewarmSerial(action, runner) {
+    if (action?.domainKey !== "archives") {
+      return runner();
+    }
+    const previous = this.archivesRewarmLock;
+    let release;
+    this.archivesRewarmLock = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      return await runner();
+    } finally {
+      release();
+    }
+  }
 }
 
 class ActionConcurrencyScheduler {
   constructor(config = {}) {
     this.maxActive = positiveInteger(config.actionGlobalMax, 4);
+    this.archivesContextParallelEnabled = config.archivesContextParallelEnabled === true;
+    this.archivesContextMaxConcurrency = positiveInteger(config.archivesContextMaxConcurrency, 2);
     this.active = 0;
     this.exclusiveActive = false;
-    this.scopedActive = new Set();
+    this.activeLocks = new Map();
     this.queue = [];
   }
 
   async runAction(action, runner) {
     const queuedAtMs = Date.now();
-    const concurrency = normalizeConcurrencyMetadata(action);
+    const concurrency = normalizeConcurrencyMetadata(action, {
+      archivesContextParallelEnabled: this.archivesContextParallelEnabled,
+      archivesContextMaxConcurrency: this.archivesContextMaxConcurrency
+    });
     const lockScope = concurrency.lock_scope;
     const concurrencyGroup = concurrency.concurrency_group;
     const release = lockScope === "global"
       ? await this.acquireExclusive({ queuedAtMs })
-      : await this.acquireShared({ queuedAtMs, lockScope, concurrencyGroup });
+      : await this.acquireShared({ queuedAtMs, lockScope, concurrencyGroup, concurrency });
     const startedAtMs = Date.now();
     const trace = {
       concurrency_lock_scope: lockScope,
       concurrency_group: concurrencyGroup,
       concurrency_wait_ms: Math.max(0, startedAtMs - queuedAtMs),
       concurrency_queued_at: new Date(queuedAtMs).toISOString(),
-      concurrency_started_at: new Date(startedAtMs).toISOString()
+      concurrency_started_at: new Date(startedAtMs).toISOString(),
+      concurrency_archives_parallel_enabled: concurrency.archives_parallel_enabled === true,
+      concurrency_same_action_mutex: concurrency.same_action_mutex === true,
+      concurrency_action_serial_key: concurrency.action_serial_key || null
     };
 
     try {
@@ -907,13 +939,14 @@ class ActionConcurrencyScheduler {
     }
   }
 
-  acquireShared({ queuedAtMs, lockScope, concurrencyGroup }) {
+  acquireShared({ queuedAtMs, lockScope, concurrencyGroup, concurrency = {} }) {
     return this.enqueue({
       type: "shared",
       queuedAtMs,
       lockScope,
       concurrencyGroup,
-      scoped: requiresScopedLock(lockScope)
+      mutexGroups: concurrency.mutex_groups || mutexGroupsForLock(lockScope, concurrencyGroup),
+      limitGroups: concurrency.limit_groups || []
     });
   }
 
@@ -966,8 +999,15 @@ class ActionConcurrencyScheduler {
     if (this.active >= this.maxActive) {
       return false;
     }
-    if (request.scoped && this.scopedActive.has(request.concurrencyGroup)) {
-      return false;
+    for (const group of request.mutexGroups || []) {
+      if (activeLockCount(this.activeLocks, group) > 0) {
+        return false;
+      }
+    }
+    for (const group of request.limitGroups || []) {
+      if (activeLockCount(this.activeLocks, group.key) >= group.limit) {
+        return false;
+      }
     }
     return true;
   }
@@ -983,12 +1023,18 @@ class ActionConcurrencyScheduler {
     }
 
     this.active += 1;
-    if (request.scoped) {
-      this.scopedActive.add(request.concurrencyGroup);
+    for (const group of request.mutexGroups || []) {
+      incrementActiveLock(this.activeLocks, group);
+    }
+    for (const group of request.limitGroups || []) {
+      incrementActiveLock(this.activeLocks, group.key);
     }
     request.resolve(() => {
-      if (request.scoped) {
-        this.scopedActive.delete(request.concurrencyGroup);
+      for (const group of request.mutexGroups || []) {
+        decrementActiveLock(this.activeLocks, group);
+      }
+      for (const group of request.limitGroups || []) {
+        decrementActiveLock(this.activeLocks, group.key);
       }
       this.active = Math.max(0, this.active - 1);
       this.drain();
@@ -1020,12 +1066,37 @@ function positiveInteger(value, fallback) {
   return Math.trunc(number);
 }
 
-function normalizeConcurrencyMetadata(action) {
+function normalizeConcurrencyMetadata(action, config = {}) {
+  if (isArchivesContextParallelCandidate(action) && config.archivesContextParallelEnabled === true) {
+    const actionSerialKey = `archives:action:${action.name}`;
+    return {
+      lock_scope: "limited_parallel",
+      concurrency_group: "archives:context_parallel",
+      mutex_groups: [actionSerialKey],
+      limit_groups: [{
+        key: "archives:context_parallel",
+        limit: positiveInteger(config.archivesContextMaxConcurrency, 2)
+      }],
+      archives_parallel_enabled: true,
+      same_action_mutex: true,
+      action_serial_key: actionSerialKey
+    };
+  }
   const lockScope = action?.concurrency?.lock_scope || inferredActionLockScope(action);
   return {
     lock_scope: lockScope,
-    concurrency_group: action?.concurrency?.concurrency_group || inferredActionConcurrencyGroup(action, lockScope)
+    concurrency_group: action?.concurrency?.concurrency_group || inferredActionConcurrencyGroup(action, lockScope),
+    archives_parallel_enabled: false,
+    same_action_mutex: false,
+    action_serial_key: null
   };
+}
+
+function isArchivesContextParallelCandidate(action) {
+  return action?.domainKey === "archives" &&
+    action?.fetchMode === "context_request" &&
+    action?.concurrency?.archives_context_parallel_candidate === true &&
+    action?.concurrency?.page_bound !== true;
 }
 
 function inferredActionLockScope(action) {
@@ -1045,8 +1116,25 @@ function inferredActionConcurrencyGroup(action, lockScope) {
   return `${action?.domainKey || "unknown"}:context_request`;
 }
 
-function requiresScopedLock(lockScope) {
-  return Boolean(lockScope && lockScope !== "none" && lockScope !== "global");
+function mutexGroupsForLock(lockScope, concurrencyGroup) {
+  return lockScope && lockScope !== "none" && lockScope !== "global" ? [concurrencyGroup] : [];
+}
+
+function activeLockCount(activeLocks, group) {
+  return activeLocks.get(group) || 0;
+}
+
+function incrementActiveLock(activeLocks, group) {
+  activeLocks.set(group, activeLockCount(activeLocks, group) + 1);
+}
+
+function decrementActiveLock(activeLocks, group) {
+  const next = activeLockCount(activeLocks, group) - 1;
+  if (next <= 0) {
+    activeLocks.delete(group);
+    return;
+  }
+  activeLocks.set(group, next);
 }
 
 function completeConcurrencyTrace(trace = {}, startedAtMs = Date.now()) {
@@ -1057,7 +1145,10 @@ function completeConcurrencyTrace(trace = {}, startedAtMs = Date.now()) {
     concurrency_queued_at: trace.concurrency_queued_at || null,
     concurrency_started_at: trace.concurrency_started_at || null,
     concurrency_finished_at: new Date().toISOString(),
-    concurrency_action_duration_ms: Math.max(0, Date.now() - startedAtMs)
+    concurrency_action_duration_ms: Math.max(0, Date.now() - startedAtMs),
+    concurrency_archives_parallel_enabled: trace.concurrency_archives_parallel_enabled === true,
+    concurrency_same_action_mutex: trace.concurrency_same_action_mutex === true,
+    concurrency_action_serial_key: trace.concurrency_action_serial_key || null
   };
 }
 
@@ -1312,10 +1403,10 @@ async function executeSerial(sources, runner) {
   return results;
 }
 
-async function executeConflictAwareParallel(sources, runner) {
+async function executeConflictAwareParallel(sources, runner, config = {}) {
   const lanes = new Map();
   for (const source of sources) {
-    const laneKey = batchConflictLaneKey(source);
+    const laneKey = batchConflictLaneKey(source, config);
     if (!lanes.has(laneKey)) {
       lanes.set(laneKey, []);
     }
@@ -1327,8 +1418,15 @@ async function executeConflictAwareParallel(sources, runner) {
   return laneResults.flat();
 }
 
-function batchConflictLaneKey(source) {
-  if (source.fetch_mode === "page_followup" || source.origin_key === "archives") {
+function batchConflictLaneKey(source, config = {}) {
+  if (source.fetch_mode === "page_followup") {
+    return "browser_session_exclusive";
+  }
+  if (source.origin_key === "archives") {
+    const action = getAction(source.action);
+    if (config.concurrency?.archivesContextParallelEnabled === true && isArchivesContextParallelCandidate(action)) {
+      return `archives_context_candidate:${source.action}`;
+    }
     return "browser_session_exclusive";
   }
   return `parallel:${source.source_id}`;

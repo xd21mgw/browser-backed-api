@@ -40,7 +40,9 @@ export function loadConfig(env = process.env, options = {}) {
       maxLiveBodyBytes: parsePositiveInt(effectiveEnv.MAX_LIVE_BODY_BYTES || String(DEFAULT_MAX_LIVE_BODY_BYTES), "MAX_LIVE_BODY_BYTES")
     },
     concurrency: {
-      actionGlobalMax: parsePositiveInt(effectiveEnv.ACTION_GLOBAL_MAX_CONCURRENCY || "4", "ACTION_GLOBAL_MAX_CONCURRENCY")
+      actionGlobalMax: parsePositiveInt(effectiveEnv.ACTION_GLOBAL_MAX_CONCURRENCY || "4", "ACTION_GLOBAL_MAX_CONCURRENCY"),
+      archivesContextParallelEnabled: parseBoolean(effectiveEnv.ARCHIVES_CONTEXT_PARALLEL_ENABLED, false),
+      archivesContextMaxConcurrency: parsePositiveInt(effectiveEnv.ARCHIVES_CONTEXT_MAX_CONCURRENCY || "2", "ARCHIVES_CONTEXT_MAX_CONCURRENCY")
     },
     originRegistry,
     domains: buildDomainConfigs(originRegistry, effectiveEnv, enabledPlatformSet)
@@ -113,6 +115,26 @@ function parsePositiveInt(raw, name) {
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function parseBoolean(raw, fallback = false) {
+  if (raw === undefined || raw === null || raw === "") {
+    return fallback;
+  }
+  if (raw === true || raw === false) {
+    return raw;
+  }
+  if (typeof raw !== "string") {
+    return fallback;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
 }
 
 function buildDomainConfigs(originRegistry, env, enabledPlatformSet) {
